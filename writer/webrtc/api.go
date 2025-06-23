@@ -189,16 +189,16 @@ func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer
 			},
 			PayloadType: 127,
 		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{
-				MimeType:     webrtc.MimeTypeRTX,
-				ClockRate:    90000,
-				Channels:     0,
-				SDPFmtpLine:  "apt=127",
-				RTCPFeedback: nil,
-			},
-			PayloadType: 125,
-		},
+		// {
+		// 	RTPCodecCapability: webrtc.RTPCodecCapability{
+		// 		MimeType:     webrtc.MimeTypeRTX,
+		// 		ClockRate:    90000,
+		// 		Channels:     0,
+		// 		SDPFmtpLine:  "apt=127",
+		// 		RTCPFeedback: nil,
+		// 	},
+		// 	PayloadType: 125,
+		// },
 
 		{
 			RTPCodecCapability: webrtc.RTPCodecCapability{
@@ -220,14 +220,14 @@ func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer
 			},
 			PayloadType: 40,
 		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{
-				MimeType:     webrtc.MimeTypeH265,
-				ClockRate:    90000,
-				RTCPFeedback: videoRTCPFeedback,
-			},
-			PayloadType: 116,
-		},
+		// {
+		// 	RTPCodecCapability: webrtc.RTPCodecCapability{
+		// 		MimeType:     webrtc.MimeTypeH265,
+		// 		ClockRate:    90000,
+		// 		RTCPFeedback: videoRTCPFeedback,
+		// 	},
+		// 	PayloadType: 116,
+		// },
 		{
 			RTPCodecCapability: webrtc.RTPCodecCapability{
 				MimeType:     webrtc.MimeTypeRTX,
