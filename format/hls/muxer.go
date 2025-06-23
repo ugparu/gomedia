@@ -9,11 +9,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gitlab.cubicmedia.cloud/cubic-ai/CA/gomedia/v2"
-	"gitlab.cubicmedia.cloud/cubic-ai/CA/gomedia/v2/format/fmp4"
-	"gitlab.cubicmedia.cloud/cubic-ai/CA/gomedia/v2/media_errors"
-	"gitlab.cubicmedia.cloud/cubic-ai/CA/goutils/lifecycle"
-	"gitlab.cubicmedia.cloud/cubic-ai/CA/goutils/logger"
+	"github.com/ugparu/gomedia"
+	"github.com/ugparu/gomedia/format/fmp4"
+	"github.com/ugparu/gomedia/utils"
+	"github.com/ugparu/gomedia/utils/lifecycle"
+	"github.com/ugparu/gomedia/utils/logger"
 )
 
 // Constants defining fragment and part parameters.
@@ -60,7 +60,7 @@ func NewHLSMuxer(segmentDuration time.Duration, segmentCount uint8) gomedia.HLSM
 #EXT-X-MAP:URI="init.mp4"
 #EXT-X-PART-INF:PART-TARGET=%.5f
 `, int(segmentDuration.Seconds()), segmentDuration.Seconds(), partTarget),
-		codecPars: gomedia.CodecParametersPair{AudioCodecParameters: nil, VideoCodecParameters: nil},
+		codecPars: gomedia.CodecParametersPair{AudioCodecParameters: nil, VideoCodecParameters: nil, URL: ""},
 		mp4Buf:    []byte{},
 		segIDs:    []uint64{0},
 		mux:       fmp4.NewMuxer(),
@@ -75,7 +75,7 @@ func (mxr *muxer) Mux(codecPars gomedia.CodecParametersPair) (err error) {
 	startFunc := func(mxr *muxer) error {
 		// Check if video or audio codec parameters are provided.
 		if codecPars.VideoCodecParameters == nil && codecPars.AudioCodecParameters == nil {
-			return &media_errors.NoCodecDataError{}
+			return &utils.NoCodecDataError{}
 		}
 
 		if err = mxr.mux.Mux(codecPars); err != nil {
@@ -103,7 +103,7 @@ func (mxr *muxer) Mux(codecPars gomedia.CodecParametersPair) (err error) {
 // WritePacket writes a multimedia packet to the current fragment of the current segment.
 func (mxr *muxer) WritePacket(inpPkt gomedia.Packet) (err error) {
 	if inpPkt == nil {
-		return &media_errors.NilPacketError{}
+		return &utils.NilPacketError{}
 	}
 
 	pkt := inpPkt.Clone(false)

@@ -1,6 +1,7 @@
 package gomedia
 
 import (
+	"context"
 	"image"
 	"time"
 )
@@ -140,3 +141,61 @@ const (
 	NoVideo InputParameter = iota // Skip video processing.
 	NoAudio                       // Skip audio processing.
 )
+
+// HLSMuxer represents an HLS muxer for single stream.
+type HLSMuxer interface {
+	Muxer                                                                    // HLSMuxer extends Muxer.
+	GetMasterEntry() (string, error)                                         // GetMasterEntry returns the master playlist.
+	GetIndexM3u8(ctx context.Context, msn int64, prt int8) (string, error)   // GetIndexM3u8 returns the index playlist.
+	GetInit() ([]byte, error)                                                // GetInit returns the initialization segment.
+	GetSegment(ctx context.Context, seg uint64) ([]byte, error)              // GetSegment returns the segment.
+	GetFragment(ctx context.Context, seg uint64, frag uint8) ([]byte, error) // GetFragment returns the fragment.
+}
+
+// HLS represents an hls receiving interface for several levels.
+type HLS interface {
+	GetMasterEntry() (string, error)                                         // GetMasterEntry returns the master playlist.
+	GetIndexM3u8(ctx context.Context, msn int64, prt int8) (string, error)   // GetIndexM3u8 returns the index playlist.
+	GetInit() ([]byte, error)                                                // GetInit returns the initialization segment.
+	GetSegment(ctx context.Context, seg uint64) ([]byte, error)              // GetSegment returns the segment.
+	GetFragment(ctx context.Context, seg uint64, frag uint8) ([]byte, error) // GetFragment returns the fragment.
+}
+
+// HLSStreamer represents an HLS streamer for several inputs.
+type HLSStreamer interface {
+	Writer                                 // HLSStreamer extends Writer.
+	HLS                                    // HLSStreamer extends HLS.
+	SegmentDuration() chan<- time.Duration // SegmentDuration returns the segment duration channel for changing generating segment duration.
+}
+
+// WebRTCCodec represents a codec configuration for WebRTC streaming.
+type WebRTCCodec struct {
+	HasAudio    bool         `json:"hasAudio"`
+	Resolutions []Resolution `json:"resolutions"`
+}
+
+// Resolution defines video dimensions for WebRTC streaming.
+type Resolution struct {
+	URL    string `json:"url"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+}
+
+// WebRTCPeer represents a WebRTC peer connection status.
+type WebRTCPeer struct {
+	SDP   string // Session Description Protocol data
+	Delay int    // Connection delay in milliseconds
+	Err   error  // Any error associated with this peer
+}
+
+// WebRTC defines the interface for WebRTC streaming functionality.
+type WebRTC interface {
+	Peers() chan WebRTCPeer // Channel for peer connection events
+	SortedResolutions() *WebRTCCodec
+}
+
+// WebRTCStreamer combines Writer and WebRTC interfaces for WebRTC streaming.
+type WebRTCStreamer interface {
+	Writer // Inherits Writer methods
+	WebRTC // Inherits WebRTC methods
+}

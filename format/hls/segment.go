@@ -7,9 +7,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gitlab.cubicmedia.cloud/cubic-ai/CA/gomedia/v2"
-	"gitlab.cubicmedia.cloud/cubic-ai/CA/gomedia/v2/format/fmp4"
-	"gitlab.cubicmedia.cloud/cubic-ai/CA/goutils/logger"
+	"github.com/ugparu/gomedia"
+	"github.com/ugparu/gomedia/format/fmp4"
+	"github.com/ugparu/gomedia/utils/logger"
 )
 
 // segment represents a segment of an HLS video stream.
