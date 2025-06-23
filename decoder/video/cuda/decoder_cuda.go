@@ -1,7 +1,8 @@
 package cuda
 
-//#cgo pkg-config: libavcodec
-//#include <libavcodec/avcodec.h>
+//#cgo LDFLAGS: -L/usr/local/cuda/lib64 -lnppc -lnppial -lnppicc -lnppidei -lnppif -lnppig  -lnppim -lnppist -lnppisu -lnppitc -lnpps -lcudart
+//#cgo CFLAGS: -I/usr/local/cuda/include
+//#cgo pkg-config: libavcodec libavutil libswscale
 //#include "decoder_cuda.h"
 import "C"
 import (

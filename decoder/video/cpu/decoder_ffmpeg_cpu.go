@@ -1,5 +1,7 @@
 package cpu
 
+//#cgo LDFLAGS: -lavcodec -lswscale
+//#cgo pkg-config: libavcodec libswscale
 //#include "decoder_ffmpeg_cpu.h"
 import "C"
 import (
