@@ -28,7 +28,7 @@ var (
 	AV1        = makeVideoCodecType(avCodecTypeMagic + 6) //nolint:mnd
 	MJPEG      = makeVideoCodecType(avCodecTypeMagic + 7) //nolint:mnd
 	AAC        = makeAudioCodecType(avCodecTypeMagic + 1) //nolint:mnd
-	PCMMulaw   = makeAudioCodecType(avCodecTypeMagic + 2) //nolint:mnd
+	PCMUlaw    = makeAudioCodecType(avCodecTypeMagic + 2) //nolint:mnd
 	PCMAlaw    = makeAudioCodecType(avCodecTypeMagic + 3) //nolint:mnd
 	SPEEX      = makeAudioCodecType(avCodecTypeMagic + 4) //nolint:mnd
 	NELLYMOSER = makeAudioCodecType(avCodecTypeMagic + 5) //nolint:mnd
@@ -59,7 +59,7 @@ func (ct CodecType) String() string {
 		return "AV1"
 	case AAC:
 		return "AAC"
-	case PCMMulaw:
+	case PCMUlaw:
 		return "PCM_MULAW"
 	case PCMAlaw:
 		return "PCM_ALAW"
