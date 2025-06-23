@@ -1,4 +1,4 @@
-package video
+package cpu
 
 //#include "decoder_ffmpeg_cpu.h"
 import "C"
