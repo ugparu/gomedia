@@ -154,11 +154,11 @@ type HLSMuxer interface {
 
 // HLS represents an hls receiving interface for several levels.
 type HLS interface {
-	GetMasterEntry() (string, error)                                         // GetMasterEntry returns the master playlist.
-	GetIndexM3u8(ctx context.Context, msn int64, prt int8) (string, error)   // GetIndexM3u8 returns the index playlist.
-	GetInit() ([]byte, error)                                                // GetInit returns the initialization segment.
-	GetSegment(ctx context.Context, seg uint64) ([]byte, error)              // GetSegment returns the segment.
-	GetFragment(ctx context.Context, seg uint64, frag uint8) ([]byte, error) // GetFragment returns the fragment.
+	GetMasterPlaylist() (string, error)                                                   // GetMasterEntry returns the master playlist.
+	GetIndexM3u8(ctx context.Context, index uint8, msn int64, prt int8) (string, error)   // GetIndexM3u8 returns the index playlist.
+	GetInit(index uint8) ([]byte, error)                                                  // GetInit returns the initialization segment.
+	GetSegment(ctx context.Context, index uint8, seg uint64) ([]byte, error)              // GetSegment returns the segment.
+	GetFragment(ctx context.Context, index uint8, seg uint64, frag uint8) ([]byte, error) // GetFragment returns the fragment.
 }
 
 // HLSStreamer represents an HLS streamer for several inputs.
@@ -198,4 +198,28 @@ type WebRTC interface {
 type WebRTCStreamer interface {
 	Writer // Inherits Writer methods
 	WebRTC // Inherits WebRTC methods
+}
+
+// RecordMode represents archiver recording mode.
+type RecordMode uint8
+
+const (
+	Never  RecordMode = iota // Never record
+	Event                    // Record on movement
+	Always                   // Record continuously
+)
+
+// FileInfo holds information about a recorded file.
+type FileInfo struct {
+	Name  string    // File name
+	Start time.Time // First packet real time
+	Stop  time.Time // Last packet real time
+	Size  int       // Size in bytes
+}
+
+type Segmenter interface {
+	Writer
+	Events() chan<- struct{}       // Events returns the events channel.
+	RecordMode() chan<- RecordMode // RecordMode returns the record mode channel.
+	Files() <-chan FileInfo        // Files returns the recorded files channel.
 }
