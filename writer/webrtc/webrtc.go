@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/pion/webrtc/v4"
@@ -146,6 +147,60 @@ func (element *webRTCWriter) checkCodecParameters(url string, codecPar gomedia.C
 	return nil
 }
 
+// extractFmtpLineFromSDP parses the SDP to find the first fmtp line that matches the given codec type
+func extractFmtpLineFromSDP(sdp string, codecType gomedia.CodecType) string {
+	lines := strings.Split(sdp, "\n")
+	var payloadType string
+	var targetCodec string
+
+	// Map codec type to SDP codec name
+	switch codecType {
+	case gomedia.H264:
+		targetCodec = "H264"
+	case gomedia.H265:
+		targetCodec = "H265"
+	default:
+		return ""
+	}
+
+	// Find the payload type for the target codec
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+
+		// Look for rtpmap lines: a=rtpmap:96 H264/90000
+		if strings.HasPrefix(line, "a=rtpmap:") {
+			parts := strings.Split(line, " ")
+			if len(parts) >= 2 {
+				// Extract payload type (e.g., "96" from "a=rtpmap:96")
+				ptPart := strings.Split(parts[0], ":")
+				if len(ptPart) >= 2 {
+					// Check if codec matches (e.g., "H264/90000")
+					if strings.HasPrefix(parts[1], targetCodec+"/") {
+						payloadType = ptPart[1]
+						break
+					}
+				}
+			}
+		}
+	}
+
+	if payloadType == "" {
+		return ""
+	}
+
+	// Find the fmtp line for this payload type
+	fmtpPrefix := "a=fmtp:" + payloadType + " "
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, fmtpPrefix) {
+			// Return the fmtp parameters (everything after "a=fmtp:PT ")
+			return strings.TrimPrefix(line, fmtpPrefix)
+		}
+	}
+
+	return ""
+}
+
 func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.WebRTCPeer {
 	sdp64 := inpPeer.SDP
 
@@ -170,16 +225,17 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 		return inpPeer
 	}
 
+	codecType := element.streams.streams[element.streams.sortedURLs[0]].codecPar.VideoCodecParameters.Type()
 	mimeType := webrtc.MimeTypeH264
-	if element.streams.streams[element.streams.sortedURLs[0]].codecPar.VideoCodecParameters.Type() == gomedia.H265 {
+	if codecType == gomedia.H265 {
 		mimeType = webrtc.MimeTypeH265
 	}
 
 	vtrack, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{
 		MimeType:     mimeType,
-		ClockRate:    9e7, //nolint:mnd // 90k
+		ClockRate:    90000, //nolint:mnd // 90k
 		Channels:     0,
-		SDPFmtpLine:  "",
+		SDPFmtpLine:  extractFmtpLineFromSDP(offer.SDP, codecType),
 		RTCPFeedback: []webrtc.RTCPFeedback{},
 	}, "video", "pion-video")
 	if err != nil {

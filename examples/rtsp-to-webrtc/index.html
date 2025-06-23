@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Demo</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .video-container {
+            background-color: #000;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        video {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .status {
+            text-align: center;
+            padding: 10px;
+            background-color: #fff;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <h1>WebRTC Demo</h1>
+    
+    <div class="container">
+        <div class="controls">
+            <button id="startButton">Start</button>
+            <button id="stopButton" disabled>Stop</button>
+        </div>
+        
+        <div class="video-container">
+            <video id="videoElement" autoplay playsinline controls muted></video>
+        </div>
+        
+        <div class="status">
+            <p>Status: <span id="connectionStatus">Disconnected</span></p>
+        </div>
+    </div>
+
+    <script>
+        // DOM elements
+        const videoElement = document.getElementById('videoElement');
+        const startButton = document.getElementById('startButton');
+        const stopButton = document.getElementById('stopButton');
+        const connectionStatus = document.getElementById('connectionStatus');
+        
+        // WebRTC variables
+        let peerConnection = null;
+        let dataChannel = null;
+        let sdpSent = false;
+        let stream = null;
+        let isConnecting = false;
+        
+        // Start streaming function
+        async function startStreaming() {
+            try {
+                // Prevent multiple simultaneous connections
+                if (isConnecting) return;
+                isConnecting = true;
+                
+                // Clean up any existing connection first
+                await cleanupConnection();
+                
+                connectionStatus.textContent = 'Connecting...';
+                startButton.disabled = true;
+                sdpSent = false;
+                
+                // Create peer connection
+                const configuration = {
+                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                };
+                
+                peerConnection = new RTCPeerConnection(configuration);
+                dataChannel = peerConnection.createDataChannel('control');
+                
+                // Set up event handlers
+                peerConnection.onicecandidate = event => {
+                    if (event.candidate === null && !sdpSent) {
+                        sdpSent = true;
+                        sendSdpToServer(peerConnection.localDescription);
+                    }
+                };
+
+                peerConnection.ontrack = event => {
+                    if (!stream) {
+                        stream = new MediaStream();
+                    }
+                    stream.addTrack(event.track);
+                    videoElement.srcObject = stream;
+                };
+                
+                peerConnection.oniceconnectionstatechange = () => {
+                    connectionStatus.textContent = peerConnection.iceConnectionState;
+                    
+                    if (peerConnection.iceConnectionState === 'connected' || 
+                        peerConnection.iceConnectionState === 'completed') {
+                        stopButton.disabled = false;
+                        isConnecting = false;
+                    } else if (peerConnection.iceConnectionState === 'failed' || 
+                               peerConnection.iceConnectionState === 'disconnected' || 
+                               peerConnection.iceConnectionState === 'closed') {
+                        stopButton.disabled = true;
+                        startButton.disabled = false;
+                        isConnecting = false;
+                    }
+                };
+                
+                // Create offer
+                const offer = await peerConnection.createOffer({
+                    offerToReceiveAudio: true,
+                    offerToReceiveVideo: true
+                });
+                
+                await peerConnection.setLocalDescription(offer);
+                
+                // Fallback SDP send after timeout
+                setTimeout(() => {
+                    if (peerConnection && !sdpSent) {
+                        sdpSent = true;
+                        sendSdpToServer(peerConnection.localDescription);
+                    }
+                }, 3000);
+                
+            } catch (error) {
+                console.error('Error starting stream:', error);
+                connectionStatus.textContent = 'Error';
+                startButton.disabled = false;
+                isConnecting = false;
+            }
+        }
+        
+        // Send SDP to server
+        async function sendSdpToServer(sessionDescription) {
+            if (!sessionDescription) return;
+            
+            try {
+                const base64Sdp = btoa(sessionDescription.sdp);
+                
+                const response = await fetch('/sdp', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sdp: base64Sdp })
+                });
+                
+                if (!response.ok) throw new Error('Failed to send SDP');
+                
+                const data = await response.json();
+                if (data.err) throw new Error(data.err);
+                if (!data.sdp) throw new Error('Empty SDP response');
+                
+                // Decode and set remote description
+                const decodedSdp = atob(data.sdp);
+                
+                await peerConnection.setRemoteDescription(
+                    new RTCSessionDescription({ type: 'answer', sdp: decodedSdp })
+                );
+                
+            } catch (error) {
+                console.error('Error sending SDP:', error);
+                connectionStatus.textContent = 'Error';
+                startButton.disabled = false;
+                isConnecting = false;
+            }
+        }
+        
+        // Comprehensive cleanup function
+        async function cleanupConnection() {
+            // Stop all media tracks first
+            if (stream) {
+                stream.getTracks().forEach(track => {
+                    track.stop();
+                    track.dispatchEvent(new Event('ended'));
+                });
+                stream = null;
+            }
+            
+            // Clear video element
+            if (videoElement.srcObject) {
+                videoElement.srcObject = null;
+            }
+            
+            // Close data channel
+            if (dataChannel) {
+                dataChannel.close();
+                dataChannel = null;
+            }
+            
+            // Properly close peer connection
+            if (peerConnection) {
+                // Remove all event listeners by setting them to null
+                peerConnection.onicecandidate = null;
+                peerConnection.ontrack = null;
+                peerConnection.oniceconnectionstatechange = null;
+                peerConnection.ondatachannel = null;
+                peerConnection.onconnectionstatechange = null;
+                
+                // Close all transceivers
+                peerConnection.getTransceivers().forEach(transceiver => {
+                    if (transceiver.stop) {
+                        transceiver.stop();
+                    }
+                });
+                
+                // Close the connection
+                peerConnection.close();
+                
+                // Wait a bit for cleanup to complete
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+                peerConnection = null;
+            }
+            
+            // Reset flags
+            sdpSent = false;
+            isConnecting = false;
+        }
+        
+        // Stop the stream
+        async function stopStream() {
+            await cleanupConnection();
+            connectionStatus.textContent = 'Disconnected';
+        }
+        
+        // Event listeners
+        startButton.addEventListener('click', () => startStreaming());
+        
+        stopButton.addEventListener('click', async () => {
+            await stopStream();
+            startButton.disabled = false;
+            stopButton.disabled = true;
+        });
+    </script>
+</body>
+</html>

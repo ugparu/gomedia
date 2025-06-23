@@ -34,7 +34,8 @@ func objToString(obj any) (objStr string) {
 	return
 }
 
-func Init(lvl logrus.Level) {
+func init() {
+	lvl := logrus.InfoLevel
 	logrus.SetLevel(lvl)
 	logrus.SetFormatter(&logrus.TextFormatter{
 		ForceColors:     true,
