@@ -49,11 +49,7 @@ func Init(lvl logrus.Level) {
 			if len(logPair.obj) > 20 {
 				logPair.obj = logPair.obj[:20]
 			}
-			// chunks := split(logPair.msg, 100)
 			sb.WriteString(fmt.Sprintf("|%20s|%-100s", logPair.obj, logPair.msg))
-			// for _, ch := range chunks[1:] {
-			// 	sb.WriteString(fmt.Sprintf("\n%29s|%50s|%-100s|", "", logPair.obj, ch))
-			// }
 			logPair.logFn(sb.String())
 			sb.Reset()
 		}
