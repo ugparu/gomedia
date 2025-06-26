@@ -9,6 +9,7 @@ import (
 	"github.com/ugparu/gomedia/codec/aac"
 	"github.com/ugparu/gomedia/codec/h264"
 	"github.com/ugparu/gomedia/codec/h265"
+	"github.com/ugparu/gomedia/codec/mjpeg"
 	"github.com/ugparu/gomedia/format/mp4/mp4io"
 	"github.com/ugparu/gomedia/utils/nal"
 )
@@ -135,6 +136,30 @@ func (s *Stream) fillTrackAtom() (err error) {
 				},
 			},
 			Unknowns: []mp4io.Atom{},
+			AtomPos: mp4io.AtomPos{
+				Offset: 0,
+				Size:   0,
+			},
+		}
+	case *mjpeg.CodecParameters:
+		width, height := codecPar.Width(), codecPar.Height()
+
+		s.sample.SampleDesc.MJPGDesc = &mp4io.MJPGDesc{
+			DataRefIdx:           1,
+			Version:              0,
+			Revision:             0,
+			Vendor:               0,
+			TemporalQuality:      0,
+			SpatialQuality:       0,
+			Width:                int16(width),  //nolint:gosec
+			Height:               int16(height), //nolint:gosec
+			HorizontalResolution: defaultDPI,
+			VorizontalResolution: defaultDPI,
+			FrameCount:           1,
+			CompressorName:       [32]byte{},
+			Depth:                defaultDepth,
+			ColorTableId:         -1,
+			Unknowns:             []mp4io.Atom{},
 			AtomPos: mp4io.AtomPos{
 				Offset: 0,
 				Size:   0,
@@ -297,6 +322,9 @@ func (s *Stream) readPacket(tm time.Duration, url string) (pkt gomedia.Packet, e
 		aacPar, _ := s.CodecParameters.(*aac.CodecParameters)
 		duration := (1024 * time.Second / time.Duration(aacPar.SampleRate())) //nolint:gosec
 		pkt = aac.NewPacket(data, tm, url, time.Now(), aacPar, duration)
+	case gomedia.MJPEG:
+		mjpegPar, _ := s.CodecParameters.(*mjpeg.CodecParameters)
+		pkt = mjpeg.NewPacket(isKeyFrame, tm, time.Now(), data, url, mjpegPar)
 	}
 
 	s.incSampleIndex()

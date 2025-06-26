@@ -14,7 +14,7 @@ import (
 )
 
 type h264Demuxer struct {
-	videoDemuxer
+	hxxxDemuxer
 	sps             []byte
 	pps             []byte
 	codec           *h264.CodecParameters
@@ -25,7 +25,7 @@ type h264Demuxer struct {
 
 func NewH264Demuxer(rdr io.Reader, sdp sdp.Media, index uint8) gomedia.Demuxer {
 	return &h264Demuxer{
-		videoDemuxer:    *newVideoDemuxer(rdr, sdp, index),
+		hxxxDemuxer:     *newHxxxDemuxer(rdr, sdp, index),
 		sps:             []byte{},
 		pps:             []byte{},
 		codec:           nil,
@@ -172,7 +172,7 @@ func (d *h264Demuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 		return
 	}
 
-	if _, err = d.videoDemuxer.ReadPacket(); err != nil {
+	if _, err = d.hxxxDemuxer.ReadPacket(); err != nil {
 		return
 	}
 

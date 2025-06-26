@@ -9,20 +9,20 @@ import (
 	"github.com/ugparu/gomedia/utils/sdp"
 )
 
-type videoDemuxer struct {
-	*audioDemuxer
+type hxxxDemuxer struct {
+	*baseDemuxer
 	nals [][]byte
 }
 
-func newVideoDemuxer(rdr io.Reader, sdp sdp.Media, index uint8) *videoDemuxer {
-	return &videoDemuxer{
-		audioDemuxer: newAudioDemuxer(rdr, sdp, index),
-		nals:         nil,
+func newHxxxDemuxer(rdr io.Reader, sdp sdp.Media, index uint8) *hxxxDemuxer {
+	return &hxxxDemuxer{
+		baseDemuxer: newBaseDemuxer(rdr, sdp, index),
+		nals:        nil,
 	}
 }
 
-func (d *videoDemuxer) ReadPacket() (pkt gomedia.Packet, err error) {
-	if _, err = d.audioDemuxer.ReadPacket(); err != nil {
+func (d *hxxxDemuxer) ReadPacket() (pkt gomedia.Packet, err error) {
+	if _, err = d.baseDemuxer.ReadPacket(); err != nil {
 		return
 	}
 

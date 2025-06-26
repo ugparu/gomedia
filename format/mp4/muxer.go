@@ -34,7 +34,7 @@ func NewMuxer(writer io.WriteSeeker) *Muxer {
 func (mux *Muxer) newStream(codec gomedia.CodecParameters) (err error) {
 	// Check if the codec type is supported.
 	switch codec.Type() {
-	case gomedia.H264, gomedia.H265, gomedia.AAC:
+	case gomedia.H264, gomedia.H265, gomedia.MJPEG, gomedia.AAC:
 		// Supported codecs.
 	default:
 		err = fmt.Errorf("mp4: codec type=%v is not supported", codec.Type())
@@ -149,7 +149,7 @@ func (mux *Muxer) newStream(codec gomedia.CodecParameters) (err error) {
 
 	// Customize settings based on the codec type.
 	switch codec.Type() {
-	case gomedia.H264, gomedia.H265:
+	case gomedia.H264, gomedia.H265, gomedia.MJPEG:
 		stream.sample.SyncSample = new(mp4io.SyncSample)
 		vPar, _ := codec.(gomedia.VideoCodecParameters)
 		stream.trackAtom.Header.TrackWidth = float64(vPar.Width())

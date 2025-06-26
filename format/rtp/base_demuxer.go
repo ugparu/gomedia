@@ -29,7 +29,7 @@ const (
 	clockrate          = 90
 )
 
-type audioDemuxer struct {
+type baseDemuxer struct {
 	rdr       io.Reader
 	sdp       sdp.Media
 	payload   []byte
@@ -39,8 +39,8 @@ type audioDemuxer struct {
 	index     uint8
 }
 
-func newAudioDemuxer(rdr io.Reader, sdp sdp.Media, index uint8) *audioDemuxer {
-	return &audioDemuxer{
+func newBaseDemuxer(rdr io.Reader, sdp sdp.Media, index uint8) *baseDemuxer {
+	return &baseDemuxer{
 		rdr:       rdr,
 		sdp:       sdp,
 		payload:   make([]byte, headerSize),
@@ -51,11 +51,11 @@ func newAudioDemuxer(rdr io.Reader, sdp sdp.Media, index uint8) *audioDemuxer {
 	}
 }
 
-func (d *audioDemuxer) Demux() (codecs gomedia.CodecParametersPair, err error) {
+func (d *baseDemuxer) Demux() (codecs gomedia.CodecParametersPair, err error) {
 	return
 }
 
-func (d *audioDemuxer) ReadPacket() (pkt gomedia.Packet, err error) {
+func (d *baseDemuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 	var n int
 	if n, err = d.rdr.Read(d.payload[:4]); err != nil {
 		return
@@ -128,9 +128,9 @@ func (d *audioDemuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 	return
 }
 
-func (d *audioDemuxer) Close() {}
+func (d *baseDemuxer) Close() {}
 
-func (d *audioDemuxer) isRTCPPacket() bool {
+func (d *baseDemuxer) isRTCPPacket() bool {
 	rtcpPacketType := d.payload[5]
 	return rtcpPacketType == rtcpSenderReport || rtcpPacketType == rtcpReceiverReport
 }

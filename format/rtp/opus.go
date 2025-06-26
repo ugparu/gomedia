@@ -10,7 +10,7 @@ import (
 )
 
 type opusDemuxer struct {
-	audioDemuxer
+	baseDemuxer
 	*opus.CodecParameters
 }
 
@@ -29,7 +29,7 @@ func NewOPUSDemuxer(rdr io.Reader, sdp sdp.Media, index uint8) gomedia.Demuxer {
 	par.SetStreamIndex(index)
 
 	return &opusDemuxer{
-		audioDemuxer:    *newAudioDemuxer(rdr, sdp, index),
+		baseDemuxer:     *newBaseDemuxer(rdr, sdp, index),
 		CodecParameters: par,
 	}
 }
@@ -41,7 +41,7 @@ func (d *opusDemuxer) Demux() (codecs gomedia.CodecParametersPair, err error) {
 
 // nolint: mnd
 func (d *opusDemuxer) ReadPacket() (pkt gomedia.Packet, err error) {
-	if _, err = d.audioDemuxer.ReadPacket(); err != nil {
+	if _, err = d.baseDemuxer.ReadPacket(); err != nil {
 		return
 	}
 

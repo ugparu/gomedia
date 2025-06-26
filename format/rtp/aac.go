@@ -10,7 +10,7 @@ import (
 )
 
 type aacDemuxer struct {
-	audioDemuxer
+	baseDemuxer
 	*aac.CodecParameters
 	packets []*aac.Packet
 }
@@ -19,7 +19,7 @@ func NewAACDemuxer(rdr io.Reader, sdp sdp.Media, index uint8) gomedia.Demuxer {
 	par, _ := aac.NewCodecDataFromMPEG4AudioConfigBytes(sdp.Config)
 	par.SetStreamIndex(index)
 	return &aacDemuxer{
-		audioDemuxer:    *newAudioDemuxer(rdr, sdp, index),
+		baseDemuxer:     *newBaseDemuxer(rdr, sdp, index),
 		CodecParameters: &par,
 		packets:         []*aac.Packet{},
 	}
@@ -38,7 +38,7 @@ func (d *aacDemuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 		return
 	}
 
-	if _, err = d.audioDemuxer.ReadPacket(); err != nil {
+	if _, err = d.baseDemuxer.ReadPacket(); err != nil {
 		return
 	}
 

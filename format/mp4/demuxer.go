@@ -10,6 +10,7 @@ import (
 	"github.com/ugparu/gomedia/codec/aac"
 	"github.com/ugparu/gomedia/codec/h264"
 	"github.com/ugparu/gomedia/codec/h265"
+	"github.com/ugparu/gomedia/codec/mjpeg"
 	"github.com/ugparu/gomedia/format/mp4/mp4io"
 )
 
@@ -152,6 +153,14 @@ func (dmx *Demuxer) probe() (err error) {
 			res.SetStreamIndex(uint8(i)) //nolint:gosec
 			stream.CodecParameters = &res
 			dmx.videoCodecData = &res
+			dmx.streams = append(dmx.streams, stream)
+			continue
+		}
+		if mjpgDesc := atrack.GetMJPGDesc(); mjpgDesc != nil {
+			res := mjpeg.NewCodecParameters(uint(mjpgDesc.Width), uint(mjpgDesc.Height), 25) // Default to 25 FPS
+			res.SetStreamIndex(uint8(i))                                                     //nolint:gosec
+			stream.CodecParameters = res
+			dmx.videoCodecData = res
 			dmx.streams = append(dmx.streams, stream)
 			continue
 		}

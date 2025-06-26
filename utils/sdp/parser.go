@@ -31,6 +31,8 @@ type Media struct {
 	PayloadType        int
 	SizeLength         int
 	IndexLength        int
+	Width              int
+	Height             int
 }
 
 // parseMediaDescription parses the media description line
@@ -57,6 +59,8 @@ func parseMediaDescription(fields []string) (*Media, bool) {
 			PayloadType:        0,
 			SizeLength:         0,
 			IndexLength:        0,
+			Width:              0,
+			Height:             0,
 		}
 
 		mfields := strings.Split(fields[1], " ")
@@ -101,7 +105,7 @@ func parseCodecType(media *Media, key string, keyval []string) {
 	case "H264":
 		media.Type = gomedia.H264
 	case "JPEG":
-		media.Type = gomedia.JPEG
+		media.Type = gomedia.MJPEG
 	case "H265", "HEVC":
 		media.Type = gomedia.H265
 	case "PCMA":
@@ -110,6 +114,8 @@ func parseCodecType(media *Media, key string, keyval []string) {
 	case "PCMU":
 		media.Type = gomedia.PCMUlaw
 		media.ChannelCount = 1
+	case "MJPEG":
+		media.Type = gomedia.MJPEG
 	}
 
 	// Parse time scale
@@ -175,6 +181,12 @@ func parseAttribute(media *Media, fields []string) {
 				media.Rtpmap, _ = strconv.Atoi(val)
 			case "x-framerate":
 				media.FPS, _ = strconv.Atoi(val)
+			case "x-dimensions":
+				dims := strings.Split(val, ",")
+				if len(dims) == 2 {
+					media.Width, _ = strconv.Atoi(dims[0])
+					media.Height, _ = strconv.Atoi(dims[1])
+				}
 			}
 		}
 

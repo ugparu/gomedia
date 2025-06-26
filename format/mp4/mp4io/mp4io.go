@@ -475,6 +475,12 @@ func (self *Track) GetHV1Conf() (conf *HV1Conf) {
 	return
 }
 
+func (self *Track) GetMJPGDesc() (desc *MJPGDesc) {
+	atom := FindChildren(self, MJPG)
+	desc, _ = atom.(*MJPGDesc)
+	return
+}
+
 func (self *Track) GetElemStreamDesc() (esds *ElemStreamDesc) {
 	atom := FindChildren(self, ESDS)
 	esds, _ = atom.(*ElemStreamDesc)

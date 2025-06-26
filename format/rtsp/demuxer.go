@@ -119,6 +119,13 @@ func (dmx *innerRTSPDemuxer) findStreams() (params gomedia.CodecParametersPair, 
 					return
 				}
 				params.VideoCodecParameters = h265Pair.VideoCodecParameters
+			case gomedia.MJPEG:
+				var mjpegPair gomedia.CodecParametersPair
+				dmx.videoDemuxer = rtp.NewMJPEGDemuxer(dmx.buffer, i2, uint8(index)) //nolint:gosec
+				if mjpegPair, err = dmx.videoDemuxer.Demux(); err != nil {
+					return
+				}
+				params.VideoCodecParameters = mjpegPair.VideoCodecParameters
 			default:
 				logger.Debugf(dmx, "SDP video codec type %v not supported", i2.Type)
 			}

@@ -10,13 +10,13 @@ import (
 )
 
 type alawDemuxer struct {
-	audioDemuxer
+	baseDemuxer
 	*pcm.CodecParameters
 }
 
 func NewPCMDemuxer(rdr io.Reader, sdp sdp.Media, index uint8, ct gomedia.CodecType) gomedia.Demuxer {
 	return &alawDemuxer{
-		audioDemuxer: *newAudioDemuxer(rdr, sdp, index),
+		baseDemuxer: *newBaseDemuxer(rdr, sdp, index),
 		CodecParameters: pcm.NewCodecParameters(index, ct,
 			uint8(sdp.ChannelCount), uint64(sdp.TimeScale)), //nolint:gosec
 	}
@@ -28,7 +28,7 @@ func (d *alawDemuxer) Demux() (codecs gomedia.CodecParametersPair, err error) {
 }
 
 func (d *alawDemuxer) ReadPacket() (pkt gomedia.Packet, err error) {
-	if _, err = d.audioDemuxer.ReadPacket(); err != nil {
+	if _, err = d.baseDemuxer.ReadPacket(); err != nil {
 		return
 	}
 
