@@ -15,12 +15,12 @@ func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer
 	// Configure WebRTC settings
 	conf = webrtc.Configuration{
 		ICEServers:           iceServers,
-		ICETransportPolicy:   0,
-		BundlePolicy:         0,
-		RTCPMuxPolicy:        0,
+		ICETransportPolicy:   webrtc.ICETransportPolicyAll,
+		BundlePolicy:         webrtc.BundlePolicyBalanced,
+		RTCPMuxPolicy:        webrtc.RTCPMuxPolicyNegotiate,
 		PeerIdentity:         "",
 		Certificates:         []webrtc.Certificate{},
-		ICECandidatePoolSize: 0,
+		ICECandidatePoolSize: 20,
 		SDPSemantics:         webrtc.SDPSemanticsUnifiedPlanWithFallback,
 	}
 
@@ -402,7 +402,7 @@ func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer
 	}
 
 	// Create a new SettingEngine
-	s := webrtc.SettingEngine{} //nolint: exhaustruct
+	var s webrtc.SettingEngine
 	if minPort > 0 && maxPort > 0 && maxPort > minPort {
 		logger.Infof("WEBRTC", "Setting port range from %d to %d", minPort, maxPort)
 		if err := s.SetEphemeralUDPPortRange(minPort, maxPort); err != nil {
@@ -415,6 +415,8 @@ func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer
 		logger.Infof("WEBRTC", "Setting host candidates to %v", hosts)
 		s.SetNAT1To1IPs(hosts, webrtc.ICECandidateTypeHost)
 	}
+
+	logger.Infof("WEBRTC", "Applied advanced settings for jitter and packet loss reduction")
 
 	// Create a new WebRTC API with the configured settings
 	api = webrtc.NewAPI(webrtc.WithMediaEngine(m), webrtc.WithInterceptorRegistry(i), webrtc.WithSettingEngine(s))

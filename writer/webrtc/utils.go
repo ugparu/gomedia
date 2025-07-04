@@ -16,7 +16,7 @@ import (
 // minPktSz is the minimum packet size constant.
 const minPktSz = 5
 
-const bufLen = 0
+const bufLen = 15
 const bufCorStep = 5
 
 // peerURL represents the information associated with a peer track, including token and URL.
@@ -101,12 +101,15 @@ func writeVideoPacketsToPeer(peer *peerTrack) {
 				logger.Errorf(peer, "Error writing video sample: %v", err)
 			}
 
-			sleep := pkt.Duration() - time.Since(last)
+			println(bufLen)
+			sleep := pkt.Duration() - time.Since(last) - time.Millisecond
 			if len(peer.vBuf) > bufLen {
 				sleep -= time.Millisecond * bufCorStep
 			} else if len(peer.vBuf) < bufLen {
 				sleep += time.Millisecond * bufCorStep
 			}
+
+			println(sleep.String())
 
 			time.Sleep(sleep)
 
