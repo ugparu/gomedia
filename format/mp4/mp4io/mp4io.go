@@ -419,7 +419,6 @@ func printatom(out io.Writer, root Atom, depth int) {
 	if str, ok := root.(stringintf); ok {
 		fmt.Fprint(out, " ", str.String())
 	}
-	fmt.Fprintln(out)
 
 	children := root.Children()
 	for _, child := range children {

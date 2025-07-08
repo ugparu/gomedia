@@ -101,15 +101,12 @@ func writeVideoPacketsToPeer(peer *peerTrack) {
 				logger.Errorf(peer, "Error writing video sample: %v", err)
 			}
 
-			println(bufLen)
 			sleep := pkt.Duration() - time.Since(last) - time.Millisecond
 			if len(peer.vBuf) > bufLen {
 				sleep -= time.Millisecond * bufCorStep
 			} else if len(peer.vBuf) < bufLen {
 				sleep += time.Millisecond * bufCorStep
 			}
-
-			println(sleep.String())
 
 			time.Sleep(sleep)
 
