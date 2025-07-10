@@ -13,10 +13,10 @@ func NewSegmentType() *SegmentType {
 		MajorBrand:   pio.U32BE([]byte("isom")),
 		MinorVersion: defaultMinorVersion,
 		CompatibleBrands: []uint32{
-			pio.U32BE([]byte("isom")),
-			pio.U32BE([]byte("iso2")),
-			pio.U32BE([]byte("mp41")),
+			pio.U32BE([]byte("iso6")),
 			pio.U32BE([]byte("avc1")),
+			pio.U32BE([]byte("mp41")),
+			pio.U32BE([]byte("dash")),
 		},
 		AtomPos: AtomPos{
 			Offset: 0,

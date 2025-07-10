@@ -161,11 +161,11 @@ func (m *Muxer) newStream(codec gomedia.CodecParameters) (err error) {
 	}
 
 	stream.trackAtom.Media.Handler = &mp4io.HandlerRefer{
-		Version:     0,
-		Flags:       0,
-		HandlerType: [4]byte([]byte("vide")),
-		Reserved:    [3]uint32{0, 0, 0},
-		Name:        []byte("VideoHandler"),
+		Version: 0,
+		Flags:   0,
+		Type:    [4]byte([]byte("mhlr")),
+		SubType: [4]byte([]byte("vide")),
+		Name:    []byte("VideoHandler"),
 		AtomPos: mp4io.AtomPos{
 			Offset: 0,
 			Size:   0,

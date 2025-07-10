@@ -165,10 +165,8 @@ func (s *Stream) fillTrackAtom() {
 			CompressionId:    0,
 			SampleRate:       float64(codecPar.SampleRate()),
 			Conf: &mp4io.ElemStreamDesc{
-				DecConfig:  codecPar.MPEG4AudioConfigBytes(),
-				TrackId:    uint16(s.StreamIndex()) + 1,
-				MaxBitrate: 128000, // Default AAC bitrate
-				AvgBitrate: 128000,
+				DecConfig: codecPar.MPEG4AudioConfigBytes(),
+				TrackId:   uint16(s.StreamIndex()) + 1,
 				AtomPos: mp4io.AtomPos{
 					Offset: 0,
 					Size:   0,
@@ -184,11 +182,11 @@ func (s *Stream) fillTrackAtom() {
 		s.trackAtom.Header.Volume = 1
 		s.trackAtom.Header.AlternateGroup = 1
 		s.trackAtom.Media.Handler = &mp4io.HandlerRefer{
-			Version:     0,
-			Flags:       0,
-			HandlerType: [4]byte{'s', 'o', 'u', 'n'},
-			Reserved:    [3]uint32{0, 0, 0},
-			Name:        []byte("SoundHandler"),
+			Version: 0,
+			Flags:   0,
+			Type:    [4]byte{},
+			SubType: [4]byte{'s', 'o', 'u', 'n'},
+			Name:    []byte("SoundHandler"),
 			AtomPos: mp4io.AtomPos{
 				Offset: 0,
 				Size:   0,

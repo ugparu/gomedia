@@ -264,6 +264,10 @@ func (self ChunkOffset) String() string {
 	return fmt.Sprintf("entries=%d", len(self.Entries))
 }
 
+func (self ElemStreamDesc) String() string {
+	return fmt.Sprintf("configlen=%d", len(self.DecConfig))
+}
+
 func (self *Track) GetAVC1Conf() (conf *AVC1Conf) {
 	atom := FindChildren(self, AVCC)
 	conf, _ = atom.(*AVC1Conf)
