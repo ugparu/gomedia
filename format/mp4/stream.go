@@ -168,20 +168,17 @@ func (s *Stream) fillTrackAtom() (err error) {
 	case *aac.CodecParameters:
 		s.sample.SampleDesc.MP4ADesc = &mp4io.MP4ADesc{
 			DataRefIdx:       1,
-			NumberOfChannels: int16(codecPar.ChannelLayout().Count()),         //nolint:gosec
-			SampleSize:       int16(codecPar.SampleFormat().BytesPerSample()), //nolint:gosec
+			NumberOfChannels: int16(codecPar.ChannelLayout().Count()), //nolint:gosec
+			SampleSize:       16,                                      //nolint:gosec
 			SampleRate:       float64(codecPar.SampleRate()),
 			Conf: &mp4io.ElemStreamDesc{
-				DecConfig: codecPar.MPEG4AudioConfigBytes(),
+				DecConfig:  codecPar.MPEG4AudioConfigBytes(),
+				TrackId:    uint16(s.index + 1),
+				MaxBitrate: 128000, // Default AAC bitrate
+				AvgBitrate: 128000,
 			},
 		}
 
-		s.trackAtom.Header.Volume = 1
-		s.trackAtom.Header.AlternateGroup = 1
-		s.trackAtom.Media.Handler = &mp4io.HandlerRefer{
-			SubType: [4]byte{'s', 'o', 'u', 'n'},
-			Name:    []byte("Sound Handler"),
-		}
 		s.trackAtom.Media.Info.Sound = &mp4io.SoundMediaInfo{}
 	}
 
@@ -257,8 +254,8 @@ func (s *Stream) incSampleIndex() (duration int64) {
 
 	if s.sample.SyncSample != nil {
 		entries := s.sample.SyncSample.Entries
-		if uint32(s.sampleIndex+1) == //nolint:gosec
-			entries[s.syncSampleIndex+1]-1 && s.syncSampleIndex+1 < len(entries) {
+		if s.syncSampleIndex+1 < len(entries) && uint32(s.sampleIndex+1) == //nolint:gosec
+			entries[s.syncSampleIndex+1]-1 {
 			s.syncSampleIndex++
 		}
 	}

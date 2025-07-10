@@ -17,10 +17,8 @@ func NewFileType() *FileType {
 		CompatibleBrands: []uint32{
 			pio.U32BE([]byte("isom")),
 			pio.U32BE([]byte("iso2")),
-			pio.U32BE([]byte("iso6")),
 			pio.U32BE([]byte("avc1")),
-			// pio.U32BE([]byte("mp41")),
-			// pio.U32BE([]byte("mp70")),
+			pio.U32BE([]byte("mp41")),
 		},
 		AtomPos: AtomPos{
 			Offset: 0,

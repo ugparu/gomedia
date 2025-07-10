@@ -45,6 +45,9 @@ func (mux *Muxer) newStream(codec gomedia.CodecParameters) (err error) {
 	stream := new(Stream)
 	stream.CodecParameters = codec
 	stream.timeScale = 90000 //nolint: mnd
+	if aCodecPar, ok := codec.(gomedia.AudioCodecParameters); ok {
+		stream.timeScale = int64(aCodecPar.SampleRate())
+	}
 
 	stream.sample = &mp4io.SampleTable{
 		SampleDesc:        new(mp4io.SampleDesc),
@@ -102,20 +105,8 @@ func (mux *Muxer) newStream(codec gomedia.CodecParameters) (err error) {
 			Size:   0,
 		},
 	}
-	stream.trackAtom.Media.Handler = &mp4io.HandlerRefer{
-		Version: 0,
-		Flags:   0,
-		Type:    [4]byte([]byte("mhlr")),
-		SubType: [4]byte([]byte("vide")),
-		Name:    []byte("VideoHandler"),
-		AtomPos: mp4io.AtomPos{
-			Offset: 0,
-			Size:   0,
-		},
-	}
+
 	stream.trackAtom.Media.Info = &mp4io.MediaInfo{
-		Sound: new(mp4io.SoundMediaInfo),
-		Video: new(mp4io.VideoMediaInfo),
 		Data: &mp4io.DataInfo{
 			Refer: &mp4io.DataRefer{
 				Version: 0,
@@ -150,10 +141,43 @@ func (mux *Muxer) newStream(codec gomedia.CodecParameters) (err error) {
 	// Customize settings based on the codec type.
 	switch codec.Type() {
 	case gomedia.H264, gomedia.H265, gomedia.MJPEG:
+		// Set up video handler and media info
+		stream.trackAtom.Media.Handler = &mp4io.HandlerRefer{
+			Version:     0,
+			Flags:       0,
+			HandlerType: [4]byte([]byte("vide")),
+			Reserved:    [3]uint32{0, 0, 0},
+			Name:        []byte("VideoHandler"),
+			AtomPos: mp4io.AtomPos{
+				Offset: 0,
+				Size:   0,
+			},
+		}
+
+		stream.trackAtom.Media.Info.Video = new(mp4io.VideoMediaInfo)
+
 		stream.sample.SyncSample = new(mp4io.SyncSample)
 		vPar, _ := codec.(gomedia.VideoCodecParameters)
 		stream.trackAtom.Header.TrackWidth = float64(vPar.Width())
 		stream.trackAtom.Header.TrackHeight = float64(vPar.Height())
+	case gomedia.AAC:
+		// Set up audio handler and media info
+		stream.trackAtom.Media.Handler = &mp4io.HandlerRefer{
+			Version:     0,
+			Flags:       0,
+			HandlerType: [4]byte{'s', 'o', 'u', 'n'},
+			Reserved:    [3]uint32{0, 0, 0},
+			Name:        []byte("SoundHandler"),
+			AtomPos: mp4io.AtomPos{
+				Offset: 0,
+				Size:   0,
+			},
+		}
+
+		stream.trackAtom.Media.Info.Sound = new(mp4io.SoundMediaInfo)
+
+		stream.trackAtom.Header.Volume = 1
+		stream.trackAtom.Header.AlternateGroup = 1
 	}
 	stream.muxer = mux
 	mux.streams = append(mux.streams, stream)
