@@ -119,7 +119,6 @@ func (dec *videoDecoder) startDecoder() (err error) {
 	if dec.codecPar == nil {
 		return errors.New("can not start with empty video codec parameters")
 	}
-
 	dec.InnerVideoDecoder = dec.newDecoderFn()
 
 	if err = dec.InnerVideoDecoder.Init(dec.codecPar); err != nil {

@@ -1,8 +1,6 @@
 package mp4io
 
 import (
-	"fmt"
-
 	"github.com/ugparu/gomedia/utils/bits/pio"
 )
 
@@ -95,8 +93,6 @@ func (esds ElemStreamDesc) Marshal(b []byte) (n int) {
 
 	copy(b[n:], esds.DecConfig)
 	n += len(esds.DecConfig)
-
-	fmt.Printf("esds: % x\n", esds.DecConfig)
 
 	pio.PutU32BE(b[0:], uint32(n))
 	return
