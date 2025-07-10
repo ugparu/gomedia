@@ -82,7 +82,7 @@ func (dec *videoDecoder) processPacket(inpPkt gomedia.VideoPacket, stopCh <-chan
 	}
 
 	if !dec.hasKey && !inpPkt.IsKeyFrame() {
-		logger.Infof(dec, "Skipping non-key frame %v", inpPkt)
+		logger.Tracef(dec, "Skipping non-key frame %v", inpPkt)
 		return
 	}
 	dec.hasKey = true
@@ -92,6 +92,7 @@ func (dec *videoDecoder) processPacket(inpPkt gomedia.VideoPacket, stopCh <-chan
 		var img image.Image
 		if img, err = dec.InnerVideoDecoder.Decode(inpPkt); err != nil {
 			if err.Error() == ErrNeedMoreData.Error() {
+				logger.Infof(dec, "Need more data to decode frame %v", inpPkt)
 				return nil
 			}
 			return err
@@ -138,6 +139,7 @@ func (dec *videoDecoder) stopDecoder() {
 	}
 	dec.InnerVideoDecoder.Close()
 	dec.InnerVideoDecoder = nil
+	dec.hasKey = false
 }
 
 // Decode initializes the inner decoder.

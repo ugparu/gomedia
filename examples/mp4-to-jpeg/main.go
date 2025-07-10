@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	dmx := mp4.NewDemuxer("input.mp4")
+	dmx := mp4.NewDemuxer("input0.mp4")
 	_, err := dmx.Demux()
 	if err != nil {
 		log.Fatal(err)
@@ -29,10 +29,15 @@ func main() {
 	}
 	defer f.Close()
 
+	i := 0
 	for {
 		packet, err := dmx.ReadPacket()
 		if err != nil {
 			log.Fatal(err)
+		}
+		if i < 20 {
+			i++
+			continue
 		}
 		if vPkt, ok := packet.(gomedia.VideoPacket); ok {
 			select {
