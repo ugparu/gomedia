@@ -92,7 +92,6 @@ func (dec *videoDecoder) processPacket(inpPkt gomedia.VideoPacket, stopCh <-chan
 		var img image.Image
 		if img, err = dec.InnerVideoDecoder.Decode(inpPkt); err != nil {
 			if err.Error() == ErrNeedMoreData.Error() {
-				logger.Infof(dec, "Need more data to decode frame %v", inpPkt)
 				return nil
 			}
 			return err
