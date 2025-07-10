@@ -18,7 +18,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	dcd := decoder.NewVideo(100, -1, func() decoder.InnerVideoDecoder {
+	dcd := decoder.NewVideo(0, -1, func() decoder.InnerVideoDecoder {
 		return cpu.NewFFmpegCPUDecoder()
 	})
 	dcd.Decode()
@@ -35,15 +35,15 @@ func main() {
 			log.Fatal(err)
 		}
 		if vPkt, ok := packet.(gomedia.VideoPacket); ok {
-			dcd.Packets() <- vPkt
-		}
-		select {
-		case img := <-dcd.Images():
-			if err := jpeg.Encode(f, img, nil); err != nil {
-				log.Fatal(err)
+			select {
+			case dcd.Packets() <- vPkt:
+				println(vPkt.IsKeyFrame())
+			case img := <-dcd.Images():
+				if err := jpeg.Encode(f, img, nil); err != nil {
+					log.Fatal(err)
+				}
+				return
 			}
-			return
-		default:
 		}
 	}
 }

@@ -82,7 +82,7 @@ func (dec *videoDecoder) processPacket(inpPkt gomedia.VideoPacket, stopCh <-chan
 	}
 
 	if !dec.hasKey && !inpPkt.IsKeyFrame() {
-		logger.Tracef(dec, "Skipping non-key frame %v", inpPkt)
+		logger.Infof(dec, "Skipping non-key frame %v", inpPkt)
 		return
 	}
 	dec.hasKey = true

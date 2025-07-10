@@ -20,8 +20,6 @@ func NewCodecDataFromMPEG4AudioConfig(config MPEG4AudioConfig) (cod CodecParamet
 		return
 	}
 
-	fmt.Printf("config: % x\n", b.Bytes())
-
 	return NewCodecDataFromMPEG4AudioConfigBytes(b.Bytes())
 }
 
