@@ -328,5 +328,8 @@ func WriteMPEG4AudioConfig(w io.Writer, config MPEG4AudioConfig) (err error) {
 	if err = bw.FlushBits(); err != nil {
 		return
 	}
+
+	w.Write([]byte{0x06, 0x80, 0x80, 0x80, 0x01, 0x02, 0x06, 0x80, 0x80, 0x80, 0x01})
+
 	return
 }

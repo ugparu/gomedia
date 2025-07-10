@@ -1,6 +1,8 @@
 package mp4io
 
 import (
+	"fmt"
+
 	"github.com/ugparu/gomedia/utils/bits/pio"
 )
 
@@ -27,16 +29,6 @@ func (esds ElemStreamDesc) Tag() Tag {
 
 func (esds ElemStreamDesc) Children() []Atom {
 	return nil
-}
-
-func (esds ElemStreamDesc) fillLength(b []byte, length int) (n int) {
-	for i := 3; i > 0; i-- {
-		b[n] = uint8(length>>uint(7*i))&0x7f | 0x80
-		n++
-	}
-	b[n] = uint8(length & 0x7f)
-	n++
-	return
 }
 
 func (esds ElemStreamDesc) Len() (n int) {
@@ -103,6 +95,8 @@ func (esds ElemStreamDesc) Marshal(b []byte) (n int) {
 
 	copy(b[n:], esds.DecConfig)
 	n += len(esds.DecConfig)
+
+	fmt.Printf("esds: % x\n", esds.DecConfig)
 
 	pio.PutU32BE(b[0:], uint32(n))
 	return
