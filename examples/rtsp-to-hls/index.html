@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RTSP to HLS Stream</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+        }
+        
+        .video-container {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto 30px;
+            background-color: #000;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        
+        video {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        
+        .controls {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 0 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        
+        button:hover {
+            background-color: #0056b3;
+        }
+        
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        
+        .status {
+            text-align: center;
+            margin: 20px 0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        
+        .status.loading {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        
+        .status.connected {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .info {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+        
+        .info h3 {
+            margin-top: 0;
+            color: #495057;
+        }
+        
+        .info p {
+            margin: 5px 0;
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>RTSP to HLS Live Stream</h1>
+        
+        <div class="video-container">
+            <video id="video" controls muted></video>
+        </div>
+        
+        <div class="controls">
+            <button id="playBtn" onclick="playVideo()">Play</button>
+            <button id="pauseBtn" onclick="pauseVideo()" disabled>Pause</button>
+            <button id="reloadBtn" onclick="reloadStream()">Reload Stream</button>
+        </div>
+        
+        <div id="status" class="status loading">
+            Initializing player...
+        </div>
+        
+        <div class="info">
+            <h3>Stream Information</h3>
+            <p><strong>Stream URL:</strong> <span id="streamUrl">/master.m3u8</span></p>
+            <p><strong>Video Quality:</strong> <span id="videoQuality">Auto</span></p>
+            <p><strong>Current Level:</strong> <span id="currentLevel">-</span></p>
+            <p><strong>Buffer Length:</strong> <span id="bufferLength">0</span> seconds</p>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script>
+        let hls;
+        let video = document.getElementById('video');
+        let statusDiv = document.getElementById('status');
+        let playBtn = document.getElementById('playBtn');
+        let pauseBtn = document.getElementById('pauseBtn');
+
+        function updateStatus(message, type = 'loading') {
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type}`;
+        }
+
+        function updateInfo() {
+            if (hls) {
+                document.getElementById('currentLevel').textContent = hls.currentLevel >= 0 ? hls.currentLevel : 'Auto';
+                document.getElementById('bufferLength').textContent = hls.media ? hls.media.buffered.length > 0 ? 
+                    (hls.media.buffered.end(0) - hls.media.currentTime).toFixed(1) : '0' : '0';
+            }
+        }
+
+        function initializePlayer() {
+            if (Hls.isSupported()) {
+                hls = new Hls({
+                    debug: false,
+                    enableWorker: true,
+                    lowLatencyMode: true,
+                    backBufferLength: 90
+                });
+
+                const streamUrl = '/master.m3u8';
+                
+                hls.loadSource(streamUrl);
+                hls.attachMedia(video);
+
+                hls.on(Hls.Events.MEDIA_ATTACHED, function() {
+                    updateStatus('Media attached, loading manifest...', 'loading');
+                });
+
+                hls.on(Hls.Events.MANIFEST_PARSED, function(event, data) {
+                    updateStatus('Manifest loaded, ready to play', 'connected');
+                    console.log('Manifest parsed, found ' + data.levels.length + ' quality levels');
+                });
+
+                hls.on(Hls.Events.FRAG_LOADED, function(event, data) {
+                    updateInfo();
+                });
+
+                hls.on(Hls.Events.LEVEL_SWITCHED, function(event, data) {
+                    console.log('Level switched to ' + data.level);
+                    updateInfo();
+                });
+
+                hls.on(Hls.Events.ERROR, function(event, data) {
+                    console.error('HLS error:', data);
+                    if (data.fatal) {
+                        switch(data.type) {
+                            case Hls.ErrorTypes.NETWORK_ERROR:
+                                updateStatus('Network error occurred', 'error');
+                                setTimeout(() => {
+                                    console.log('Trying to recover from network error');
+                                    hls.startLoad();
+                                }, 3000);
+                                break;
+                            case Hls.ErrorTypes.MEDIA_ERROR:
+                                updateStatus('Media error occurred', 'error');
+                                setTimeout(() => {
+                                    console.log('Trying to recover from media error');
+                                    hls.recoverMediaError();
+                                }, 3000);
+                                break;
+                            default:
+                                updateStatus('Fatal error occurred: ' + data.type, 'error');
+                                break;
+                        }
+                    }
+                });
+
+                video.addEventListener('loadstart', function() {
+                    updateStatus('Loading stream...', 'loading');
+                });
+
+                video.addEventListener('canplay', function() {
+                    updateStatus('Stream ready to play', 'connected');
+                });
+
+                video.addEventListener('playing', function() {
+                    updateStatus('Stream is playing', 'connected');
+                    playBtn.disabled = true;
+                    pauseBtn.disabled = false;
+                });
+
+                video.addEventListener('pause', function() {
+                    updateStatus('Stream paused', 'loading');
+                    playBtn.disabled = false;
+                    pauseBtn.disabled = true;
+                });
+
+                video.addEventListener('waiting', function() {
+                    updateStatus('Buffering...', 'loading');
+                });
+
+                // Update info every second
+                setInterval(updateInfo, 1000);
+
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                // Native HLS support (Safari)
+                video.src = '/master.m3u8';
+                updateStatus('Using native HLS support', 'connected');
+            } else {
+                updateStatus('HLS is not supported in this browser', 'error');
+            }
+        }
+
+        function playVideo() {
+            video.play().catch(function(error) {
+                console.error('Play failed:', error);
+                updateStatus('Failed to play video', 'error');
+            });
+        }
+
+        function pauseVideo() {
+            video.pause();
+        }
+
+        function reloadStream() {
+            if (hls) {
+                hls.destroy();
+            }
+            video.src = '';
+            updateStatus('Reloading stream...', 'loading');
+            setTimeout(initializePlayer, 1000);
+        }
+
+        // Initialize when page loads
+        window.addEventListener('load', initializePlayer);
+    </script>
+</body>
+</html> 
