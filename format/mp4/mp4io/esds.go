@@ -51,7 +51,7 @@ func (esds ElemStreamDesc) Marshal(b []byte) (n int) {
 	pio.PutU8(b[n:], MP4ESDescrTag)
 	n++
 
-	length := encodeLength(39)
+	length := encodeLength(uint32(26 + len(esds.DecConfig)))
 	copy(b[n:], length)
 	n += len(length)
 
@@ -64,7 +64,7 @@ func (esds ElemStreamDesc) Marshal(b []byte) (n int) {
 	pio.PutU8(b[n:], MP4DecConfigDescrTag)
 	n++
 
-	length = encodeLength(31)
+	length = encodeLength(uint32(18 + len(esds.DecConfig)))
 	copy(b[n:], length)
 	n += len(length)
 
@@ -87,7 +87,7 @@ func (esds ElemStreamDesc) Marshal(b []byte) (n int) {
 	pio.PutU8(b[n:], MP4DecSpecificDescrTag)
 	n++
 
-	length = encodeLength(13)
+	length = encodeLength(uint32(len(esds.DecConfig)))
 	copy(b[n:], length)
 	n += len(length)
 

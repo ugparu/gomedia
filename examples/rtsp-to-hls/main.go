@@ -236,6 +236,21 @@ func GetInit(c *gin.Context) {
 		c.Status(http.StatusInternalServerError)
 		return
 	}
+
+	f, err := os.Create("init.mp4")
+	if err != nil {
+		logrus.Errorf("Failed to create segment file: %v", err)
+		c.Status(http.StatusInternalServerError)
+		return
+	}
+	defer f.Close()
+
+	_, err = f.Write(buf)
+	if err != nil {
+		logrus.Errorf("Failed to write segment to file: %v", err)
+		c.Status(http.StatusInternalServerError)
+		return
+	}
 }
 
 func GetSegment(c *gin.Context) {
