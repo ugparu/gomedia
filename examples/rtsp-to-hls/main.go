@@ -1,24 +1,170 @@
 package main
 
 import (
-	"context"
-	"log"
+	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
+	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
-	"github.com/ugparu/gomedia"
+	"github.com/sirupsen/logrus"
 	"github.com/ugparu/gomedia/reader"
+	"github.com/ugparu/gomedia/utils/logger"
 	"github.com/ugparu/gomedia/writer/hls"
 )
 
-var hlsWriter gomedia.HLSStreamer
+var rtspURL = os.Getenv("RTSP_URL")
 
-// StringToInt converts string to int, returns -1 on error
+const segSize = 6 * time.Second
+
+// Debug HLS writer
+var hlsWr = hls.New(1, 3, segSize, 100)
+
+func main() {
+	fmt.Println("Starting HLS debug server...")
+
+	// Initialize the HLS writer
+	hlsWr.Write()
+	logrus.Info("HLS writer initialized with: segments per playlist=1, fragment count=3, segment size=", segSize)
+
+	// Set log level to debug for more detailed output
+	logrus.SetLevel(logrus.DebugLevel)
+	logrus.Info("Log level set to DEBUG")
+
+	// Setup signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Start the server in a goroutine
+	go func() {
+		logrus.Info("Starting server on port 8080")
+		GetServer().Start()
+	}()
+
+	// Initialize RTSP reader
+	logrus.Info("Connecting to RTSP stream: ", rtspURL)
+	rdr := reader.NewRTSP(100)
+	rdr.Read()
+	rdr.AddURL() <- rtspURL
+
+	logrus.Info("HLS writer initialized with stream parameters")
+
+	// Process packets
+	go func() {
+		logrus.Info("Starting packet processing")
+		packetCount := 0
+		lastLog := time.Now()
+
+		for {
+			select {
+			case pkt := <-rdr.Packets():
+				hlsWr.Packets() <- pkt
+				packetCount++
+
+				// Log packet statistics periodically
+				if time.Since(lastLog) > 5*time.Second {
+					logrus.Infof("Processed %d packets in the last 5 seconds", packetCount)
+					packetCount = 0
+					lastLog = time.Now()
+				}
+			}
+		}
+	}()
+
+	// Wait for termination signal
+	<-sigChan
+	logrus.Info("Shutdown signal received")
+
+	// Graceful shutdown
+	GetServer().Close()
+	logrus.Info("Server shutdown complete")
+}
+
+type Server struct {
+	server    *http.Server
+	router    *gin.Engine
+	startOnce *sync.Once
+	closeOnce *sync.Once
+	deadChan  chan any
+}
+
+func (s *Server) Start() {
+	err := errors.New("HTTP server has been started already")
+	s.startOnce.Do(func() {
+		defer close(s.deadChan)
+
+		logger.Info(s, "Starting listening")
+		if err = s.server.ListenAndServe(); err != nil {
+			logger.Warning(s, err.Error())
+			err = nil
+		}
+	})
+	if err != nil {
+		logger.Error(s, err.Error())
+	}
+}
+
+func (s *Server) Close() {
+	s.closeOnce.Do(func() {
+		logger.Warning(s, "Stopping and closing")
+		s.server.Close()
+	})
+}
+
+func (s *Server) Dead() <-chan any {
+	return s.deadChan
+}
+
+var instance *Server
+var serverOnce = &sync.Once{}
+
+func GetServer() *Server {
+	serverOnce.Do(func() {
+		gin.SetMode(gin.ReleaseMode)
+		router := gin.New()
+		router.Use(
+			func(c *gin.Context) {
+				c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+				c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+				c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+				c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
+				if c.Request.Method == "OPTIONS" {
+					c.AbortWithStatus(200)
+					return
+				}
+				c.Next()
+			})
+		router.Use(gin.Recovery())
+		pprof.Register(router)
+
+		router.GET("/streams/stream.m3u8", GetMaster)
+		router.GET("/streams/:uuid/:id/cubic.m3u8", GetManifest)
+		router.GET("/streams/:uuid/:id/init.mp4", GetInit)
+		router.GET("/streams/:uuid/:id/segment/:segment/:any", GetSegment)
+		router.GET("/streams/:uuid/:id/fragment/:segment/:fragment/:any", GetFragment)
+		router.GET("/", GetIndexHTML)
+
+		instance = &Server{
+			server: &http.Server{
+				Addr:    "0.0.0.0:8080",
+				Handler: router,
+			},
+			router:    router,
+			deadChan:  make(chan any),
+			startOnce: &sync.Once{},
+			closeOnce: &sync.Once{},
+		}
+		logger.Debug(instance, "Initialized and set up")
+	})
+	return instance
+}
+
 func StringToInt(val string) int {
 	i, err := strconv.Atoi(val)
 	if err != nil {
@@ -27,210 +173,120 @@ func StringToInt(val string) int {
 	return i
 }
 
-// GetMaster handles master playlist requests
 func GetMaster(c *gin.Context) {
-	c.Header("Content-Type", "application/vnd.apple.mpegurl")
-	c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
-	c.Header("Pragma", "no-cache")
-	c.Header("Expires", "0")
+	logger.Debug(GetServer(), "Manifest request")
+	logrus.Debug("Low-Latency master playlist requested")
 
-	playlist, err := hlsWriter.GetMasterPlaylist()
+	index, err := hlsWr.GetMasterPlaylist()
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"Error on getting master playlist": err.Error()})
+		logrus.Errorf("Failed to get master playlist: %v", err)
+		c.Status(http.StatusNotFound)
 		return
 	}
 
-	_, err = c.Writer.Write([]byte(playlist))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"Error on writing playlist's data to response": err.Error()})
-		return
-	}
-}
-
-// GetManifest handles index playlist requests
-func GetManifest(c *gin.Context) {
-	c.Header("Content-Type", "application/vnd.apple.mpegurl")
-	c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
-	c.Header("Pragma", "no-cache")
-	c.Header("Expires", "0")
-
-	index, err := hlsWriter.GetIndexM3u8(c,
-		uint8(StringToInt(c.Param("id"))),
-		int64(StringToInt(c.DefaultQuery("_HLS_msn", "-1"))),
-		int8(StringToInt(c.DefaultQuery("_HLS_part", "-1"))))
-	if err != nil {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"Error on getting index M3u8": err.Error()})
-		return
-	}
-
+	logrus.Debug("Serving master playlist")
 	_, err = c.Writer.Write([]byte(index))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"Error on writing index's data to response": err.Error()})
+		logrus.Errorf("Failed to write master playlist: %v", err)
+		c.Status(http.StatusInternalServerError)
 		return
 	}
 }
 
-// GetInit handles initialization segment requests
+func GetManifest(c *gin.Context) {
+	id := StringToInt(c.Param("id"))
+	msn := StringToInt(c.DefaultQuery("_HLS_msn", "-1"))
+	part := StringToInt(c.DefaultQuery("_HLS_part", "-1"))
+
+	logrus.Debugf("Low-Latency manifest requested: id=%d, msn=%d, part=%d", id, msn, part)
+
+	index, err := hlsWr.GetIndexM3u8(c, uint8(id), int64(msn), int8(part))
+	if err != nil {
+		logrus.Errorf("Failed to get manifest: %v", err)
+		c.String(http.StatusNotFound, err.Error())
+		return
+	}
+
+	logrus.Debug("Serving manifest")
+	_, err = c.Writer.Write([]byte(index))
+	if err != nil {
+		logrus.Errorf("Failed to write manifest: %v", err)
+		c.Status(http.StatusInternalServerError)
+		return
+	}
+}
+
 func GetInit(c *gin.Context) {
 	c.Header("Content-Type", "video/mp4")
-	c.Header("Cache-Control", "public, max-age=31536000")
+	id := StringToInt(c.Param("id"))
 
-	buf, err := hlsWriter.GetInit(uint8(StringToInt(c.Param("id"))))
+	logrus.Debugf("Init segment requested: id=%d", id)
+
+	buf, err := hlsWr.GetInit(uint8(id))
 	if err != nil {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"Error on getting init for current \"id\"-parameter": err.Error()})
+		logrus.Errorf("Failed to get init segment: %v", err)
+		c.Status(http.StatusNotFound)
 		return
 	}
 
+	logrus.Debugf("Serving init segment: size=%d bytes", len(buf))
 	_, err = c.Writer.Write(buf)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"Error on writing camera's init data to response": err.Error()})
+		logrus.Errorf("Failed to write init segment: %v", err)
+		c.Status(http.StatusInternalServerError)
 		return
 	}
 }
 
-// GetSegment handles media segment requests
 func GetSegment(c *gin.Context) {
 	c.Header("Content-Type", "video/mp4")
-	c.Header("Cache-Control", "public, max-age=31536000")
+	id := StringToInt(c.Param("id"))
+	segment := StringToInt(c.Param("segment"))
 
-	buf, err := hlsWriter.GetSegment(c,
-		uint8(StringToInt(c.Param("id"))),
-		uint64(StringToInt(c.Param("segment"))))
+	logrus.Debugf("Segment requested: id=%d, segment=%d", id, segment)
+
+	buf, err := hlsWr.GetSegment(c, uint8(id), uint64(segment))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"Error on getting segment": err.Error()})
+		logrus.Errorf("Failed to get segment: %v", err)
+		c.Status(http.StatusNotFound)
 		return
 	}
 
+	logrus.Debugf("Serving segment: id=%d, segment=%d, size=%d bytes", id, segment, len(buf))
 	_, err = c.Writer.Write(buf)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"Error on writing camera's segment data to response": err.Error()})
+		logrus.Errorf("Failed to write segment: %v", err)
+		c.Status(http.StatusInternalServerError)
 		return
 	}
 }
 
-// GetFragment handles fragment requests
 func GetFragment(c *gin.Context) {
 	c.Header("Content-Type", "video/mp4")
-	c.Header("Cache-Control", "no-cache")
+	id := StringToInt(c.Param("id"))
+	segment := StringToInt(c.Param("segment"))
+	fragment := StringToInt(c.Param("fragment"))
 
-	buf, err := hlsWriter.GetFragment(c,
-		uint8(StringToInt(c.Param("id"))),
-		uint64(StringToInt(c.Param("segment"))),
-		uint8(StringToInt(c.Param("fragment"))))
+	logrus.Debugf("Fragment requested: id=%d, segment=%d, fragment=%d", id, segment, fragment)
+
+	buf, err := hlsWr.GetFragment(c, uint8(id), uint64(segment), uint8(fragment))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"Error on getting fragment": err.Error()})
+		logrus.Errorf("Failed to get fragment: %v", err)
+		c.Status(http.StatusNotFound)
 		return
 	}
 
+	logrus.Debugf("Serving fragment: id=%d, segment=%d, fragment=%d, size=%d bytes", id, segment, fragment, len(buf))
 	_, err = c.Writer.Write(buf)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"Error on writing camera's fragment data to response": err.Error()})
+		logrus.Errorf("Failed to write fragment: %v", err)
+		c.Status(http.StatusInternalServerError)
 		return
 	}
 }
 
-func main() {
-	// Get RTSP URL from environment variable
-	rtspURL := os.Getenv("RTSP_URL")
-	if rtspURL == "" {
-		log.Fatal("RTSP_URL environment variable is required")
-	}
-
-	// Get server port from environment variable or use default
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-
-	// Initialize RTSP reader
-	rdr := reader.NewRTSP(0)
-	rdr.Read()
-	defer rdr.Close()
-	rdr.AddURL() <- rtspURL
-
-	// Initialize HLS writer
-	hlsWriter = hls.New(0, 2, 6*time.Second, 10)
-	hlsWriter.Write()
-	defer hlsWriter.Close()
-
-	// Start packet forwarding goroutine
-	go func() {
-		for pkt := range rdr.Packets() {
-			hlsWriter.Packets() <- pkt
-		}
-	}()
-
-	// Setup Gin router
-	gin.SetMode(gin.ReleaseMode)
-	r := gin.New()
-	r.Use(gin.Logger())
-	r.Use(gin.Recovery())
-
-	// Add CORS middleware for better browser compatibility
-	r.Use(func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Content-Type")
-
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
-			return
-		}
-
-		c.Next()
-	})
-
-	// Serve the HTML page
-	r.StaticFile("/", "./index.html")
-	r.StaticFile("/index.html", "./index.html")
-
-	// Register HLS endpoints using the extracted handler functions
-	r.GET("/master.m3u8", GetMaster)
-	r.GET("/:uuid/:id/cubic.m3u8", GetManifest)
-	r.GET("/:uuid/:id/init.mp4", GetInit)
-	r.GET("/:uuid/:id/segment/:segment/:any", GetSegment)
-	r.GET("/:uuid/:id/fragment/:segment/:fragment/:any", GetFragment)
-
-	// Health check endpoint
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"status":   "healthy",
-			"rtsp_url": rtspURL,
-		})
-	})
-
-	// Start HTTP server
-	srv := &http.Server{
-		Addr:    ":" + port,
-		Handler: r,
-	}
-
-	// Start server in a goroutine
-	go func() {
-		log.Printf("Starting HTTP server on port %s", port)
-		log.Printf("Open http://localhost:%s in your browser to view the stream", port)
-		log.Printf("RTSP URL: %s", rtspURL)
-
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server failed to start: %v", err)
-		}
-	}()
-
-	// Wait for interrupt signal to gracefully shutdown the server
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-
-	log.Println("Shutting down server...")
-
-	// Create a context with timeout for shutdown
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	// Shutdown the server gracefully
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Printf("Server forced to shutdown: %v", err)
-	}
-
-	log.Println("Server exited")
+// GetIndexHTML serves the main HTML page with video player
+func GetIndexHTML(c *gin.Context) {
+	logrus.Debug("Index HTML page requested")
+	c.File("index.html")
 }
