@@ -446,7 +446,7 @@ func (m *Muxer) processDataOffsets(moof *mp4io.MovieFrag, startMOOF int, out []b
 
 // GetMP4Fragment returns an MP4 fragment
 // This function is complex but has been refactored to reduce cyclomatic complexity
-func (m *Muxer) GetMP4Fragment() []byte {
+func (m *Muxer) GetMP4Fragment(buf []byte) []byte {
 	defer m.processMuxer()
 
 	moof := new(mp4io.MovieFrag)
@@ -542,12 +542,16 @@ func (m *Muxer) GetMP4Fragment() []byte {
 		bufSz += sidx[i].Len()
 	}
 
-	out := make([]byte, bufSz)
+	if cap(buf) < bufSz {
+		buf = make([]byte, 0, bufSz)
+	}
+
+	buf = buf[:bufSz]
 
 	var n int
-	n += styp.Marshal(out)
+	n += styp.Marshal(buf)
 	for _, s := range sidx {
-		n += s.Marshal(out[n:])
+		n += s.Marshal(buf[n:])
 	}
 
 	startMOOF := n
@@ -556,16 +560,16 @@ func (m *Muxer) GetMP4Fragment() []byte {
 	mdatStart := n
 
 	n += 4
-	pio.PutU32BE(out[n:], uint32(mp4io.MDAT))
+	pio.PutU32BE(buf[n:], uint32(mp4io.MDAT))
 	n += 4
 
-	n = m.processDataOffsets(moof, startMOOF, out, n)
-	moof.Marshal(out[startMOOF:])
+	n = m.processDataOffsets(moof, startMOOF, buf, n)
+	moof.Marshal(buf[startMOOF:])
 
 	// Safe conversion with validation
 	mdatSizeValue := n - mdatStart
 	mdatSize := m.safeUint32Conversion(mdatSizeValue, "MDAT size")
-	pio.PutU32BE(out[mdatStart:], mdatSize)
+	pio.PutU32BE(buf[mdatStart:], mdatSize)
 
-	return out
+	return buf
 }

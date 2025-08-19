@@ -130,6 +130,10 @@ func (mxr *muxer) WritePacket(inpPkt gomedia.Packet) (err error) {
 			for i := 1; i < segCount; i++ {
 				mxr.segIDs[i-1] = mxr.segIDs[i]
 			}
+			oldSeg, ok := mxr.segmentMap.Load(oldSegID)
+			if ok {
+				newSeg.mp4Buf = oldSeg.(*segment).mp4Buf[:0]
+			}
 			mxr.segIDs = mxr.segIDs[:segCount-1]
 			mxr.segmentMap.Delete(oldSegID)
 			mxr.mediaSequence++

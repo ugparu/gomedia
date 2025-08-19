@@ -111,7 +111,7 @@ func (element *segment) close() (err error) {
 			}
 		}
 	}
-	element.mp4Buf = element.sMux.GetMP4Fragment()
+	element.mp4Buf = element.sMux.GetMP4Fragment(element.mp4Buf)
 
 	return nil
 }

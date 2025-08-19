@@ -77,7 +77,7 @@ func (fr *fragment) close() error {
 		}
 	}
 	// Finalize the MP4 buffer.
-	fr.mp4Buff = fr.mux.GetMP4Fragment()
+	fr.mp4Buff = fr.mux.GetMP4Fragment(fr.mp4Buff)
 	// Update the manifest entry based on whether the fragment is independent.
 	if fr.independent {
 		// Build manifest entry with INDEPENDENT=YES flag
