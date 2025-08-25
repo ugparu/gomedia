@@ -79,10 +79,34 @@ func ParametersToFFmpeg(vPar gomedia.VideoCodecParameters, ptr unsafe.Pointer) e
 	return nil
 }
 
+// convertLengthPrefixedToAnnexB converts length-prefixed NAL units to Annex-B format
+// This is needed for H.265 packets which come with 4-byte length prefixes
+func convertLengthPrefixedToAnnexB(data []byte) {
+	offset := 0
+	for offset < len(data) {
+		if offset+4 > len(data) {
+			break
+		}
+
+		// Read the 4-byte length prefix
+		nalLength := int(data[offset])<<24 | int(data[offset+1])<<16 | int(data[offset+2])<<8 | int(data[offset+3])
+
+		// Replace length prefix with Annex-B start code (0x00 0x00 0x00 0x01)
+		data[offset] = 0x00
+		data[offset+1] = 0x00
+		data[offset+2] = 0x00
+		data[offset+3] = 0x01
+
+		// Move to next NAL unit
+		offset += 4 + nalLength
+	}
+}
+
 func PacketToFFmpeg(vPkt gomedia.VideoPacket, ptr unsafe.Pointer) error {
 	cPkt := (*C.struct_AVPacket)(ptr)
+
 	switch pkt := vPkt.(type) {
-	case *h264.Packet, *h265.Packet:
+	case *h264.Packet:
 		cPkt.stream_index = C.int(pkt.StreamIndex())
 		cPkt.dts = C.long(pkt.Timestamp().Milliseconds())
 		cPkt.pts = cPkt.dts
@@ -100,6 +124,21 @@ func PacketToFFmpeg(vPkt gomedia.VideoPacket, ptr unsafe.Pointer) error {
 			slice[2] = 0
 			slice[3] = 1
 		}
+		return nil
+	case *h265.Packet:
+		cPkt.stream_index = C.int(pkt.StreamIndex())
+		cPkt.dts = C.long(pkt.Timestamp().Milliseconds())
+		cPkt.pts = cPkt.dts
+		cPkt.time_base.num = 1
+		cPkt.time_base.den = 1000000
+
+		C.av_grow_packet(cPkt, C.int(len(pkt.Data())))
+
+		slice := unsafe.Slice((*byte)(cPkt.data), int(cPkt.size))
+		copy(slice, pkt.Data())
+
+		// Convert length-prefixed NAL units to Annex-B format for H.265
+		convertLengthPrefixedToAnnexB(slice)
 		return nil
 	default:
 		return fmt.Errorf("unsupported packet type: %T", vPkt)
