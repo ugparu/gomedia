@@ -296,6 +296,7 @@ func (s *Stream) incSampleIndex() (duration int64) {
 }
 
 func (s *Stream) readPacket(tm time.Duration, url string) (pkt gomedia.Packet, err error) {
+
 	// Check if we have a buffered H.265 sliced packet to return first
 	if s.h265SlicedPacket != nil && !s.isSampleValid() {
 		pkt = s.h265SlicedPacket
@@ -308,6 +309,7 @@ func (s *Stream) readPacket(tm time.Duration, url string) (pkt gomedia.Packet, e
 		err = io.EOF
 		return
 	}
+
 	chunkOffset := s.sample.ChunkOffset.Entries[s.chunkIndex]
 	var sampleSize uint32
 	if s.sample.SampleSize.SampleSize != 0 {

@@ -87,9 +87,15 @@ func SplitNALUs(b []byte) (nalus [][]byte, typ int) {
 		nalus = [][]byte{}
 		for {
 			if _val4 > uint32(len(_b)) { //nolint:gosec
+				// For corrupted streams, try to salvage partial NALUs
+				if len(_b) > 0 {
+					nalus = append(nalus, _b)
+				}
 				break
 			}
-			nalus = append(nalus, _b[:_val4])
+			if _val4 > 0 {
+				nalus = append(nalus, _b[:_val4])
+			}
 			_b = _b[_val4:]
 			if len(_b) < MinNaluSize {
 				break
@@ -97,10 +103,14 @@ func SplitNALUs(b []byte) (nalus [][]byte, typ int) {
 			_val4 = pio.U32BE(_b)
 			_b = _b[MinNaluSize:]
 			if _val4 > uint32(len(_b)) { //nolint:gosec
+				// For corrupted streams, try to salvage partial NALUs
+				if len(_b) > 0 {
+					nalus = append(nalus, _b)
+				}
 				break
 			}
 		}
-		if len(_b) == 0 {
+		if len(_b) == 0 || len(nalus) > 0 {
 			return nalus, naluAVCC
 		}
 	}

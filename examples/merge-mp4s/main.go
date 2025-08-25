@@ -56,10 +56,12 @@ func main() {
 			logger.Errorf(mpDmx, "read packet error: %v", err)
 			break
 		}
-		lastTimestamp = pkt.Timestamp()
-		if err = mp4wr.WritePacket(pkt); err != nil {
-			logger.Errorf(mpDmx, "write packet error: %v", err)
-			break
+		if pkt != nil {
+			lastTimestamp = pkt.Timestamp()
+			if err = mp4wr.WritePacket(pkt); err != nil {
+				logger.Errorf(mpDmx, "write packet error: %v", err)
+				break
+			}
 		}
 	}
 	mpDmx.Close()
@@ -87,22 +89,24 @@ func main() {
 				break
 			}
 
-			// For the first packet from this file, calculate the timestamp offset
-			if !firstPacketRead {
-				firstPacketTimestamp = pkt.Timestamp()
-				// Add a small buffer to ensure continuation and avoid timestamp overlap
-				timestampOffset = lastTimestamp + time.Millisecond - firstPacketTimestamp
-				firstPacketRead = true
-			}
+			if pkt != nil {
+				// For the first packet from this file, calculate the timestamp offset
+				if !firstPacketRead {
+					firstPacketTimestamp = pkt.Timestamp()
+					// Add a small buffer to ensure continuation and avoid timestamp overlap
+					timestampOffset = lastTimestamp + time.Millisecond - firstPacketTimestamp
+					firstPacketRead = true
+				}
 
-			// Adjust the packet timestamp to continue from where the previous file ended
-			adjustedTimestamp := pkt.Timestamp() + timestampOffset
-			pkt.SetTimestamp(adjustedTimestamp)
-			lastTimestamp = adjustedTimestamp
+				// Adjust the packet timestamp to continue from where the previous file ended
+				adjustedTimestamp := pkt.Timestamp() + timestampOffset
+				pkt.SetTimestamp(adjustedTimestamp)
+				lastTimestamp = adjustedTimestamp
 
-			if err = mp4wr.WritePacket(pkt); err != nil {
-				logger.Errorf(mpDmx, "write packet error: %v", err)
-				break
+				if err = mp4wr.WritePacket(pkt); err != nil {
+					logger.Errorf(mpDmx, "write packet error: %v", err)
+					break
+				}
 			}
 		}
 		mpDmx.Close()

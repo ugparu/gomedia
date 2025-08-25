@@ -53,13 +53,29 @@ func (dmx *Demuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 	if err = dmx.probe(); err != nil {
 		return
 	}
+
 	if len(dmx.streams) == 0 {
 		err = errors.New("mp4: no streams available while trying to read a packet")
 		return
 	}
 
 	var chosen *Stream
+	// Filter streams to only include those with valid samples remaining
+	validStreams := make([]*Stream, 0, len(dmx.streams))
 	for _, stream := range dmx.streams {
+		if stream.isSampleValid() {
+			validStreams = append(validStreams, stream)
+		}
+	}
+
+	// If no streams have valid samples remaining, return EOF
+	if len(validStreams) == 0 {
+		err = io.EOF
+		return
+	}
+
+	// Choose the stream with the earliest timestamp from valid streams
+	for _, stream := range validStreams {
 		if chosen == nil || stream.tsToTime(stream.dts) < chosen.tsToTime(chosen.dts) {
 			chosen = stream
 		}
