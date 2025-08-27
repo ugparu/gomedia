@@ -42,7 +42,11 @@ func AudioParametersToFFmpeg(aPar gomedia.AudioCodecParameters, ptr unsafe.Point
 		configBytes := par.MPEG4AudioConfigBytes()
 		if len(configBytes) > 0 {
 			cPtr.extradata_size = C.int(len(configBytes))
+			// Use malloc for compatibility - extradata will be freed by avcodec_parameters_free
 			cPtr.extradata = (*C.uchar)(C.malloc(C.ulong(cPtr.extradata_size)))
+			if cPtr.extradata == nil {
+				return fmt.Errorf("failed to allocate extradata memory")
+			}
 			extra := unsafe.Slice((*byte)(cPtr.extradata), int(cPtr.extradata_size))
 			copy(extra, configBytes)
 		}
@@ -82,10 +86,13 @@ func (d *aacDecoder) Init(param gomedia.AudioCodecParameters) error {
 }
 
 func (d *aacDecoder) Decode(inData []byte) (outData []byte, err error) {
-	// Fill the packet with input data
-	C.av_grow_packet(d.dec.packet, C.int(len(inData)))
-	slice := unsafe.Slice((*byte)(d.dec.packet.data), int(d.dec.packet.size))
-	copy(slice, inData)
+	// Ensure packet is clean and fill with input data
+	d.dec.packet.size = 0
+	if len(inData) > 0 {
+		C.av_grow_packet(d.dec.packet, C.int(len(inData)))
+		slice := unsafe.Slice((*byte)(d.dec.packet.data), int(d.dec.packet.size))
+		copy(slice, inData)
+	}
 
 	var output *C.uint8_t
 	var outputSize C.int
