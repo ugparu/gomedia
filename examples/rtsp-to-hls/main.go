@@ -17,6 +17,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/decoder"
+	aacDec "github.com/ugparu/gomedia/decoder/aac"
 	"github.com/ugparu/gomedia/decoder/opus"
 	"github.com/ugparu/gomedia/decoder/pcm"
 	"github.com/ugparu/gomedia/encoder"
@@ -69,6 +70,7 @@ func main() {
 		gomedia.PCMAlaw: pcm.NewALAWDecoder,
 		gomedia.PCMUlaw: pcm.NewULAWDecoder,
 		gomedia.OPUS:    opus.NewOpusDecoder,
+		gomedia.AAC:     aacDec.NewAacDecoder,
 	})
 	audioDecoder.Decode()
 

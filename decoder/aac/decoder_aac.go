@@ -2,10 +2,13 @@ package aac
 
 //#cgo CFLAGS: -I/usr/include/fdk-aac
 //#cgo LDFLAGS: -L/usr/include/fdk-aac -lfdk-aac -Wl,-rpath=/usr/include/fdk-aac
-//#include "aac_decoder.h"
+//#include "aacdecoder_lib.h"
+//#include <stdlib.h>
 import "C"
 import (
+	"errors"
 	"fmt"
+	"runtime"
 	"unsafe"
 
 	"github.com/ugparu/gomedia"
@@ -14,22 +17,35 @@ import (
 )
 
 const (
-	aacDecNotEnoughBits = 0x1002
+	aacSampleBits = 16 // For lib-fdkaac, always use 16bits sample
+	bitsPerByte   = 8  // Number of bits in a byte
+
+	// FDK-AAC error code ranges (from aacdecoder_lib.h)
+	aacDecodeErrorStart = 0x4000
+	aacDecodeErrorEnd   = 0x4FFF
 )
 
+// isOutputValid implements the IS_OUTPUT_VALID macro from FDK-AAC
+// Output buffer is valid if err == AAC_DEC_OK or it's a decode error (concealed but valid)
+func isOutputValid(err C.AAC_DECODER_ERROR) bool {
+	return err == C.AAC_DEC_OK || (err >= aacDecodeErrorStart && err <= aacDecodeErrorEnd)
+}
+
 type aacDecoder struct {
-	m C.aacdec_t
+	dec         C.HANDLE_AACDECODER
+	isAdts      C.int
+	info        *C.CStreamInfo
+	sampleBits  C.int
+	filledBytes C.UINT
 }
 
 func NewAacDecoder() decoder.InnerAudioDecoder {
 	return &aacDecoder{
-		m: C.aacdec_t{
-			dec:          nil,
-			is_adts:      0,
-			info:         nil,
-			sample_bits:  0,
-			filled_bytes: 0,
-		},
+		dec:         nil,
+		isAdts:      0,
+		info:        nil,
+		sampleBits:  aacSampleBits,
+		filledBytes: 0,
 	}
 }
 
@@ -40,33 +56,60 @@ func (d *aacDecoder) Init(param gomedia.AudioCodecParameters) error {
 	}
 
 	asc := aacParam.ConfigBytes
-	p := (*C.char)(unsafe.Pointer(&asc[0]))
-	pSize := C.int(len(asc))
 
-	r := C.aacdec_init_raw(&d.m, p, pSize) //nolint:gocritic // CGO function call
-
-	if int(r) != 0 {
-		return fmt.Errorf("init RAW decoder failed, code is %d", int(r))
+	// Open the decoder
+	d.dec = C.aacDecoder_Open(C.TT_MP4_RAW, 1)
+	if d.dec == nil {
+		return errors.New("failed to open AAC decoder")
 	}
+
+	// Configure the decoder with raw config data
+	// Pin the Go memory to prevent GC from moving it
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+
+	pinner.Pin(&asc[0])
+	uasc := (*C.UCHAR)(unsafe.Pointer(&asc[0]))
+	unbAsc := C.UINT(len(asc))
+	err := C.aacDecoder_ConfigRaw(d.dec, &uasc, &unbAsc)
+	if err != C.AAC_DEC_OK {
+		return fmt.Errorf("init RAW decoder failed, code is %d", int(err))
+	}
+
+	// Try to get stream info early if possible after configuration
+	d.info = C.aacDecoder_GetStreamInfo(d.dec)
+
 	return nil
 }
 
 func (d *aacDecoder) Decode(inData []byte) (outData []byte, err error) {
-	p := (*C.char)(unsafe.Pointer(&inData[0]))
-	pSize := C.int(len(inData))
-	leftSize := C.int(0)
+	// Fill the decoder with input data
+	d.filledBytes += C.UINT(len(inData))
 
-	r := C.aacdec_fill(&d.m, p, pSize, &leftSize) //nolint:gocritic // CGO function call
+	// Pin the Go memory to prevent GC from moving it
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
 
-	if int(r) != 0 {
-		return nil, fmt.Errorf("fill aac decoder failed, code is %d", int(r))
+	pinner.Pin(&inData[0])
+	udata := (*C.UCHAR)(unsafe.Pointer(&inData[0]))
+	unbData := C.UINT(len(inData))
+	unbLeft := unbData
+
+	fillErr := C.aacDecoder_Fill(d.dec, &udata, &unbData, &unbLeft)
+	if fillErr != C.AAC_DEC_OK {
+		return nil, fmt.Errorf("fill aac decoder failed, code is %d", int(fillErr))
 	}
 
-	if int(leftSize) > 0 {
-		return nil, fmt.Errorf("decoder left %v bytes", int(leftSize))
+	if int(unbLeft) > 0 {
+		return nil, fmt.Errorf("decoder left %v bytes", int(unbLeft))
 	}
 
-	nbPcm := int(C.aacdec_pcm_size(&d.m)) //nolint:gocritic // CGO function call
+	// Calculate PCM buffer size
+	var nbPcm int
+	if d.info != nil {
+		nbPcm = int(d.info.numChannels * d.info.frameSize * d.sampleBits / bitsPerByte)
+	}
+
 	// Calculate a more appropriate buffer size based on typical AAC frame parameters if size is unknown
 	if nbPcm == 0 {
 		// Maximum AAC frame size (2048 samples) * max 8 channels * 4 bytes per sample (worst case)
@@ -81,23 +124,95 @@ func (d *aacDecoder) Decode(inData []byte) (outData []byte, err error) {
 	}
 	pcmData := make([]byte, nbPcm)
 
-	p = (*C.char)(unsafe.Pointer(&pcmData[0]))
-	pSize = C.int(nbPcm)
-	validSize := C.int(0)
+	// Pin the output buffer as well
+	pinner.Pin(&pcmData[0])
 
-	ret := C.aacdec_decode_frame(&d.m, p, pSize, &validSize) //nolint:gocritic // CGO function call
+	// Decode the frame
+	upcm := (*C.INT_PCM)(unsafe.Pointer(&pcmData[0]))
+	unbPcm := C.INT(nbPcm)
 
-	if int(ret) == aacDecNotEnoughBits {
+	decodeErr := C.aacDecoder_DecodeFrame(d.dec, upcm, unbPcm, 0)
+
+	if decodeErr == C.AAC_DEC_NOT_ENOUGH_BITS {
 		return nil, nil
 	}
 
-	if int(r) != 0 {
-		return nil, fmt.Errorf("decode aac frame failed, code is %d", int(r))
+	// Use FDK-AAC's output validation logic for proper error handling
+	if !isOutputValid(decodeErr) {
+		return nil, fmt.Errorf("decode produced invalid output, code is %d", int(decodeErr))
+	}
+
+	// Get stream info after decode (successful or with concealed output)
+	if d.info == nil {
+		d.info = C.aacDecoder_GetStreamInfo(d.dec)
+	}
+
+	// Calculate actual valid size
+	var validSize int
+	if d.info != nil {
+		validSize = int(d.info.numChannels * d.info.frameSize * d.sampleBits / bitsPerByte)
+	} else {
+		validSize = nbPcm
+	}
+
+	return pcmData[:validSize], nil
+}
+
+// Flush remaining audio data from decoder internal buffers
+func (d *aacDecoder) Flush() ([]byte, error) {
+	if d.dec == nil {
+		return nil, errors.New("decoder not initialized")
+	}
+
+	// Calculate PCM buffer size
+	var nbPcm int
+	if d.info != nil {
+		nbPcm = int(d.info.numChannels * d.info.frameSize * d.sampleBits / bitsPerByte)
+	} else {
+		// Use default buffer size for flushing
+		const (
+			maxSamplesPerFrame = 2048
+			maxChannels        = 8
+			bytesPerSample     = 4
+		)
+		nbPcm = maxSamplesPerFrame * maxChannels * bytesPerSample
+	}
+
+	pcmData := make([]byte, nbPcm)
+
+	// Pin the output buffer to prevent GC from moving it
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+
+	pinner.Pin(&pcmData[0])
+	upcm := (*C.INT_PCM)(unsafe.Pointer(&pcmData[0]))
+	unbPcm := C.INT(nbPcm)
+
+	// Decode with FLUSH flag to get remaining delayed audio
+	decodeErr := C.aacDecoder_DecodeFrame(d.dec, upcm, unbPcm, C.AACDEC_FLUSH)
+
+	if decodeErr == C.AAC_DEC_NOT_ENOUGH_BITS {
+		return nil, nil
+	}
+
+	if !isOutputValid(decodeErr) {
+		return nil, fmt.Errorf("flush produced invalid output, code is %d", int(decodeErr))
+	}
+
+	// Calculate actual valid size
+	var validSize int
+	if d.info != nil {
+		validSize = int(d.info.numChannels * d.info.frameSize * d.sampleBits / bitsPerByte)
+	} else {
+		validSize = nbPcm
 	}
 
 	return pcmData[:validSize], nil
 }
 
 func (d *aacDecoder) Close() {
-	C.aacdec_close(&d.m) //nolint:gocritic // CGO function call
+	if d.dec != nil {
+		C.aacDecoder_Close(d.dec)
+		d.dec = nil
+	}
 }
