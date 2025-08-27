@@ -3,8 +3,6 @@ package hls
 import (
 	"context"
 	"fmt"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/ugparu/gomedia"
@@ -19,9 +17,8 @@ type segment struct {
 	targetDuration     time.Duration               // Target duration for the entire segment.
 	duration           time.Duration               // Actual duration of the segment.
 	finished           chan struct{}               // Channel to signal completion of the segment.
-	fragmentMap        *sync.Map                   // Map to store fragments of the segment.
-	curFragment        *atomic.Value               // Atomic value to store the current fragment.
-	manifestEntry      *atomic.Value               // Atomic value to store the HLS manifest entry for the segment.
+	curFragment        *fragment                   // Atomic value to store the current fragment.
+	manifestEntry      string                      // HLS manifest entry for the segment.
 	codecPars          gomedia.CodecParametersPair // Codec parameters for the segment.
 	cacheEntry         string                      // Cache entry for manifest generation.
 	mp4Buf             []byte                      // Buffer for the finalized MP4 content.
@@ -50,48 +47,48 @@ func newSegment(
 		finished:           make(chan struct{}),
 		duration:           0,
 		time:               time.Now(),
-		fragmentMap:        &sync.Map{},
 		mp4Buf:             nil,
 		cacheEntry:         "",
-		curFragment:        &atomic.Value{},
-		manifestEntry:      &atomic.Value{},
+		curFragment:        nil,
+		manifestEntry:      "",
 		sMux:               sMux,
 		fMux:               fMux,
 	}
-	seg.fragmentMap.Store(uint8(0), seg.fragments[0])
-	seg.manifestEntry.Store(seg.fragments[0].manifestEntry.Load())
-	seg.curFragment.Store(seg.fragments[0])
+	seg.manifestEntry = seg.fragments[0].manifestEntry
+	seg.curFragment = seg.fragments[0]
 	return seg
 }
 
 // writePacket writes a multimedia packet to the current fragment of the segment.
 func (element *segment) writePacket(packet gomedia.Packet) (err error) {
-	curFrag, _ := element.curFragment.Load().(*fragment)
+	curFrag := element.curFragment
 	if err = curFrag.writePacket(packet); err != nil {
 		return
+	}
+	if err = element.sMux.WritePacket(packet); err != nil {
+		return err
 	}
 
 	select {
 	case <-curFrag.finished:
 		element.duration += curFrag.duration
-		element.cacheEntry = fmt.Sprintf("%s%s", element.cacheEntry, curFrag.manifestEntry.Load())
+		element.cacheEntry = fmt.Sprintf("%s%s", element.cacheEntry, curFrag.manifestEntry)
 		if element.duration >= element.targetDuration {
-			element.manifestEntry.Store(fmt.Sprintf("%s#EXT-X-PROGRAM-DATE-TIME:%s\n#EXTINF:%.5f\nsegment/%d/cubic.m4s\n",
-				element.cacheEntry, element.time.Format("2006-01-02T15:04:05.000000Z"), element.duration.Seconds(), element.id))
+			element.manifestEntry = fmt.Sprintf("%s#EXT-X-PROGRAM-DATE-TIME:%s\n#EXTINF:%.5f\nsegment/%d/cubic.m4s\n",
+				element.cacheEntry, element.time.Format("2006-01-02T15:04:05.000000Z"), element.duration.Seconds(), element.id)
 			return element.close()
 		} else {
 			newFragID := curFrag.id + 1
 			newFragment := newFragment(newFragID, element.id, element.targetFragDuration, element.fMux)
 			element.fragments = append(element.fragments, newFragment)
-			element.fragmentMap.Store(newFragID, element.fragments[newFragID])
-			element.curFragment.Store(element.fragments[newFragID])
+			element.curFragment = element.fragments[newFragID]
 
 			// Update manifest entry with new fragment
 			newManifestEntry := fmt.Sprintf("%s%s",
 				element.cacheEntry,
-				element.fragments[newFragID].manifestEntry.Load(),
+				element.fragments[newFragID].manifestEntry,
 			)
-			element.manifestEntry.Store(newManifestEntry)
+			element.manifestEntry = newManifestEntry
 		}
 	default:
 	}
@@ -102,15 +99,6 @@ func (element *segment) writePacket(packet gomedia.Packet) (err error) {
 func (element *segment) close() (err error) {
 	logger.Tracef(element, "Finishing segment")
 	defer close(element.finished)
-
-	for _, fragment := range element.fragments {
-		for _, v := range fragment.packets {
-			if err = element.sMux.WritePacket(v); err != nil {
-				logger.Errorf(element, "can not mux to mp4: %v", err)
-				return err
-			}
-		}
-	}
 	element.mp4Buf = element.sMux.GetMP4Fragment(element.mp4Buf)
 
 	return nil
@@ -118,8 +106,7 @@ func (element *segment) close() (err error) {
 
 // getFragment gets the MP4 content of a specific fragment in the segment.
 func (element *segment) getFragment(ctx context.Context, id uint8) []byte {
-	val, ok := element.fragmentMap.Load(id)
-	if !ok {
+	if id >= uint8(len(element.fragments)) {
 		return nil
 	}
 
@@ -127,7 +114,7 @@ func (element *segment) getFragment(ctx context.Context, id uint8) []byte {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	frag, _ := val.(*fragment)
+	frag := element.fragments[id]
 	select {
 	case <-ctx.Done():
 		return nil
@@ -139,7 +126,7 @@ func (element *segment) getFragment(ctx context.Context, id uint8) []byte {
 // waitFragment waits until a specific fragment in the segment is finished.
 func (element *segment) waitFragment(ctx context.Context, id uint8) {
 	for {
-		curFrag, _ := element.curFragment.Load().(*fragment)
+		curFrag := element.curFragment
 		if curFrag.id >= id {
 			return
 		}

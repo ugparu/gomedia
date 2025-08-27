@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -14,12 +15,18 @@ import (
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
+	"github.com/ugparu/gomedia"
+	"github.com/ugparu/gomedia/decoder"
+	"github.com/ugparu/gomedia/decoder/opus"
+	"github.com/ugparu/gomedia/decoder/pcm"
+	"github.com/ugparu/gomedia/encoder"
+	"github.com/ugparu/gomedia/encoder/aac"
 	"github.com/ugparu/gomedia/reader"
 	"github.com/ugparu/gomedia/utils/logger"
 	"github.com/ugparu/gomedia/writer/hls"
 )
 
-var rtspURL = os.Getenv("RTSP_URL")
+var rtspURLs = strings.Split(os.Getenv("RTSP_URLS"), ",")
 
 const segSize = 6 * time.Second
 
@@ -34,7 +41,7 @@ func main() {
 	logrus.Info("HLS writer initialized with: segments per playlist=1, fragment count=3, segment size=", segSize)
 
 	// Set log level to debug for more detailed output
-	logrus.SetLevel(logrus.DebugLevel)
+	logrus.SetLevel(logrus.InfoLevel)
 	logrus.Info("Log level set to DEBUG")
 
 	// Setup signal handling for graceful shutdown
@@ -48,10 +55,22 @@ func main() {
 	}()
 
 	// Initialize RTSP reader
-	logrus.Info("Connecting to RTSP stream: ", rtspURL)
+	logrus.Info("Connecting to RTSP streams: ", rtspURLs)
 	rdr := reader.NewRTSP(100)
 	rdr.Read()
-	rdr.AddURL() <- rtspURL
+	for _, rtspURL := range rtspURLs {
+		rdr.AddURL() <- rtspURL
+	}
+
+	aacEnc := encoder.NewAudioEncoder(100, aac.NewAacEncoder)
+	aacEnc.Encode()
+
+	audioDecoder := decoder.NewAudioDecoder(100, map[gomedia.CodecType]func() decoder.InnerAudioDecoder{
+		gomedia.PCMAlaw: pcm.NewALAWDecoder,
+		gomedia.PCMUlaw: pcm.NewULAWDecoder,
+		gomedia.OPUS:    opus.NewOpusDecoder,
+	})
+	audioDecoder.Decode()
 
 	logrus.Info("HLS writer initialized with stream parameters")
 
@@ -63,8 +82,22 @@ func main() {
 
 		for {
 			select {
-			case pkt := <-rdr.Packets():
+			case smpl := <-audioDecoder.Samples():
+				aacEnc.Samples() <- smpl
+			case pkt := <-aacEnc.Packets():
+				// clonePkt := pkt.Clone(true)
+				// clonePkt.SetURL(rtspURLs[1])
+				// hlsWr.Packets() <- clonePkt
 				hlsWr.Packets() <- pkt
+			case pkt := <-rdr.Packets():
+				if inPkt, ok := pkt.(gomedia.AudioPacket); ok {
+					if inPkt.URL() != rtspURLs[0] {
+						continue
+					}
+					audioDecoder.Packets() <- inPkt
+				} else if inPkt, ok := pkt.(gomedia.VideoPacket); ok {
+					hlsWr.Packets() <- inPkt
+				}
 				packetCount++
 
 				// Log packet statistics periodically

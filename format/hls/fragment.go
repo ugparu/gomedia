@@ -2,7 +2,6 @@ package hls
 
 import (
 	"fmt"
-	"sync/atomic"
 	"time"
 
 	"github.com/ugparu/gomedia"
@@ -12,14 +11,13 @@ import (
 
 // fragment represents a fragment of an HLS video stream.
 type fragment struct {
-	independent    bool             // Indicates if the fragment is independent.
-	id             uint8            // Identifier for the fragment.
-	segID          uint64           // Identifier for the segment to which the fragment belongs.
-	targetDuration time.Duration    // Target duration for the fragment.
-	duration       time.Duration    // Actual duration of the fragment.
-	finished       chan struct{}    // Channel to signal completion of the fragment.
-	manifestEntry  *atomic.Value    // Atomic value for storing the HLS manifest entry.
-	packets        []gomedia.Packet // List of multimedia packets in the fragment.
+	independent    bool          // Indicates if the fragment is independent.
+	id             uint8         // Identifier for the fragment.
+	segID          uint64        // Identifier for the segment to which the fragment belongs.
+	targetDuration time.Duration // Target duration for the fragment.
+	duration       time.Duration // Actual duration of the fragment.
+	finished       chan struct{} // Channel to signal completion of the fragment.
+	manifestEntry  string        // HLS manifest entry.
 	mux            *fmp4.Muxer
 	mp4Buff        []byte // Buffer for the finalized MP4 content.
 }
@@ -32,14 +30,13 @@ func newFragment(id uint8, segID uint64, targetDuration time.Duration, mux *fmp4
 		targetDuration: targetDuration,
 		independent:    false,
 		duration:       0,
-		packets:        nil,
 		finished:       make(chan struct{}),
 		mp4Buff:        nil,
-		manifestEntry:  &atomic.Value{},
+		manifestEntry:  "",
 		mux:            mux,
 	}
 	// Initialize the manifest entry with a preload hint.
-	frag.manifestEntry.Store(fmt.Sprintf("#EXT-X-PRELOAD-HINT:TYPE=PART,URI=\"fragment/%d/%d/cubic.m4s\"\n", segID, id))
+	frag.manifestEntry = fmt.Sprintf("#EXT-X-PRELOAD-HINT:TYPE=PART,URI=\"fragment/%d/%d/cubic.m4s\"\n", segID, id)
 	return frag
 }
 
@@ -47,7 +44,9 @@ func newFragment(id uint8, segID uint64, targetDuration time.Duration, mux *fmp4
 func (fr *fragment) writePacket(packet gomedia.Packet) error {
 	logger.Tracef(fr, "Writing packet %v", packet)
 
-	fr.packets = append(fr.packets, packet)
+	if err := fr.mux.WritePacket(packet); err != nil {
+		return err
+	}
 
 	vPacket, casted := packet.(gomedia.VideoPacket)
 
@@ -71,35 +70,30 @@ func (fr *fragment) close() error {
 	logger.Tracef(fr, "Finishing fragment")
 	defer close(fr.finished)
 
-	for _, v := range fr.packets {
-		if err := fr.mux.WritePacket(v); err != nil {
-			return err
-		}
-	}
-	// Finalize the MP4 buffer.
 	fr.mp4Buff = fr.mux.GetMP4Fragment(fr.mp4Buff)
+
 	// Update the manifest entry based on whether the fragment is independent.
 	if fr.independent {
 		// Build manifest entry with INDEPENDENT=YES flag
-		fr.manifestEntry.Store(fmt.Sprintf(
+		fr.manifestEntry = fmt.Sprintf(
 			"#EXT-X-PART:DURATION=%.5f,INDEPENDENT=YES,URI=\"fragment/%d/%d/cubic.m4s\"\n",
 			fr.duration.Seconds(),
 			fr.segID,
 			fr.id,
-		))
+		)
 	} else {
 		// Build standard manifest entry
-		fr.manifestEntry.Store(fmt.Sprintf(
+		fr.manifestEntry = fmt.Sprintf(
 			"#EXT-X-PART:DURATION=%.5f,URI=\"fragment/%d/%d/cubic.m4s\"\n",
 			fr.duration.Seconds(),
 			fr.segID,
 			fr.id,
-		))
+		)
 	}
 	return nil
 }
 
 // String returns a string representation of the fragment.
 func (fr *fragment) String() string {
-	return fmt.Sprintf("FRAGMENT id=%d ind=%v pkts=%d", fr.id, fr.independent, len(fr.packets))
+	return fmt.Sprintf("FRAGMENT id=%d ind=%v", fr.id, fr.independent)
 }
