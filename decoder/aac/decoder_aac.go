@@ -46,14 +46,6 @@ type aacDecoder struct {
 	// Separate buffers for input and output to avoid conflicts
 	inputBuffer  []byte
 	outputBuffer []byte
-
-	// Pin management for C interop
-	inputPinner  runtime.Pinner
-	outputPinner runtime.Pinner
-
-	// C pointers - will be updated when buffers are reallocated
-	cInPcmData  *C.UCHAR
-	cOutPcmData *C.INT_PCM
 }
 
 func NewAacDecoder() decoder.InnerAudioDecoder {
@@ -65,17 +57,7 @@ func NewAacDecoder() decoder.InnerAudioDecoder {
 		filledBytes:  0,
 		inputBuffer:  make([]byte, maxPossibleSize),
 		outputBuffer: make([]byte, maxPossibleSize),
-		inputPinner:  runtime.Pinner{},
-		outputPinner: runtime.Pinner{},
-		cInPcmData:   nil,
-		cOutPcmData:  nil,
 	}
-
-	// Pin buffers and set up C pointers
-	aacDec.inputPinner.Pin(&aacDec.inputBuffer[0])
-	aacDec.outputPinner.Pin(&aacDec.outputBuffer[0])
-	aacDec.cInPcmData = (*C.UCHAR)(unsafe.Pointer(&aacDec.inputBuffer[0]))
-	aacDec.cOutPcmData = (*C.INT_PCM)(unsafe.Pointer(&aacDec.outputBuffer[0]))
 
 	return aacDec
 }
@@ -111,26 +93,18 @@ func (d *aacDecoder) Init(param gomedia.AudioCodecParameters) error {
 	return nil
 }
 
-// ensureInputBufferSize safely reallocates input buffer if needed and updates C pointer
+// ensureInputBufferSize safely reallocates input buffer if needed
 func (d *aacDecoder) ensureInputBufferSize(requiredSize int) {
 	if cap(d.inputBuffer) < requiredSize {
-		// Unpin old buffer and allocate new one
-		d.inputPinner.Unpin()
 		d.inputBuffer = make([]byte, requiredSize)
-		d.inputPinner.Pin(&d.inputBuffer[0])
-		d.cInPcmData = (*C.UCHAR)(unsafe.Pointer(&d.inputBuffer[0]))
 	}
 	d.inputBuffer = d.inputBuffer[:requiredSize]
 }
 
-// ensureOutputBufferSize safely reallocates output buffer if needed and updates C pointer
+// ensureOutputBufferSize safely reallocates output buffer if needed
 func (d *aacDecoder) ensureOutputBufferSize(requiredSize int) {
 	if cap(d.outputBuffer) < requiredSize {
-		// Unpin old buffer and allocate new one
-		d.outputPinner.Unpin()
 		d.outputBuffer = make([]byte, requiredSize)
-		d.outputPinner.Pin(&d.outputBuffer[0])
-		d.cOutPcmData = (*C.INT_PCM)(unsafe.Pointer(&d.outputBuffer[0]))
 	}
 	d.outputBuffer = d.outputBuffer[:requiredSize]
 }
@@ -142,10 +116,16 @@ func (d *aacDecoder) Decode(inData []byte) (outData []byte, err error) {
 	d.ensureInputBufferSize(len(inData))
 	copy(d.inputBuffer, inData)
 
+	// Pin input buffer for C interop
+	var inputPinner runtime.Pinner
+	defer inputPinner.Unpin()
+	inputPinner.Pin(&d.inputBuffer[0])
+	cInPcmData := (*C.UCHAR)(unsafe.Pointer(&d.inputBuffer[0]))
+
 	unbData := C.UINT(len(inData))
 	unbLeft := unbData
 
-	fillErr := C.aacDecoder_Fill(d.dec, &d.cInPcmData, &unbData, &unbLeft)
+	fillErr := C.aacDecoder_Fill(d.dec, &cInPcmData, &unbData, &unbLeft)
 	if fillErr != C.AAC_DEC_OK {
 		return nil, fmt.Errorf("fill aac decoder failed, code is %d", int(fillErr))
 	}
@@ -170,9 +150,15 @@ func (d *aacDecoder) Decode(inData []byte) (outData []byte, err error) {
 	// Ensure output buffer is large enough
 	d.ensureOutputBufferSize(nbPcm)
 
+	// Pin output buffer for C interop
+	var outputPinner runtime.Pinner
+	defer outputPinner.Unpin()
+	outputPinner.Pin(&d.outputBuffer[0])
+	cOutPcmData := (*C.INT_PCM)(unsafe.Pointer(&d.outputBuffer[0]))
+
 	// Decode the frame using the separate output buffer
 	unbPcm := C.INT(nbPcm)
-	decodeErr := C.aacDecoder_DecodeFrame(d.dec, d.cOutPcmData, unbPcm, 0)
+	decodeErr := C.aacDecoder_DecodeFrame(d.dec, cOutPcmData, unbPcm, 0)
 
 	if decodeErr == C.AAC_DEC_NOT_ENOUGH_BITS {
 		return nil, nil
@@ -219,10 +205,16 @@ func (d *aacDecoder) Flush() ([]byte, error) {
 	// Ensure output buffer is large enough for flush operation
 	d.ensureOutputBufferSize(nbPcm)
 
+	// Pin output buffer for C interop
+	var outputPinner runtime.Pinner
+	defer outputPinner.Unpin()
+	outputPinner.Pin(&d.outputBuffer[0])
+	cOutPcmData := (*C.INT_PCM)(unsafe.Pointer(&d.outputBuffer[0]))
+
 	unbPcm := C.INT(nbPcm)
 
 	// Decode with FLUSH flag to get remaining delayed audio
-	decodeErr := C.aacDecoder_DecodeFrame(d.dec, d.cOutPcmData, unbPcm, C.AACDEC_FLUSH)
+	decodeErr := C.aacDecoder_DecodeFrame(d.dec, cOutPcmData, unbPcm, C.AACDEC_FLUSH)
 
 	if decodeErr == C.AAC_DEC_NOT_ENOUGH_BITS {
 		return nil, nil
@@ -244,10 +236,6 @@ func (d *aacDecoder) Flush() ([]byte, error) {
 }
 
 func (d *aacDecoder) Close() {
-	// Properly unpin both buffers
-	d.inputPinner.Unpin()
-	d.outputPinner.Unpin()
-
 	if d.dec != nil {
 		C.aacDecoder_Close(d.dec)
 		d.dec = nil
