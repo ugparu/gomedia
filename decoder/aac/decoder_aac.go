@@ -23,6 +23,11 @@ const (
 	// FDK-AAC error code ranges (from aacdecoder_lib.h)
 	aacDecodeErrorStart = 0x4000
 	aacDecodeErrorEnd   = 0x4FFF
+
+	maxSamplesPerFrame = 2048
+	maxChannels        = 8
+	bytesPerSample     = 2
+	maxPossibleSize    = maxSamplesPerFrame * maxChannels * bytesPerSample
 )
 
 // isOutputValid implements the IS_OUTPUT_VALID macro from FDK-AAC
@@ -37,16 +42,42 @@ type aacDecoder struct {
 	info        *C.CStreamInfo
 	sampleBits  C.int
 	filledBytes C.UINT
+
+	// Separate buffers for input and output to avoid conflicts
+	inputBuffer  []byte
+	outputBuffer []byte
+
+	// Pin management for C interop
+	inputPinner  runtime.Pinner
+	outputPinner runtime.Pinner
+
+	// C pointers - will be updated when buffers are reallocated
+	cInPcmData  *C.UCHAR
+	cOutPcmData *C.INT_PCM
 }
 
 func NewAacDecoder() decoder.InnerAudioDecoder {
-	return &aacDecoder{
-		dec:         nil,
-		isAdts:      0,
-		info:        nil,
-		sampleBits:  aacSampleBits,
-		filledBytes: 0,
+	aacDec := &aacDecoder{
+		dec:          nil,
+		isAdts:       0,
+		info:         nil,
+		sampleBits:   aacSampleBits,
+		filledBytes:  0,
+		inputBuffer:  make([]byte, maxPossibleSize),
+		outputBuffer: make([]byte, maxPossibleSize),
+		inputPinner:  runtime.Pinner{},
+		outputPinner: runtime.Pinner{},
+		cInPcmData:   nil,
+		cOutPcmData:  nil,
 	}
+
+	// Pin buffers and set up C pointers
+	aacDec.inputPinner.Pin(&aacDec.inputBuffer[0])
+	aacDec.outputPinner.Pin(&aacDec.outputBuffer[0])
+	aacDec.cInPcmData = (*C.UCHAR)(unsafe.Pointer(&aacDec.inputBuffer[0]))
+	aacDec.cOutPcmData = (*C.INT_PCM)(unsafe.Pointer(&aacDec.outputBuffer[0]))
+
+	return aacDec
 }
 
 func (d *aacDecoder) Init(param gomedia.AudioCodecParameters) error {
@@ -63,8 +94,6 @@ func (d *aacDecoder) Init(param gomedia.AudioCodecParameters) error {
 		return errors.New("failed to open AAC decoder")
 	}
 
-	// Configure the decoder with raw config data
-	// Pin the Go memory to prevent GC from moving it
 	var pinner runtime.Pinner
 	defer pinner.Unpin()
 
@@ -82,20 +111,41 @@ func (d *aacDecoder) Init(param gomedia.AudioCodecParameters) error {
 	return nil
 }
 
+// ensureInputBufferSize safely reallocates input buffer if needed and updates C pointer
+func (d *aacDecoder) ensureInputBufferSize(requiredSize int) {
+	if cap(d.inputBuffer) < requiredSize {
+		// Unpin old buffer and allocate new one
+		d.inputPinner.Unpin()
+		d.inputBuffer = make([]byte, requiredSize)
+		d.inputPinner.Pin(&d.inputBuffer[0])
+		d.cInPcmData = (*C.UCHAR)(unsafe.Pointer(&d.inputBuffer[0]))
+	}
+	d.inputBuffer = d.inputBuffer[:requiredSize]
+}
+
+// ensureOutputBufferSize safely reallocates output buffer if needed and updates C pointer
+func (d *aacDecoder) ensureOutputBufferSize(requiredSize int) {
+	if cap(d.outputBuffer) < requiredSize {
+		// Unpin old buffer and allocate new one
+		d.outputPinner.Unpin()
+		d.outputBuffer = make([]byte, requiredSize)
+		d.outputPinner.Pin(&d.outputBuffer[0])
+		d.cOutPcmData = (*C.INT_PCM)(unsafe.Pointer(&d.outputBuffer[0]))
+	}
+	d.outputBuffer = d.outputBuffer[:requiredSize]
+}
+
 func (d *aacDecoder) Decode(inData []byte) (outData []byte, err error) {
-	// Fill the decoder with input data
 	d.filledBytes += C.UINT(len(inData))
 
-	// Pin the Go memory to prevent GC from moving it
-	var pinner runtime.Pinner
-	defer pinner.Unpin()
+	// Ensure input buffer is large enough and copy input data
+	d.ensureInputBufferSize(len(inData))
+	copy(d.inputBuffer, inData)
 
-	pinner.Pin(&inData[0])
-	udata := (*C.UCHAR)(unsafe.Pointer(&inData[0]))
 	unbData := C.UINT(len(inData))
 	unbLeft := unbData
 
-	fillErr := C.aacDecoder_Fill(d.dec, &udata, &unbData, &unbLeft)
+	fillErr := C.aacDecoder_Fill(d.dec, &d.cInPcmData, &unbData, &unbLeft)
 	if fillErr != C.AAC_DEC_OK {
 		return nil, fmt.Errorf("fill aac decoder failed, code is %d", int(fillErr))
 	}
@@ -104,7 +154,7 @@ func (d *aacDecoder) Decode(inData []byte) (outData []byte, err error) {
 		return nil, fmt.Errorf("decoder left %v bytes", int(unbLeft))
 	}
 
-	// Calculate PCM buffer size
+	// Calculate PCM output buffer size
 	var nbPcm int
 	if d.info != nil {
 		nbPcm = int(d.info.numChannels * d.info.frameSize * d.sampleBits / bitsPerByte)
@@ -113,25 +163,16 @@ func (d *aacDecoder) Decode(inData []byte) (outData []byte, err error) {
 	// Calculate a more appropriate buffer size based on typical AAC frame parameters if size is unknown
 	if nbPcm == 0 {
 		// Maximum AAC frame size (2048 samples) * max 8 channels * 4 bytes per sample (worst case)
-		const (
-			maxSamplesPerFrame = 2048
-			maxChannels        = 8
-			bytesPerSample     = 4
-			maxPossibleSize    = maxSamplesPerFrame * maxChannels * bytesPerSample
-		)
 		// Start with a reasonable default that can handle most cases
 		nbPcm = maxPossibleSize
 	}
-	pcmData := make([]byte, nbPcm)
 
-	// Pin the output buffer as well
-	pinner.Pin(&pcmData[0])
+	// Ensure output buffer is large enough
+	d.ensureOutputBufferSize(nbPcm)
 
-	// Decode the frame
-	upcm := (*C.INT_PCM)(unsafe.Pointer(&pcmData[0]))
+	// Decode the frame using the separate output buffer
 	unbPcm := C.INT(nbPcm)
-
-	decodeErr := C.aacDecoder_DecodeFrame(d.dec, upcm, unbPcm, 0)
+	decodeErr := C.aacDecoder_DecodeFrame(d.dec, d.cOutPcmData, unbPcm, 0)
 
 	if decodeErr == C.AAC_DEC_NOT_ENOUGH_BITS {
 		return nil, nil
@@ -155,7 +196,10 @@ func (d *aacDecoder) Decode(inData []byte) (outData []byte, err error) {
 		validSize = nbPcm
 	}
 
-	return pcmData[:validSize], nil
+	resp := make([]byte, validSize)
+	copy(resp, d.outputBuffer[:validSize])
+
+	return resp, nil
 }
 
 // Flush remaining audio data from decoder internal buffers
@@ -169,27 +213,16 @@ func (d *aacDecoder) Flush() ([]byte, error) {
 	if d.info != nil {
 		nbPcm = int(d.info.numChannels * d.info.frameSize * d.sampleBits / bitsPerByte)
 	} else {
-		// Use default buffer size for flushing
-		const (
-			maxSamplesPerFrame = 2048
-			maxChannels        = 8
-			bytesPerSample     = 4
-		)
 		nbPcm = maxSamplesPerFrame * maxChannels * bytesPerSample
 	}
 
-	pcmData := make([]byte, nbPcm)
+	// Ensure output buffer is large enough for flush operation
+	d.ensureOutputBufferSize(nbPcm)
 
-	// Pin the output buffer to prevent GC from moving it
-	var pinner runtime.Pinner
-	defer pinner.Unpin()
-
-	pinner.Pin(&pcmData[0])
-	upcm := (*C.INT_PCM)(unsafe.Pointer(&pcmData[0]))
 	unbPcm := C.INT(nbPcm)
 
 	// Decode with FLUSH flag to get remaining delayed audio
-	decodeErr := C.aacDecoder_DecodeFrame(d.dec, upcm, unbPcm, C.AACDEC_FLUSH)
+	decodeErr := C.aacDecoder_DecodeFrame(d.dec, d.cOutPcmData, unbPcm, C.AACDEC_FLUSH)
 
 	if decodeErr == C.AAC_DEC_NOT_ENOUGH_BITS {
 		return nil, nil
@@ -207,10 +240,14 @@ func (d *aacDecoder) Flush() ([]byte, error) {
 		validSize = nbPcm
 	}
 
-	return pcmData[:validSize], nil
+	return d.outputBuffer[:validSize], nil
 }
 
 func (d *aacDecoder) Close() {
+	// Properly unpin both buffers
+	d.inputPinner.Unpin()
+	d.outputPinner.Unpin()
+
 	if d.dec != nil {
 		C.aacDecoder_Close(d.dec)
 		d.dec = nil
