@@ -135,8 +135,6 @@ func (mxr *muxer) Mux(codecPars gomedia.CodecParametersPair) (err error) {
 
 // WritePacket writes a multimedia packet to the current fragment of the current segment.
 func (mxr *muxer) WritePacket(inpPkt gomedia.Packet) (err error) {
-	fmt.Printf("segIDs: %v\n", mxr.segIDs)
-
 	if inpPkt == nil {
 		return &utils.NilPacketError{}
 	}
