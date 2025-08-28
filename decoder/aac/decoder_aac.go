@@ -87,17 +87,17 @@ func (d *aacDecoder) Init(param gomedia.AudioCodecParameters) error {
 
 func (d *aacDecoder) Decode(inData []byte) (outData []byte, err error) {
 	// Ensure packet is clean and fill with input data
-	d.dec.packet.size = 0
-	if len(inData) > 0 {
-		C.av_grow_packet(d.dec.packet, C.int(len(inData)))
-		slice := unsafe.Slice((*byte)(d.dec.packet.data), int(d.dec.packet.size))
-		copy(slice, inData)
+	if grow := len(inData) - int(d.dec.packet.size); grow > 0 {
+		C.av_grow_packet(d.dec.packet, C.int(grow))
+	} else if grow < 0 {
+		C.av_shrink_packet(d.dec.packet, C.int(len(inData)))
 	}
 
-	var output *C.uint8_t
-	var outputSize C.int
+	slice := unsafe.Slice((*byte)(d.dec.packet.data), int(d.dec.packet.size))
+	copy(slice, inData)
 
-	ret := C.decode_aac_packet(d.dec, &output, &outputSize)
+	var outputSize C.int
+	ret := C.decode_aac_packet(d.dec, &outputSize)
 	if ret != 0 {
 		if ret > 0 {
 			return nil, nil // Need more data or no output available
@@ -109,9 +109,8 @@ func (d *aacDecoder) Decode(inData []byte) (outData []byte, err error) {
 		return nil, nil
 	}
 
-	// Copy output data to Go slice
 	result := make([]byte, int(outputSize))
-	copy(result, unsafe.Slice((*byte)(output), int(outputSize)))
+	copy(result, unsafe.Slice((*byte)(d.dec.audio_buf), int(outputSize)))
 
 	return result, nil
 }

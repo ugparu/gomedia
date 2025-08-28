@@ -10,7 +10,6 @@ int init_aac_decoder(aacDecoder *dec, AVCodecParameters *par) {
     dec->codec_ctx = NULL;
     dec->swr_ctx = NULL;
     dec->audio_buf = NULL;
-    dec->audio_buf_index = 0;
 
     // Allocate packet and frame
     dec->packet = av_packet_alloc();
@@ -91,13 +90,12 @@ int init_aac_decoder(aacDecoder *dec, AVCodecParameters *par) {
     return 0;
 }
 
-int decode_aac_packet(aacDecoder *dec, uint8_t **output, int *output_size) {
-    *output = NULL;
+int decode_aac_packet(aacDecoder *dec, int *output_size) {
     *output_size = 0;
 
     // Send packet to decoder
     int ret = avcodec_send_packet(dec->codec_ctx, dec->packet);
-    av_packet_unref(dec->packet);
+    // av_packet_unref(dec->packet);
     if (ret < 0) {
         if (ret == AVERROR_EOF || ret == AVERROR_INVALIDDATA) {
             return 1; // Need more data
@@ -118,23 +116,12 @@ int decode_aac_packet(aacDecoder *dec, uint8_t **output, int *output_size) {
     int out_samples = swr_get_out_samples(dec->swr_ctx, dec->frame->nb_samples);
     int out_size = av_samples_get_buffer_size(NULL, dec->out_channels, out_samples, dec->out_sample_fmt, 1);
     
-    if (out_size > dec->audio_buf_size) {
-        // Reallocate buffer if needed
-        uint8_t* new_buf = (uint8_t*)av_realloc(dec->audio_buf, out_size);
-        if (!new_buf) {
-            // Keep original buffer on failure
-            return AVERROR(ENOMEM);
-        }
-        dec->audio_buf = new_buf;
-        dec->audio_buf_size = out_size;
-    }
-
     // Convert audio to desired format
     int converted_samples = swr_convert(dec->swr_ctx, &dec->audio_buf, out_samples,
                                         (const uint8_t**)dec->frame->data, dec->frame->nb_samples);
     
     // Unref the frame after processing to prevent memory accumulation
-    av_frame_unref(dec->frame);
+    // av_frame_unref(dec->frame);
     
     if (converted_samples < 0) {
         return converted_samples;
@@ -142,75 +129,8 @@ int decode_aac_packet(aacDecoder *dec, uint8_t **output, int *output_size) {
 
     // Calculate actual output size
     *output_size = av_samples_get_buffer_size(NULL, dec->out_channels, converted_samples, dec->out_sample_fmt, 1);
-    *output = dec->audio_buf;
 
     return 0;
-}
-
-int flush_aac_decoder(aacDecoder *dec, uint8_t **output, int *output_size) {
-    *output = NULL;
-    *output_size = 0;
-
-    // Send NULL packet to flush decoder
-    int ret = avcodec_send_packet(dec->codec_ctx, NULL);
-    if (ret < 0) {
-        return ret;
-    }
-
-    // Try to receive any remaining frames
-    ret = avcodec_receive_frame(dec->codec_ctx, dec->frame);
-    if (ret < 0) {
-        if (ret == AVERROR_EOF || ret == AVERROR(EAGAIN)) {
-            return 1; // No more frames
-        }
-        return ret;
-    }
-
-    // Convert the frame like in normal decode
-    int out_samples = swr_get_out_samples(dec->swr_ctx, dec->frame->nb_samples);
-    int out_size = av_samples_get_buffer_size(NULL, dec->out_channels, out_samples, dec->out_sample_fmt, 1);
-    
-    if (out_size > dec->audio_buf_size) {
-        uint8_t* new_buf = (uint8_t*)av_realloc(dec->audio_buf, out_size);
-        if (!new_buf) {
-            // Keep original buffer on failure
-            return AVERROR(ENOMEM);
-        }
-        dec->audio_buf = new_buf;
-        dec->audio_buf_size = out_size;
-    }
-
-    int converted_samples = swr_convert(dec->swr_ctx, &dec->audio_buf, out_samples,
-                                        (const uint8_t**)dec->frame->data, dec->frame->nb_samples);
-    
-    // Unref the frame after processing to prevent memory accumulation
-    av_frame_unref(dec->frame);
-    
-    if (converted_samples < 0) {
-        return converted_samples;
-    }
-
-    *output_size = av_samples_get_buffer_size(NULL, dec->out_channels, converted_samples, dec->out_sample_fmt, 1);
-    *output = dec->audio_buf;
-
-    return 0;
-}
-
-void reset_aac_decoder(aacDecoder *dec) {
-    if (!dec || !dec->codec_ctx) {
-        return;
-    }
-    
-    // Flush any remaining frames in the decoder
-    avcodec_flush_buffers(dec->codec_ctx);
-    
-    // Reset packet and frame state
-    if (dec->packet) {
-        av_packet_unref(dec->packet);
-    }
-    if (dec->frame) {
-        av_frame_unref(dec->frame);
-    }
 }
 
 void close_aac_decoder(aacDecoder *dec) {

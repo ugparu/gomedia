@@ -31,9 +31,7 @@ typedef struct {
 } aacDecoder;
 
 int init_aac_decoder(aacDecoder *dec, AVCodecParameters *par);
-int decode_aac_packet(aacDecoder *dec, uint8_t **output, int *output_size);
-int flush_aac_decoder(aacDecoder *dec, uint8_t **output, int *output_size);
-void reset_aac_decoder(aacDecoder *dec);
+int decode_aac_packet(aacDecoder *dec, int *output_size);
 void close_aac_decoder(aacDecoder *dec);
 
 #endif
