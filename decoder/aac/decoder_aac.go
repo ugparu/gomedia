@@ -91,8 +91,8 @@ func (d *aacDecoder) Decode(inData []byte) (outData []byte, err error) {
 		return nil, nil
 	}
 
-	if int(r) != 0 {
-		return nil, fmt.Errorf("decode aac frame failed, code is %d", int(r))
+	if int(ret) != 0 {
+		return nil, fmt.Errorf("decode aac frame failed, code is %d", int(ret))
 	}
 
 	return pcmData[:validSize], nil

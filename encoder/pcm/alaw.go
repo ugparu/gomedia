@@ -63,8 +63,15 @@ func (e *alawEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err e
 		if e.inpChannels == 1 {
 			inBuf = inData
 		} else {
-			for i := 0; i < len(inData); i += int(e.inpChannels) {
-				inBuf = append(inBuf, inData[i])
+			// For multi-channel 16-bit PCM, properly extract the first channel
+			// Each sample is 2 bytes, and samples are interleaved by channel
+			bytesPerSample := 2
+			totalChannels := int(e.inpChannels)
+			for i := 0; i < len(inData); i += bytesPerSample * totalChannels {
+				// Take the 2 bytes of the first channel's sample
+				if i+1 < len(inData) {
+					inBuf = append(inBuf, inData[i], inData[i+1])
+				}
 			}
 		}
 
