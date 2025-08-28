@@ -1,7 +1,8 @@
 package aac
 
-//#cgo pkg-config: libavcodec libavutil libswresample libavformat
-//#include "aac_decoder_ffmpeg.h"
+//#cgo CFLAGS: -I/usr/include/fdk-aac
+//#cgo LDFLAGS: -L/usr/include/fdk-aac -lfdk-aac -Wl,-rpath=/usr/include/fdk-aac
+//#include "aac_decoder.h"
 import "C"
 import (
 	"fmt"
@@ -12,109 +13,91 @@ import (
 	"github.com/ugparu/gomedia/decoder"
 )
 
-const errBufSize = 50
-
-type FFmpegError struct {
-	error
-}
-
-func NewFFmpegError(msg string, ret int) error {
-	errBuf := (*C.char)(C.malloc(errBufSize))
-	defer C.free(unsafe.Pointer(errBuf))
-	C.av_strerror(C.int(ret), errBuf, errBufSize)
-	return &FFmpegError{fmt.Errorf("%s: code=%v msg=%s", msg, ret, C.GoString(errBuf))}
-}
-
-func AudioParametersToFFmpeg(aPar gomedia.AudioCodecParameters, ptr unsafe.Pointer) error {
-	cPtr := (*C.struct_AVCodecParameters)(ptr)
-	cPtr.codec_type = C.AVMEDIA_TYPE_AUDIO
-	cPtr.sample_rate = C.int(aPar.SampleRate())
-	cPtr.ch_layout.nb_channels = C.int(aPar.Channels())
-
-	// Set channel layout based on number of channels using av_channel_layout_default
-	C.av_channel_layout_default(&cPtr.ch_layout, C.int(aPar.Channels()))
-
-	switch par := aPar.(type) {
-	case *aac.CodecParameters:
-		cPtr.codec_id = C.AV_CODEC_ID_AAC
-
-		// Set up extradata with AAC decoder config
-		configBytes := par.MPEG4AudioConfigBytes()
-		if len(configBytes) > 0 {
-			cPtr.extradata_size = C.int(len(configBytes))
-			// Use malloc for compatibility - extradata will be freed by avcodec_parameters_free
-			cPtr.extradata = (*C.uchar)(C.malloc(C.ulong(cPtr.extradata_size)))
-			if cPtr.extradata == nil {
-				return fmt.Errorf("failed to allocate extradata memory")
-			}
-			extra := unsafe.Slice((*byte)(cPtr.extradata), int(cPtr.extradata_size))
-			copy(extra, configBytes)
-		}
-	default:
-		return fmt.Errorf("unsupported audio codec type: %T", aPar)
-	}
-
-	return nil
-}
+const (
+	aacDecNotEnoughBits = 0x1002
+)
 
 type aacDecoder struct {
-	dec *C.aacDecoder
+	m C.aacdec_t
 }
 
 func NewAacDecoder() decoder.InnerAudioDecoder {
-	aacDec := &aacDecoder{
-		dec: new(C.aacDecoder),
+	return &aacDecoder{
+		m: C.aacdec_t{
+			dec:          nil,
+			is_adts:      0,
+			info:         nil,
+			sample_bits:  0,
+			filled_bytes: 0,
+		},
 	}
-
-	return aacDec
 }
 
 func (d *aacDecoder) Init(param gomedia.AudioCodecParameters) error {
-	cPar := C.avcodec_parameters_alloc()
-	defer C.avcodec_parameters_free(&cPar) //nolint:gocritic // CGO function call
-
-	if err := AudioParametersToFFmpeg(param, unsafe.Pointer(cPar)); err != nil {
-		return err
+	aacParam, ok := param.(*aac.CodecParameters)
+	if !ok {
+		return fmt.Errorf("expected *aac.CodecParameters, got %T", param)
 	}
 
-	d.dec = new(C.aacDecoder)
-	if ret := C.init_aac_decoder(d.dec, cPar); ret < 0 {
-		return NewFFmpegError("can not init aac decoder", int(ret))
-	}
+	asc := aacParam.ConfigBytes
+	p := (*C.char)(unsafe.Pointer(&asc[0]))
+	pSize := C.int(len(asc))
 
+	r := C.aacdec_init_raw(&d.m, p, pSize) //nolint:gocritic // CGO function call
+
+	if int(r) != 0 {
+		return fmt.Errorf("init RAW decoder failed, code is %d", int(r))
+	}
 	return nil
 }
 
 func (d *aacDecoder) Decode(inData []byte) (outData []byte, err error) {
-	// Ensure packet is clean and fill with input data
-	if grow := len(inData) - int(d.dec.packet.size); grow > 0 {
-		C.av_grow_packet(d.dec.packet, C.int(grow))
-	} else if grow < 0 {
-		C.av_shrink_packet(d.dec.packet, C.int(len(inData)))
+	p := (*C.char)(unsafe.Pointer(&inData[0]))
+	pSize := C.int(len(inData))
+	leftSize := C.int(0)
+
+	r := C.aacdec_fill(&d.m, p, pSize, &leftSize) //nolint:gocritic // CGO function call
+
+	if int(r) != 0 {
+		return nil, fmt.Errorf("fill aac decoder failed, code is %d", int(r))
 	}
 
-	slice := unsafe.Slice((*byte)(d.dec.packet.data), int(d.dec.packet.size))
-	copy(slice, inData)
-
-	var outputSize C.int
-	ret := C.decode_aac_packet(d.dec, &outputSize)
-	if ret != 0 {
-		if ret > 0 {
-			return nil, nil // Need more data or no output available
-		}
-		return nil, NewFFmpegError("can not decode AAC packet", int(ret))
+	if int(leftSize) > 0 {
+		return nil, fmt.Errorf("decoder left %v bytes", int(leftSize))
 	}
 
-	if outputSize == 0 {
+	nbPcm := int(C.aacdec_pcm_size(&d.m)) //nolint:gocritic // CGO function call
+	// Calculate a more appropriate buffer size based on typical AAC frame parameters if size is unknown
+	if nbPcm == 0 {
+		// Maximum AAC frame size (2048 samples) * max 8 channels * 4 bytes per sample (worst case)
+		const (
+			maxSamplesPerFrame = 2048
+			maxChannels        = 8
+			bytesPerSample     = 4
+			maxPossibleSize    = maxSamplesPerFrame * maxChannels * bytesPerSample
+		)
+		// Start with a reasonable default that can handle most cases
+		nbPcm = maxPossibleSize
+	}
+	pcmData := make([]byte, nbPcm)
+
+	p = (*C.char)(unsafe.Pointer(&pcmData[0]))
+	pSize = C.int(nbPcm)
+	validSize := C.int(0)
+
+	ret := C.aacdec_decode_frame(&d.m, p, pSize, &validSize) //nolint:gocritic // CGO function call
+
+	if int(ret) == aacDecNotEnoughBits {
 		return nil, nil
 	}
 
-	result := make([]byte, int(outputSize))
-	copy(result, unsafe.Slice((*byte)(d.dec.audio_buf), int(outputSize)))
+	if int(r) != 0 {
+		return nil, fmt.Errorf("decode aac frame failed, code is %d", int(r))
+	}
 
-	return result, nil
+	return pcmData[:validSize], nil
 }
 
 func (d *aacDecoder) Close() {
-	C.close_aac_decoder(d.dec)
+	C.aacdec_close(&d.m) //nolint:gocritic // CGO function call
 }
