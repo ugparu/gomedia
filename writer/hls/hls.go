@@ -86,7 +86,7 @@ func (hlsw *hlsWriter) checkCodPar(url string, codecPar gomedia.CodecParameters)
 		return
 	}
 
-	for _, par := range hlsw.codPars {
+	for url, par := range hlsw.codPars {
 		mux, ok := hlsw.muxerURLs[par.URL]
 		if ok {
 			mux.Close()
@@ -96,6 +96,7 @@ func (hlsw *hlsWriter) checkCodPar(url string, codecPar gomedia.CodecParameters)
 		if err = mux.Mux(*par); err != nil {
 			return
 		}
+		hlsw.muxerURLs[url] = mux
 	}
 
 	return hlsw.recalcManifest()
