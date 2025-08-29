@@ -93,8 +93,6 @@ func main() {
 					hlsWr.Packets() <- clonePkt
 				}
 			case pkt := <-rdr.Packets():
-				_, ok := pkt.(gomedia.AudioPacket)
-				println(pkt.StreamIndex(), pkt.URL(), ok)
 				if inPkt, ok := pkt.(gomedia.AudioPacket); ok {
 					if inPkt.URL() != rtspURLs[0] {
 						continue
@@ -275,15 +273,7 @@ func GetInit(c *gin.Context) {
 		return
 	}
 
-	f, err := os.Create("init.mp4")
-	if err != nil {
-		logrus.Errorf("Failed to create segment file: %v", err)
-		c.Status(http.StatusInternalServerError)
-		return
-	}
-	defer f.Close()
-
-	_, err = f.Write(buf)
+	_, err = c.Writer.Write(buf)
 	if err != nil {
 		logrus.Errorf("Failed to write segment to file: %v", err)
 		c.Status(http.StatusInternalServerError)

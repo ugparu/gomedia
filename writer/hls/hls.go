@@ -53,6 +53,8 @@ func New(id uint64, segCnt uint8, segDur time.Duration, chanSize int) gomedia.HL
 		mu:         sync.RWMutex{},
 		master:     "",
 	}
+	logger.Infof(hwr, "Initialized HLS writer with %d segments, %.2f seconds per segment", segCnt, segDur.Seconds())
+
 	hwr.AsyncManager = lifecycle.NewFailSafeAsyncManager(hwr)
 	return hwr
 }
@@ -76,23 +78,27 @@ func (hlsw *hlsWriter) checkCodPar(url string, codecPar gomedia.CodecParameters)
 		if hlsw.codPars[url].VideoCodecParameters == par {
 			return
 		}
+		logger.Infof(hlsw, "Setting new video codec parameters for url %s", url)
 		hlsw.codPars[url].VideoCodecParameters = par
 	case gomedia.AudioCodecParameters:
 		if hlsw.codPars[url].AudioCodecParameters == par {
 			return
 		}
+		logger.Infof(hlsw, "Setting new audio codec parameters for url %s", url)
 		hlsw.codPars[url].AudioCodecParameters = par
 	default:
 		return
 	}
 
 	for url, par := range hlsw.codPars {
+		if par.VideoCodecParameters == nil {
+			continue
+		}
 		mux, ok := hlsw.muxerURLs[par.URL]
 		if ok {
 			mux.Close()
 		}
 		mux = hls.NewHLSMuxer(hlsw.segmentDuration, hlsw.segmentCount)
-		logger.Infof(hlsw, "Muxing %s", par.URL)
 		if err = mux.Mux(*par); err != nil {
 			return
 		}
@@ -145,10 +151,15 @@ func (hlsw *hlsWriter) recalcManifest() (err error) {
 
 	index := uint8(0)
 	for _, url := range hlsw.sortedURLs {
+		mux, ok := hlsw.muxerURLs[url]
+		if !ok {
+			continue
+		}
+
 		hlsw.muxerIDs[index] = hlsw.muxerURLs[url]
 
 		var entry string
-		if entry, err = hlsw.muxerURLs[url].GetMasterEntry(); err != nil {
+		if entry, err = mux.GetMasterEntry(); err != nil {
 			return err
 		}
 		if _, err = builder.WriteString(fmt.Sprintf("%s\n", entry)); err != nil {
@@ -200,11 +211,12 @@ func (hlsw *hlsWriter) Step(stopCh <-chan struct{}) (err error) {
 			}
 		}
 
-		if hlsw.codPars[inpPkt.URL()].VideoCodecParameters == nil {
+		mux, ok := hlsw.muxerURLs[inpPkt.URL()]
+		if !ok {
 			return
 		}
 
-		if err = hlsw.muxerURLs[inpPkt.URL()].WritePacket(inpPkt); err != nil {
+		if err = mux.WritePacket(inpPkt); err != nil {
 			return err
 		}
 	case hlsw.segmentDuration = <-hlsw.segmentDurationChan:
