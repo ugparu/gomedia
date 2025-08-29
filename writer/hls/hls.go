@@ -63,7 +63,6 @@ func (hlsw *hlsWriter) checkCodPar(url string, codecPar gomedia.CodecParameters)
 	}
 
 	if _, ok := hlsw.codPars[url]; !ok {
-		logger.Infof(hlsw, "Adding new codec parameters for %s", url)
 		hlsw.codPars[url] = &gomedia.CodecParametersPair{
 			URL:                  url,
 			AudioCodecParameters: nil,
@@ -93,6 +92,7 @@ func (hlsw *hlsWriter) checkCodPar(url string, codecPar gomedia.CodecParameters)
 			mux.Close()
 		}
 		mux = hls.NewHLSMuxer(hlsw.segmentDuration, hlsw.segmentCount)
+		logger.Infof(hlsw, "Muxing %s", par.URL)
 		if err = mux.Mux(*par); err != nil {
 			return
 		}

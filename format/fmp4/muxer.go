@@ -268,39 +268,8 @@ func (m *Muxer) GetInit() []byte {
 }
 
 func (m *Muxer) WritePacket(pkt gomedia.Packet) error {
-	// Find the correct stream based on packet type, not just stream index
-	var targetStream *Stream
-
-	switch pkt.(type) {
-	case gomedia.VideoPacket:
-		// Find the video stream
-		for _, stream := range m.strs {
-			if stream.CodecParameters.Type().IsVideo() {
-				targetStream = stream
-				break
-			}
-		}
-	case gomedia.AudioPacket:
-		// Find the audio stream
-		for _, stream := range m.strs {
-			if stream.CodecParameters.Type().IsAudio() {
-				targetStream = stream
-				break
-			}
-		}
-	default:
-		// Fallback to original behavior for unknown packet types
-		if int(pkt.StreamIndex()) >= len(m.strs) {
-			return fmt.Errorf("stream index %d out of range, only have %d streams", pkt.StreamIndex(), len(m.strs))
-		}
-		targetStream = m.strs[pkt.StreamIndex()]
-	}
-
-	if targetStream == nil {
-		return fmt.Errorf("no suitable stream found for packet type %T", pkt)
-	}
-
-	return targetStream.writePacket(pkt)
+	stream := m.strs[pkt.StreamIndex()]
+	return stream.writePacket(pkt)
 }
 
 // processMuxer handles the common processing of streams within GetMP4Fragment
