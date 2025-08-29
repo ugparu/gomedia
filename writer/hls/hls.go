@@ -200,6 +200,10 @@ func (hlsw *hlsWriter) Step(stopCh <-chan struct{}) (err error) {
 			}
 		}
 
+		if hlsw.codPars[inpPkt.URL()].VideoCodecParameters == nil {
+			return
+		}
+
 		if err = hlsw.muxerURLs[inpPkt.URL()].WritePacket(inpPkt); err != nil {
 			return err
 		}
