@@ -92,10 +92,7 @@ func main() {
 					clonePkt.SetURL(url)
 					hlsWr.Packets() <- clonePkt
 				}
-				hlsWr.Packets() <- pkt
 			case pkt := <-rdr.Packets():
-				_, ok := pkt.(gomedia.AudioPacket)
-				println(pkt.StreamIndex(), pkt.URL(), ok)
 				if inPkt, ok := pkt.(gomedia.AudioPacket); ok {
 					if inPkt.URL() != rtspURLs[0] {
 						continue
