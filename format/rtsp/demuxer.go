@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -91,6 +92,21 @@ func (dmx *innerRTSPDemuxer) Demux() (params gomedia.CodecParametersPair, err er
 //nolint:unparam //audio currently unused but presented in api
 func (dmx *innerRTSPDemuxer) findStreams() (params gomedia.CodecParametersPair, err error) {
 	params.URL = dmx.url
+
+	sort.Slice(dmx.mediaSDP, func(i, j int) bool {
+		getPriority := func(avType string) int {
+			switch avType {
+			case video:
+				return 0
+			case audio:
+				return 1
+			default:
+				return 2
+			}
+		}
+		return getPriority(dmx.mediaSDP[i].AVType) < getPriority(dmx.mediaSDP[j].AVType)
+	})
+
 	for index, i2 := range dmx.mediaSDP {
 		if dmx.noVideo && i2.AVType == video || dmx.noAudio && i2.AVType == audio {
 			continue

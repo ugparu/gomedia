@@ -86,9 +86,16 @@ func (hlsw *hlsWriter) checkCodPar(url string, codecPar gomedia.CodecParameters)
 		return
 	}
 
-	hlsw.muxerURLs[url] = hls.NewHLSMuxer(hlsw.segmentDuration, hlsw.segmentCount)
-	if err = hlsw.muxerURLs[url].Mux(*hlsw.codPars[url]); err != nil {
-		return
+	for _, par := range hlsw.codPars {
+		mux, ok := hlsw.muxerURLs[par.URL]
+		if ok {
+			mux.Close()
+		}
+		mux = hls.NewHLSMuxer(hlsw.segmentDuration, hlsw.segmentCount)
+		logger.Infof(hlsw, "Muxing %s", par.URL)
+		if err = mux.Mux(*par); err != nil {
+			return
+		}
 	}
 
 	return hlsw.recalcManifest()

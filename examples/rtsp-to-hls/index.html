@@ -71,6 +71,50 @@
             background-color: #e8f5e9;
             border-left-color: #4caf50;
         }
+        .controls-container {
+            margin-top: 15px;
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .quality-selector {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .quality-selector label {
+            font-weight: bold;
+            color: #333;
+        }
+        .quality-selector select {
+            padding: 6px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #fff;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        .quality-selector select:hover {
+            border-color: #2196F3;
+        }
+        .quality-info {
+            background-color: #fff;
+            padding: 8px 12px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            font-size: 14px;
+            color: #666;
+        }
+        .quality-info.auto {
+            border-color: #4caf50;
+            color: #4caf50;
+        }
+        .quality-info.manual {
+            border-color: #2196F3;
+            color: #2196F3;
+        }
     </style>
 </head>
 <body>
@@ -78,6 +122,17 @@
         <h1>Low-Latency HLS Video Stream</h1>
         <div class="video-container">
             <video id="video" controls autoplay muted></video>
+        </div>
+        <div class="controls-container">
+            <div class="quality-selector">
+                <label for="qualitySelect">Quality:</label>
+                <select id="qualitySelect">
+                    <option value="-1">Auto</option>
+                </select>
+            </div>
+            <div id="qualityInfo" class="quality-info auto">
+                Current: Auto
+            </div>
         </div>
         <div class="info">
             <p>This is a low-latency HLS stream using hls.js.</p>
@@ -96,6 +151,104 @@
         const video = document.getElementById('video');
         const statusDiv = document.getElementById('status');
         const logDiv = document.getElementById('log');
+        const qualitySelect = document.getElementById('qualitySelect');
+        const qualityInfo = document.getElementById('qualityInfo');
+        
+        // Quality management variables
+        let hlsInstance = null;
+        let currentQualityLevel = -1; // -1 for auto
+        
+        // Quality management functions
+        function updateQualityOptions(levels) {
+            // Clear existing options except Auto
+            while (qualitySelect.children.length > 1) {
+                qualitySelect.removeChild(qualitySelect.lastChild);
+            }
+            
+            // Add quality options
+            levels.forEach((level, index) => {
+                const option = document.createElement('option');
+                option.value = index;
+                
+                // Format quality label
+                let qualityLabel = '';
+                if (level.height) {
+                    qualityLabel = `${level.height}p`;
+                    if (level.bitrate) {
+                        qualityLabel += ` (${Math.round(level.bitrate / 1000)}kbps)`;
+                    }
+                } else if (level.bitrate) {
+                    qualityLabel = `${Math.round(level.bitrate / 1000)}kbps`;
+                } else {
+                    qualityLabel = `Level ${index + 1}`;
+                }
+                
+                option.textContent = qualityLabel;
+                qualitySelect.appendChild(option);
+            });
+            
+            logDiv.innerHTML += '<div class="log-entry">Quality levels populated: ' + levels.length + ' levels</div>';
+        }
+        
+        function updateQualityInfo() {
+            if (!hlsInstance) return;
+            
+            const currentLevel = hlsInstance.currentLevel;
+            let qualityText = '';
+            let className = 'quality-info ';
+            
+            if (currentLevel === -1) {
+                qualityText = 'Current: Auto';
+                className += 'auto';
+                
+                // Try to get auto-selected level info
+                const autoLevel = hlsInstance.levels[hlsInstance.loadLevel];
+                if (autoLevel && autoLevel.height) {
+                    qualityText += ` (${autoLevel.height}p)`;
+                }
+            } else {
+                const level = hlsInstance.levels[currentLevel];
+                if (level) {
+                    if (level.height) {
+                        qualityText = `Current: ${level.height}p`;
+                        if (level.bitrate) {
+                            qualityText += ` (${Math.round(level.bitrate / 1000)}kbps)`;
+                        }
+                    } else if (level.bitrate) {
+                        qualityText = `Current: ${Math.round(level.bitrate / 1000)}kbps`;
+                    } else {
+                        qualityText = `Current: Level ${currentLevel + 1}`;
+                    }
+                }
+                className += 'manual';
+            }
+            
+            qualityInfo.textContent = qualityText;
+            qualityInfo.className = className;
+        }
+        
+        function changeQuality(levelIndex) {
+            if (!hlsInstance) return;
+            
+            const level = parseInt(levelIndex);
+            hlsInstance.currentLevel = level;
+            currentQualityLevel = level;
+            
+            if (level === -1) {
+                logDiv.innerHTML += '<div class="log-entry">Quality changed to: Auto</div>';
+            } else {
+                const levelInfo = hlsInstance.levels[level];
+                const levelName = levelInfo && levelInfo.height ? `${levelInfo.height}p` : `Level ${level + 1}`;
+                logDiv.innerHTML += '<div class="log-entry">Quality changed to: ' + levelName + '</div>';
+            }
+            
+            updateQualityInfo();
+        }
+        
+        // Quality selector event listener
+        qualitySelect.addEventListener('change', function() {
+            changeQuality(this.value);
+        });
         
         // Logging function
         function logRequest(url, type) {
@@ -128,7 +281,7 @@
         // HLS.js setup
         function initPlayer() {
             if (Hls.isSupported()) {
-                const hls = new Hls({
+                hlsInstance = new Hls({
                     // Low-latency HLS configuration
                     lowLatencyMode: true,
                     // Set backBufferLength to a small value to reduce buffer size
@@ -150,27 +303,37 @@
                     debug: false
                 });
                 
-                hls.on(Hls.Events.MEDIA_ATTACHED, function() {
+                hlsInstance.on(Hls.Events.MEDIA_ATTACHED, function() {
                     statusDiv.textContent = "Media attached, loading manifest...";
                     logDiv.innerHTML += '<div class="log-entry">HLS.js: Media attached</div>';
                 });
                 
-                hls.on(Hls.Events.MANIFEST_PARSED, function(event, data) {
+                hlsInstance.on(Hls.Events.MANIFEST_PARSED, function(event, data) {
                     statusDiv.textContent = "Manifest loaded, " + data.levels.length + " quality level(s) found";
                     statusDiv.className = "status success";
                     logDiv.innerHTML += '<div class="log-entry">HLS.js: Manifest parsed - ' + data.levels.length + ' quality levels</div>';
+                    
+                    // Update quality options
+                    updateQualityOptions(data.levels);
+                    updateQualityInfo();
+                    
                     video.play();
                 });
                 
-                hls.on(Hls.Events.FRAG_LOADED, function(event, data) {
+                hlsInstance.on(Hls.Events.LEVEL_SWITCHED, function(event, data) {
+                    logDiv.innerHTML += '<div class="log-entry">HLS.js: Level switched to ' + data.level + '</div>';
+                    updateQualityInfo();
+                });
+                
+                hlsInstance.on(Hls.Events.FRAG_LOADED, function(event, data) {
                     logDiv.innerHTML += '<div class="log-entry">HLS.js: Fragment loaded - ' + data.frag.sn + ' (Duration: ' + data.frag.duration.toFixed(2) + 's)</div>';
                 });
                 
-                hls.on(Hls.Events.BUFFER_APPENDED, function(event, data) {
+                hlsInstance.on(Hls.Events.BUFFER_APPENDED, function(event, data) {
                     logDiv.innerHTML += '<div class="log-entry">HLS.js: Buffer appended - ' + data.type + ' (' + data.timeRanges[data.type].length + ' ranges)</div>';
                 });
                 
-                hls.on(Hls.Events.ERROR, function(event, data) {
+                hlsInstance.on(Hls.Events.ERROR, function(event, data) {
                     statusDiv.textContent = "Error: " + data.details;
                     statusDiv.className = "status error";
                     console.error('HLS Error:', data);
@@ -181,24 +344,24 @@
                             case Hls.ErrorTypes.NETWORK_ERROR:
                                 // Try to recover network error
                                 logDiv.innerHTML += '<div class="log-entry">Fatal network error encountered, trying to recover...</div>';
-                                hls.startLoad();
+                                hlsInstance.startLoad();
                                 break;
                             case Hls.ErrorTypes.MEDIA_ERROR:
                                 logDiv.innerHTML += '<div class="log-entry">Fatal media error encountered, trying to recover...</div>';
-                                hls.recoverMediaError();
+                                hlsInstance.recoverMediaError();
                                 break;
                             default:
                                 // Cannot recover
                                 logDiv.innerHTML += '<div class="log-entry">Fatal error, cannot recover.</div>';
-                                hls.destroy();
+                                hlsInstance.destroy();
                                 break;
                         }
                     }
                 });
                 
                 // Load the stream
-                hls.attachMedia(video);
-                hls.loadSource('/streams/stream.m3u8');
+                hlsInstance.attachMedia(video);
+                hlsInstance.loadSource('/streams/stream.m3u8');
                 logDiv.innerHTML += '<div class="log-entry">Loading stream from /streams/stream.m3u8</div>';
                 
                 // Handle play/pause events
@@ -212,11 +375,13 @@
                 
                 // Get stats periodically
                 setInterval(function() {
-                    if (hls.stats) {
-                        const stats = hls.stats;
-                        const latency = hls.latency || 'unknown';
+                    if (hlsInstance && hlsInstance.stats) {
+                        const stats = hlsInstance.stats;
+                        const latency = hlsInstance.latency || 'unknown';
                         logDiv.innerHTML += '<div class="log-entry">Stats: Latency=' + latency + 's, Buffer=' + stats.buffer.length.toFixed(2) + 's</div>';
                     }
+                    // Update quality info periodically
+                    updateQualityInfo();
                 }, 5000);
                 
             } else if (video.canPlayType('application/vnd.apple.mpegurl')) {

@@ -17,7 +17,6 @@ const nameTemplate = "READER srcs=%d"
 
 // Constants for configuring the reader.
 const (
-	fpsProbeInterval      = time.Hour
 	maxReconnectInternval = time.Second * 128
 )
 
