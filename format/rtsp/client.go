@@ -255,7 +255,7 @@ func (c *client) request(method rtspMethod,
 		c.control = strings.TrimSpace(val)
 	}
 
-	if responseStatus != "RTSP/1.0 200 OK" && responseStatus != "RTSP/1.0 401 Unauthorized" {
+	if !strings.HasPrefix(responseStatus, "RTSP/1.0 200") && !strings.HasPrefix(responseStatus, "RTSP/1.0 401") {
 		return nil, errors.New("camera send status: " + responseStatus)
 	}
 
