@@ -212,14 +212,6 @@ func (dmx *innerRTSPDemuxer) ReadPacket() (packet gomedia.Packet, err error) {
 		return
 	}
 
-	select {
-	case <-dmx.ticker.C:
-		if err = dmx.client.ping(); err != nil {
-			return
-		}
-	default:
-	}
-
 	var header [headerSize]byte
 	for {
 		if time.Since(dmx.lastPktRcv) >= minPacketInterval {
@@ -247,7 +239,7 @@ func (dmx *innerRTSPDemuxer) ReadPacket() (packet gomedia.Packet, err error) {
 
 	switch header[0] {
 	case rtspPacket:
-		err = dmx.processRTSPPacket(header[:])
+		err = dmx.processRTSPPacket(header)
 	case rtpPacket:
 		var targetDmx gomedia.Demuxer
 
@@ -282,8 +274,7 @@ func (dmx *innerRTSPDemuxer) ReadPacket() (packet gomedia.Packet, err error) {
 		if _, err = dmx.buffer.Write(header[:]); err != nil {
 			return
 		}
-		content := dmx.readBuffer.Buffer[:length]
-		if _, err = dmx.buffer.Write(content); err != nil {
+		if _, err = dmx.buffer.Write(dmx.readBuffer.Buffer[:length]); err != nil {
 			return
 		}
 
@@ -301,6 +292,14 @@ func (dmx *innerRTSPDemuxer) ReadPacket() (packet gomedia.Packet, err error) {
 		}
 	}
 
+	select {
+	case <-dmx.ticker.C:
+		if err = dmx.client.ping(); err != nil {
+			return
+		}
+	default:
+	}
+
 	if len(dmx.packets) > 0 {
 		packet = dmx.packets[0]
 		dmx.packets = dmx.packets[1:]
@@ -309,9 +308,9 @@ func (dmx *innerRTSPDemuxer) ReadPacket() (packet gomedia.Packet, err error) {
 	return
 }
 
-func (dmx *innerRTSPDemuxer) processRTSPPacket(header []byte) (err error) {
-	if string(header) != "RTSP" {
-		logger.Warningf(dmx, "rtsp packet reading desync: first symbols are %s. Trying to recover", string(header))
+func (dmx *innerRTSPDemuxer) processRTSPPacket(header [headerSize]byte) (err error) {
+	if string(header[:]) != "RTSP" {
+		logger.Warningf(dmx, "rtsp packet reading desync: first symbols are %s. Trying to recover", string(header[:]))
 		return
 	}
 
@@ -319,7 +318,6 @@ func (dmx *innerRTSPDemuxer) processRTSPPacket(header []byte) (err error) {
 	var dummyBuffer [maxRTSPHeadersMessageSize]byte
 	var idx int
 
-	dmx.buffer.Reset()
 	for {
 		dmx.readBuffer.Grow(1)
 		if err = dmx.client.Read(dmx.readBuffer.Buffer); err != nil {
