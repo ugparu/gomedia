@@ -196,6 +196,7 @@ func (c *client) request(method rtspMethod,
 
 	// Initialize variables for reading the response.
 	var line []byte
+	var responseStatus string
 	responseHeaders := make(map[string]string)
 
 	// Read and process each line of the response.
@@ -216,9 +217,8 @@ func (c *client) request(method rtspMethod,
 		}
 
 		// Check for unexpected status codes in the response.
-		if strings.Contains(string(line), "RTSP/1.0") &&
-			!strings.Contains(string(line), "200") && !strings.Contains(string(line), "401") {
-			return nil, errors.New("camera send status: " + string(line))
+		if strings.Contains(string(line), "RTSP/1.0") {
+			responseStatus = string(line)
 		}
 
 		// Split the line into key-value pairs and update the response headers.
@@ -228,12 +228,11 @@ func (c *client) request(method rtspMethod,
 				splits[0] = "Content-Length"
 			}
 			responseHeaders[splits[0]] = strings.Trim(splits[1], " ")
-
-			// Check for CSeq mismatch in the response.
-			if splits[0] == "CSeq" && responseHeaders[splits[0]] != strconv.FormatUint(uint64(c.seq), 10) {
-				return nil, fmt.Errorf("response seq mismatch %v!=%v", c.seq, responseHeaders[splits[0]])
-			}
 		}
+	}
+
+	if val, ok := responseHeaders["CSeq"]; ok && val != strconv.FormatUint(uint64(c.seq), 10) {
+		return nil, fmt.Errorf("response seq mismatch %v!=%v", c.seq, val)
 	}
 
 	// Process authentication challenges in the response.
@@ -254,6 +253,10 @@ func (c *client) request(method rtspMethod,
 	// Update control information based on the response.
 	if val, ok := responseHeaders["Content-Base"]; ok {
 		c.control = strings.TrimSpace(val)
+	}
+
+	if responseStatus != "RTSP/1.0 200 OK" && responseStatus != "RTSP/1.0 401 Unauthorized" {
+		return nil, errors.New("camera send status: " + responseStatus)
 	}
 
 	return responseHeaders, nil
