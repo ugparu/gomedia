@@ -14,6 +14,7 @@ import (
 
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/format/rtp"
+	"github.com/ugparu/gomedia/utils"
 	"github.com/ugparu/gomedia/utils/logger"
 	"github.com/ugparu/gomedia/utils/sdp"
 )
@@ -32,6 +33,7 @@ type innerRTSPDemuxer struct {
 	buffer           *bytes.Buffer
 	packets          []gomedia.Packet
 	noVideo, noAudio bool
+	readBuffer       *utils.RefBuffer
 }
 
 func New(url string, inpPars ...gomedia.InputParameter) gomedia.Demuxer {
@@ -46,10 +48,11 @@ func New(url string, inpPars ...gomedia.InputParameter) gomedia.Demuxer {
 		lastPktRcv:   time.Now(),
 		client:       newClient(),
 		ticker:       time.NewTicker(pingTimeout),
-		buffer:       &bytes.Buffer{},
+		buffer:       bytes.NewBuffer(make([]byte, 0)),
 		packets:      []gomedia.Packet{},
 		noVideo:      false,
 		noAudio:      false,
+		readBuffer:   utils.GetRefBuffer(0),
 	}
 	for _, inpPar := range inpPars {
 		switch inpPar {
@@ -217,35 +220,50 @@ func (dmx *innerRTSPDemuxer) ReadPacket() (packet gomedia.Packet, err error) {
 	default:
 	}
 
-	var header []byte
-	if header, err = dmx.client.Read(headerSize); err != nil {
-		return
+	var header [headerSize]byte
+	for {
+		if time.Since(dmx.lastPktRcv) >= minPacketInterval {
+			err = errors.New("packet timeout expired")
+			return
+		}
+
+		dmx.readBuffer.Grow(1)
+		if err = dmx.client.Read(dmx.readBuffer.Buffer); err != nil {
+			return
+		}
+		header[0] = dmx.readBuffer.Buffer[0]
+		if header[0] != rtspPacket && header[0] != rtpPacket {
+			logger.Warningf(dmx, "packet reading desync: first symbol is %s. Trying to recover", string(header[0]))
+			continue
+		}
+
+		dmx.readBuffer.Grow(headerSize - 1)
+		if err = dmx.client.Read(dmx.readBuffer.Buffer); err != nil {
+			return
+		}
+		copy(header[1:], dmx.readBuffer.Buffer)
+
+		if header[0] == rtspPacket {
+			if string(header[:]) != "RTSP" {
+				logger.Warningf(dmx, "rtsp packet reading desync: first symbols are %s. Trying to recover", string(header[:]))
+				continue
+			}
+		} else if header[0] == rtpPacket {
+			if string(header[:]) != "RTP" {
+				logger.Warningf(dmx, "rtp packet reading desync: first symbols are %s. Trying to recover", string(header[:]))
+				continue
+			}
+		}
+		break
 	}
 
 	switch header[0] {
 	case rtspPacket:
 		err = dmx.processRTSPPacket()
 	case rtpPacket:
-		dmx.lastPktRcv = time.Now()
-
-		length := int32(binary.BigEndian.Uint16(header[2:]))
-		if length > 65535 || length < 12 {
-			return nil, fmt.Errorf("RTSP client incorrect packet size %v", length)
-		}
-
-		var content []byte
-		if content, err = dmx.client.Read(int(length)); err != nil {
-			return nil, err
-		}
-		content = append(header, content...)
-
-		dmx.buffer.Reset()
-		_, _ = dmx.buffer.Write(content)
-
-		var pkt gomedia.Packet
 		var targetDmx gomedia.Demuxer
 
-		switch int8(content[1]) {
+		switch int8(header[1]) {
 		case dmx.videoIdx + 1:
 			fallthrough
 		case dmx.videoIdx:
@@ -255,12 +273,35 @@ func (dmx *innerRTSPDemuxer) ReadPacket() (packet gomedia.Packet, err error) {
 		case dmx.audioIdx:
 			targetDmx = dmx.audioDemuxer
 		default:
-			logger.Debugf(dmx, "Unknown stream index %d", content[1])
+			logger.Debugf(dmx, "Unknown stream index %d", header[1])
 		}
 
 		if targetDmx == nil {
 			return
 		}
+
+		if _, err = dmx.buffer.Write(header[:]); err != nil {
+			return
+		}
+		dmx.lastPktRcv = time.Now()
+
+		length := int32(binary.BigEndian.Uint16(header[2:]))
+		if length > 65535 || length < 12 {
+			return nil, fmt.Errorf("RTSP client incorrect packet size %v", length)
+		}
+
+		dmx.readBuffer.Grow(int(length))
+		if err = dmx.client.Read(dmx.readBuffer.Buffer); err != nil {
+			return nil, err
+		}
+
+		content := dmx.readBuffer.Buffer[:length]
+		if _, err = dmx.buffer.Write(content); err != nil {
+			return
+		}
+
+		var pkt gomedia.Packet
+
 		for {
 			if pkt, err = targetDmx.ReadPacket(); err != nil {
 				if errors.Is(err, io.EOF) {
@@ -272,7 +313,7 @@ func (dmx *innerRTSPDemuxer) ReadPacket() (packet gomedia.Packet, err error) {
 			dmx.packets = append(dmx.packets, pkt)
 		}
 	default:
-		err = fmt.Errorf("rtp packet reading desync: first symbol is %s", string(header[0]))
+		logger.Warningf(dmx, "rtp packet reading desync: first symbol is %s. Trying to recover", string(header[0]))
 		return
 	}
 
@@ -285,34 +326,37 @@ func (dmx *innerRTSPDemuxer) ReadPacket() (packet gomedia.Packet, err error) {
 }
 
 func (dmx *innerRTSPDemuxer) processRTSPPacket() (err error) {
-	var responseTmp []byte
+	const maxRTSPHeadersMessageSize = 2 << 9
+	var dummyBuffer [maxRTSPHeadersMessageSize]byte
+	var idx int
 
-	const maxRTSPHeadersMessageSize = 2 << 10
-
+	dmx.buffer.Reset()
 	for {
-		var oneb []byte
-		if oneb, err = dmx.client.Read(1); err != nil {
+		dmx.readBuffer.Grow(1)
+		if err = dmx.client.Read(dmx.readBuffer.Buffer); err != nil {
 			return err
 		}
-		responseTmp = append(responseTmp, oneb...)
+		dummyBuffer[idx] = dmx.readBuffer.Buffer[0]
+		idx++
 
-		if len(responseTmp) > maxRTSPHeadersMessageSize {
+		if idx >= maxRTSPHeadersMessageSize {
 			return fmt.Errorf("failed to parse RTSP headers after %d bytes", maxRTSPHeadersMessageSize)
 		}
 
-		if len(responseTmp) > headerSize &&
-			bytes.Equal(responseTmp[len(responseTmp)-headerSize:], []byte("\r\n\r\n")) {
+		if idx > headerSize &&
+			bytes.Equal(dummyBuffer[idx-headerSize:idx], []byte("\r\n\r\n")) {
 			logger.Debug(dmx, "consumed rtsp message")
 
-			if !strings.Contains(string(responseTmp), "Content-Length:") {
+			if !strings.Contains(string(dummyBuffer[:idx]), "Content-Length:") {
 				break
 			}
 			var si int
-			if si, err = strconv.Atoi(stringInBetween(string(responseTmp), "Content-Length: ", "\r\n")); err != nil {
+			if si, err = strconv.Atoi(stringInBetween(string(dummyBuffer[:idx]), "Content-Length: ", "\r\n")); err != nil {
 				return err
 			}
 
-			if _, err = dmx.client.Read(si); err != nil {
+			dmx.readBuffer.Grow(si)
+			if err = dmx.client.Read(dmx.readBuffer.Buffer); err != nil {
 				return err
 			}
 		}

@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ugparu/gomedia/utils"
 	"github.com/ugparu/gomedia/utils/logger"
 	"github.com/ugparu/gomedia/utils/sdp"
 )
@@ -145,9 +146,9 @@ func (c *client) request(method rtspMethod,
 	// Include Digest authentication details if realm is available.
 	if c.realm != "" {
 		// Calculate MD5 hashes for authentication.
-		md5UserRealmPwd := fmt.Sprintf("%x", md5.Sum([]byte(fmt.Sprintf("%s:%s:%s", c.username, c.realm, c.password))))
-		md5MethodURL := fmt.Sprintf("%x", md5.Sum([]byte(fmt.Sprintf("%s:%s", method, uri))))
-		response := fmt.Sprintf("%x", md5.Sum([]byte(fmt.Sprintf("%s:%s:%s", md5UserRealmPwd, c.nonce, md5MethodURL))))
+		md5UserRealmPwd := fmt.Sprintf("%x", md5.Sum(fmt.Appendf(nil, "%s:%s:%s", c.username, c.realm, c.password)))
+		md5MethodURL := fmt.Sprintf("%x", md5.Sum(fmt.Appendf(nil, "%s:%s", method, uri)))
+		response := fmt.Sprintf("%x", md5.Sum(fmt.Appendf(nil, "%s:%s:%s", md5UserRealmPwd, c.nonce, md5MethodURL)))
 		authorization := fmt.Sprintf("Digest username=\"%s\", realm=\"%s\", nonce=\"%s\", uri=\"%s\", response=\"%s\"",
 			c.username, c.realm, c.nonce, uri, response)
 		builder.WriteString(fmt.Sprintf("Authorization: %s\r\n", authorization))
@@ -165,6 +166,7 @@ func (c *client) request(method rtspMethod,
 
 	// End the request headers.
 	builder.WriteString("\r\n")
+
 	requestString := builder.String()
 
 	// Set write deadline for the connection.
@@ -302,8 +304,7 @@ func (c *client) options() (err error) {
 	// Parse and update supported methods from the response.
 	if val, ok := resp["Public"]; ok {
 		logger.Debugf(c, "Supported methods: %s", val)
-		methods := strings.Split(val, ",")
-		for _, m := range methods {
+		for m := range strings.SplitSeq(val, ",") {
 			c.methods[rtspMethod(strings.TrimSpace(m))] = true
 		}
 	}
@@ -336,14 +337,17 @@ func (c *client) describe() (sdps []sdp.Media, err error) {
 	if contentLen, err = strconv.Atoi(strings.TrimSpace(val)); err != nil {
 		return nil, err
 	}
-	sdpRaw := make([]byte, contentLen)
+
+	sdpBuffer := utils.GetRefBuffer(contentLen)
+	defer utils.PutRefBuffer(sdpBuffer)
+
 	if err = c.conn.SetReadDeadline(time.Now().Add(readWriteTimeout)); err != nil {
 		return
 	}
-	if _, err = io.ReadFull(c.connRW, sdpRaw); err != nil {
+	if _, err = io.ReadFull(c.connRW, sdpBuffer.Buffer); err != nil {
 		return nil, err
 	}
-	_, sdps = sdp.Parse(string(sdpRaw))
+	_, sdps = sdp.Parse(string(sdpBuffer.Buffer))
 
 	return sdps, nil
 }
@@ -374,8 +378,7 @@ func (c *client) setup(chTMP int, uri string) (streamIdx int, err error) {
 	}
 
 	// Split and parse the "Transport" header to extract the interleaved channel information.
-	splits2 := strings.Split(val, ";")
-	for _, vs := range splits2 {
+	for vs := range strings.SplitSeq(val, ";") {
 		if !strings.Contains(vs, "interleaved") {
 			continue
 		}
@@ -423,39 +426,29 @@ func (c *client) ping() (err error) {
 
 // Read reads a specified number of bytes (n) from the RTSP connection.
 // If n is 0, it reads the entire response until the connection is closed.
-func (c *client) Read(n int) (resp []byte, err error) {
+func (c *client) Read(buf []byte) (err error) {
 	if c.conn == nil {
-		return nil, errors.New("connection is not opened")
+		return errors.New("connection is not opened")
 	}
 	// Set the deadline for the connection.
 	if err = c.conn.SetDeadline(time.Now().Add(readWriteTimeout)); err != nil {
-		return nil, err
+		return err
 	}
 
 	// Read a specific number of bytes if n > 0.
-	if n > 0 {
-		resp = make([]byte, n)
-
+	if len(buf) > 0 {
 		// Set the read deadline for the connection.
 		if err = c.conn.SetReadDeadline(time.Now().Add(readWriteTimeout)); err != nil {
 			return
 		}
 
-		var nb int
-		// Read the specified number of bytes.
-		if nb, err = io.ReadFull(c.connRW, resp); err != nil {
-			return nil, err
-		} else if nb != n {
-			return nil, fmt.Errorf("read count mismatch %v!=%v", nb, n)
+		if _, err = io.ReadFull(c.connRW, buf); err != nil {
+			return err
 		}
-		return resp, nil
+		return nil
 	}
 
-	// Read all available data until the connection is closed.
-	if err = c.conn.SetReadDeadline(time.Now().Add(readWriteTimeout)); err != nil {
-		return
-	}
-	return io.ReadAll(c.connRW)
+	return
 }
 
 // Close closes the RTSP connection.
