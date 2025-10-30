@@ -25,40 +25,44 @@ func (s *segment) add(pkt gomedia.Packet) {
 
 type segmenter struct {
 	lifecycle.AsyncManager[*segmenter]
-	recordMode     gomedia.RecordMode
-	duration       time.Duration
-	targetDuration time.Duration
-	recordModeCh   chan gomedia.RecordMode
-	eventCh        chan struct{}
-	inpPktCh       chan gomedia.Packet
-	outInfoCh      chan gomedia.FileInfo
-	lastEvent      time.Time
-	eventSaved     bool
-	curSegment     *segment
-	dest           string
-	codecPar       gomedia.CodecParametersPair
-	segments       []*segment
-	rmSrcCh        chan string
+	recordMode        gomedia.RecordMode
+	duration          time.Duration
+	targetDuration    time.Duration
+	recordModeCh      chan gomedia.RecordMode
+	eventCh           chan struct{}
+	inpPktCh          chan gomedia.Packet
+	outInfoCh         chan gomedia.FileInfo
+	recordCurStatusCh chan bool
+	recordCurStatus   bool
+	lastEvent         time.Time
+	eventSaved        bool
+	curSegment        *segment
+	dest              string
+	codecPar          gomedia.CodecParametersPair
+	segments          []*segment
+	rmSrcCh           chan string
 }
 
 // New creates a new instance of the archiver with the specified parameters.
 func New(dest string, segSize time.Duration, recordMode gomedia.RecordMode, chanSize int) gomedia.Segmenter {
 	newArch := &segmenter{
-		AsyncManager:   nil,
-		recordMode:     recordMode,
-		duration:       0,
-		targetDuration: segSize,
-		recordModeCh:   make(chan gomedia.RecordMode, chanSize),
-		eventCh:        make(chan struct{}, chanSize),
-		inpPktCh:       make(chan gomedia.Packet, chanSize),
-		outInfoCh:      make(chan gomedia.FileInfo, chanSize),
-		lastEvent:      time.Now(),
-		eventSaved:     true,
-		curSegment:     nil,
-		dest:           dest,
-		codecPar:       gomedia.CodecParametersPair{AudioCodecParameters: nil, VideoCodecParameters: nil},
-		segments:       []*segment{},
-		rmSrcCh:        make(chan string, chanSize),
+		AsyncManager:      nil,
+		recordMode:        recordMode,
+		duration:          0,
+		targetDuration:    segSize,
+		recordModeCh:      make(chan gomedia.RecordMode, chanSize),
+		eventCh:           make(chan struct{}, chanSize),
+		inpPktCh:          make(chan gomedia.Packet, chanSize),
+		outInfoCh:         make(chan gomedia.FileInfo, chanSize),
+		recordCurStatusCh: make(chan bool, chanSize),
+		recordCurStatus:   false,
+		lastEvent:         time.Now(),
+		eventSaved:        true,
+		curSegment:        nil,
+		dest:              dest,
+		codecPar:          gomedia.CodecParametersPair{AudioCodecParameters: nil, VideoCodecParameters: nil},
+		segments:          []*segment{},
+		rmSrcCh:           make(chan string, chanSize),
 	}
 	newArch.AsyncManager = lifecycle.NewFailSafeAsyncManager[*segmenter](newArch)
 	return newArch
@@ -198,12 +202,20 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 			}
 			return nil
 		}
-
+		if (s.recordMode == gomedia.Always && s.duration >= s.targetDuration ||
+			s.recordMode == gomedia.Event && !s.eventSaved) && !s.recordCurStatus {
+			s.recordCurStatus = true
+			s.recordCurStatusCh <- true
+		}
 		if s.recordMode == gomedia.Always && s.duration >= s.targetDuration ||
 			s.recordMode == gomedia.Event && !s.eventSaved &&
 				(time.Since(s.lastEvent) >= s.targetDuration/2 || s.duration >= time.Minute) {
 			err = s.dumpToFile(stopCh)
 			s.eventSaved = true
+			if s.recordMode == gomedia.Event {
+				s.recordCurStatus = false
+				s.recordCurStatusCh <- false
+			}
 		}
 		if s.recordMode == gomedia.Event && s.eventSaved &&
 			len(s.segments) > 0 && s.duration-s.segments[0].duration >= s.targetDuration/2 {
@@ -231,8 +243,12 @@ func (s *segmenter) Close_() { //nolint: revive
 		close(stopCh)
 	}()
 	_ = s.dumpToFile(stopCh)
+	if s.recordCurStatus {
+		s.recordCurStatusCh <- false
+	}
 	close(s.inpPktCh)
 	close(s.outInfoCh)
+	close(s.recordCurStatusCh)
 }
 
 // String returns a string representation of the archiver, indicating the destination path.
@@ -261,4 +277,8 @@ func (s *segmenter) Events() chan<- struct{} {
 // RecordMode returns a channel for sending updates to the recording mode.
 func (s *segmenter) RecordMode() chan<- gomedia.RecordMode {
 	return s.recordModeCh
+}
+
+func (s *segmenter) RecordCurStatus() chan<- bool {
+	return s.recordCurStatusCh
 }
