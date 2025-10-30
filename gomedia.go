@@ -222,4 +222,5 @@ type Segmenter interface {
 	Events() chan<- struct{}       // Events returns the events channel.
 	RecordMode() chan<- RecordMode // RecordMode returns the record mode channel.
 	Files() <-chan FileInfo        // Files returns the recorded files channel.
+	RecordCurStatus() <-chan bool  // Files returns the current record status.
 }
