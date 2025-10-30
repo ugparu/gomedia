@@ -279,6 +279,6 @@ func (s *segmenter) RecordMode() chan<- gomedia.RecordMode {
 	return s.recordModeCh
 }
 
-func (s *segmenter) RecordCurStatus() chan<- bool {
+func (s *segmenter) RecordCurStatus() <-chan bool {
 	return s.recordCurStatusCh
 }
