@@ -169,6 +169,10 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 		if recordMode != s.recordMode {
 			err = s.dumpToFile(stopCh)
 			s.recordMode = recordMode
+			if s.recordCurStatus {
+				s.recordCurStatus = false
+				s.recordCurStatusCh <- false
+			}
 		}
 	case <-s.rmSrcCh:
 	case <-s.eventCh:
