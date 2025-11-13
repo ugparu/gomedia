@@ -69,13 +69,21 @@ type peerTrack struct {
 	vBuf                   chan gomedia.VideoPacket
 	flush                  chan struct{}
 	delay                  time.Duration
-	*webrtc.DataChannel    // Data channel associated with the peer.
+	done                   chan struct{} // Signal to stop goroutines
+	*webrtc.DataChannel                  // Data channel associated with the peer.
 }
 
 func writeVideoPacketsToPeer(peer *peerTrack) {
+	defer logger.Infof(peer, "writeVideoPacketsToPeer goroutine exiting")
 	last := time.Now()
 	for {
 		select {
+		case <-peer.done:
+			// Drain remaining packets before exiting
+			for len(peer.vBuf) > 0 {
+				<-peer.vBuf
+			}
+			return
 		case <-peer.flush:
 		loop:
 			for {
@@ -86,7 +94,10 @@ func writeVideoPacketsToPeer(peer *peerTrack) {
 					break loop
 				}
 			}
-		case pkt := <-peer.vBuf:
+		case pkt, ok := <-peer.vBuf:
+			if !ok {
+				return
+			}
 			sample := createSampleFromPacket(pkt)
 			if pkt.IsKeyFrame() {
 				sample.Data = appendCodecParameters(pkt.CodecParameters())
@@ -120,11 +131,24 @@ func writeVideoPacketsToPeer(peer *peerTrack) {
 }
 
 func writeAudioPacketsToPeer(peer *peerTrack) {
-	for pkt := range peer.aBuf {
-		sample := createSampleFromPacket(pkt)
+	defer logger.Infof(peer, "writeAudioPacketsToPeer goroutine exiting")
+	for {
+		select {
+		case <-peer.done:
+			// Drain remaining packets before exiting
+			for len(peer.aBuf) > 0 {
+				<-peer.aBuf
+			}
+			return
+		case pkt, ok := <-peer.aBuf:
+			if !ok {
+				return
+			}
+			sample := createSampleFromPacket(pkt)
 
-		if err := peer.at.WriteSample(sample); err != nil {
-			logger.Errorf(peer, "Error writing audio sample: %v", err)
+			if err := peer.at.WriteSample(sample); err != nil {
+				logger.Errorf(peer, "Error writing audio sample: %v", err)
+			}
 		}
 	}
 }

@@ -248,7 +248,6 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 		inpPeer.Err = err
 		return inpPeer
 	}
-	go dropRTCP(vRTPSender)
 
 	atrack, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{
 		MimeType:     webrtc.MimeTypePCMA,
@@ -267,7 +266,6 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 		inpPeer.Err = err
 		return inpPeer
 	}
-	go dropRTCP(aRTPSender)
 
 	const bufSize = 1000
 	pt := &peerTrack{
@@ -278,11 +276,14 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 		aBuf:           make(chan gomedia.AudioPacket, bufSize),
 		vBuf:           make(chan gomedia.VideoPacket, bufSize),
 		flush:          make(chan struct{}),
+		done:           make(chan struct{}),
 		DataChannel:    nil,
 	}
 
 	go writeVideoPacketsToPeer(pt)
 	go writeAudioPacketsToPeer(pt)
+	go dropRTCPWithContext(vRTPSender, pt.done)
+	go dropRTCPWithContext(aRTPSender, pt.done)
 
 	peer.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
 		logger.Infof(element, "Connection state has changed to %s", connectionState.String())
@@ -371,20 +372,48 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 // removePeer removes a peer from all existing and to-be-added peers, removes associated tracks,
 // closes the DataChannel, and closes the PeerConnection.
 func (element *webRTCWriter) removePeer(peer *peerTrack) (err error) {
+	logger.Infof(element, "Removing peer connection")
+
+	// Signal all goroutines to stop first
+	close(peer.done)
+
+	// Remove peer from streams to prevent new writes to channels
 	for _, peers := range element.streams.streams {
 		delete(peers.tracks, peer)
 		delete(peers.toAdd, peer)
 	}
+
+	// Give a brief moment for any in-flight writes to complete
+	// This prevents "send on closed channel" panics
+	time.Sleep(10 * time.Millisecond)
+
+	// Now safe to close channels
+	close(peer.vBuf)
+	close(peer.aBuf)
+	close(peer.flush)
+
+	// Remove tracks
 	senders := peer.GetSenders()
 	for _, stream := range senders {
 		if err = peer.RemoveTrack(stream); err != nil {
-			return err
+			logger.Debugf(element, "Error removing track: %v", err)
 		}
 	}
+
+	// Close DataChannel
 	if peer.DataChannel != nil {
-		peer.DataChannel.Close()
+		if err := peer.DataChannel.Close(); err != nil {
+			logger.Errorf(element, "Error closing data channel: %v", err)
+		}
 	}
-	peer.PeerConnection.Close()
+
+	// Close PeerConnection
+	if err := peer.PeerConnection.Close(); err != nil {
+		logger.Errorf(element, "Error closing peer connection: %v", err)
+		return err
+	}
+
+	logger.Infof(element, "Peer connection removed successfully")
 	return nil
 }
 
@@ -446,6 +475,38 @@ func dropRTCP(rs *webrtc.RTPSender) {
 	for {
 		if _, _, rtcpErr := rs.Read(rtcpBuf); rtcpErr != nil {
 			return
+		}
+	}
+}
+
+func dropRTCPWithContext(rs *webrtc.RTPSender, done <-chan struct{}) {
+	defer logger.Infof("WEBRTC", "dropRTCPWithContext goroutine exiting")
+	const bufSize = 999
+	rtcpBuf := make([]byte, bufSize)
+
+	// Use a goroutine to handle blocking read
+	rtcpChan := make(chan error, 1)
+	go func() {
+		for {
+			if _, _, rtcpErr := rs.Read(rtcpBuf); rtcpErr != nil {
+				rtcpChan <- rtcpErr
+				return
+			}
+			select {
+			case rtcpChan <- nil:
+			default:
+			}
+		}
+	}()
+
+	for {
+		select {
+		case <-done:
+			return
+		case err := <-rtcpChan:
+			if err != nil {
+				return
+			}
 		}
 	}
 }

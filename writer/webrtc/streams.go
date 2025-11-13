@@ -56,6 +56,8 @@ func (ss *sortedStreams) Update(newURL string, newCodecPar gomedia.CodecParamete
 		for peer := range stream.tracks {
 			select {
 			case peer.flush <- struct{}{}:
+			case <-peer.done:
+				logger.Warningf(ss, "Peer is being removed, skipping flush")
 			case <-time.After(flushDuration):
 				logger.Errorf(ss, "Failed to flush peer %v", peer)
 			}
@@ -260,16 +262,34 @@ func (ss *sortedStreams) moveTrackToStream(str *stream, pu *peerURL, peerBuf []g
 	const flushDuration = time.Second * 3
 	select {
 	case pu.flush <- struct{}{}:
+	case <-pu.peerTrack.done:
+		logger.Warningf(ss, "Peer is being removed, skipping flush")
+		return
 	case <-time.After(flushDuration):
 		logger.Errorf(ss, "Failed to flush peer %v", pu.peerTrack)
 	}
 
 	for _, bufPkt := range peerBuf {
+		// Use select with done channel to avoid writing to closed channels
+		select {
+		case <-pu.peerTrack.done:
+			return
+		default:
+		}
+
 		switch packet := bufPkt.(type) {
 		case gomedia.VideoPacket:
-			pu.peerTrack.vBuf <- packet
+			select {
+			case pu.peerTrack.vBuf <- packet:
+			case <-pu.peerTrack.done:
+				return
+			}
 		case gomedia.AudioPacket:
-			pu.peerTrack.aBuf <- packet
+			select {
+			case pu.peerTrack.aBuf <- packet:
+			case <-pu.peerTrack.done:
+				return
+			}
 		}
 	}
 
@@ -372,11 +392,26 @@ func (ss *sortedStreams) seedTrack(str *stream, peer *peerTrack) error {
 
 	// Buffer packets for the peer
 	for _, bufPkt := range peerBuf {
+		// Check if peer is being removed
+		select {
+		case <-peer.done:
+			return nil
+		default:
+		}
+
 		switch packet := bufPkt.(type) {
 		case gomedia.VideoPacket:
-			peer.vBuf <- packet
+			select {
+			case peer.vBuf <- packet:
+			case <-peer.done:
+				return nil
+			}
 		case gomedia.AudioPacket:
-			peer.aBuf <- packet
+			select {
+			case peer.aBuf <- packet:
+			case <-peer.done:
+				return nil
+			}
 		}
 	}
 
@@ -409,11 +444,26 @@ func (ss *sortedStreams) seedTrack(str *stream, peer *peerTrack) error {
 
 // bufferPacketForPeer adds a packet to peer's buffer
 func (ss *sortedStreams) bufferPacketForPeer(peer *peerTrack, pkt gomedia.Packet) {
+	// Check if peer is being removed
+	select {
+	case <-peer.done:
+		return
+	default:
+	}
+
 	switch packet := pkt.(type) {
 	case gomedia.VideoPacket:
-		peer.vBuf <- packet
+		select {
+		case peer.vBuf <- packet:
+		case <-peer.done:
+			// Peer is being removed, skip sending
+		}
 	case gomedia.AudioPacket:
-		peer.aBuf <- packet
+		select {
+		case peer.aBuf <- packet:
+		case <-peer.done:
+			// Peer is being removed, skip sending
+		}
 	}
 }
 
