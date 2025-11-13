@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pion/webrtc/v4"
@@ -297,9 +298,13 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 
 	peer.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
 		logger.Infof(element, "Connection state has changed to %s", connectionState.String())
+
+		var once sync.Once
 		if connectionState == webrtc.ICEConnectionStateDisconnected ||
 			connectionState == webrtc.ICEConnectionStateClosed || connectionState == webrtc.ICEConnectionStateFailed {
-			element.closePeersChan <- pt
+			once.Do(func() {
+				element.closePeersChan <- pt
+			})
 		}
 	})
 
