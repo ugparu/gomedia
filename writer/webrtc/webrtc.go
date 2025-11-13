@@ -480,33 +480,16 @@ func dropRTCP(rs *webrtc.RTPSender) {
 }
 
 func dropRTCPWithContext(rs *webrtc.RTPSender, done <-chan struct{}) {
-	defer logger.Infof("WEBRTC", "dropRTCPWithContext goroutine exiting")
+	defer logger.Debugf("WEBRTC", "dropRTCPWithContext goroutine exiting")
 	const bufSize = 999
 	rtcpBuf := make([]byte, bufSize)
 
-	// Use a goroutine to handle blocking read
-	rtcpChan := make(chan error, 1)
-	go func() {
-		for {
-			if _, _, rtcpErr := rs.Read(rtcpBuf); rtcpErr != nil {
-				rtcpChan <- rtcpErr
-				return
-			}
-			select {
-			case rtcpChan <- nil:
-			default:
-			}
-		}
-	}()
-
+	// rs.Read() blocks until data is available or connection closes
+	// When peer connection is closed, Read will return an error
+	// This is efficient - no busy-waiting or select overhead
 	for {
-		select {
-		case <-done:
+		if _, _, rtcpErr := rs.Read(rtcpBuf); rtcpErr != nil {
 			return
-		case err := <-rtcpChan:
-			if err != nil {
-				return
-			}
 		}
 	}
 }

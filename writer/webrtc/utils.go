@@ -79,19 +79,23 @@ func writeVideoPacketsToPeer(peer *peerTrack) {
 	for {
 		select {
 		case <-peer.done:
-			// Drain remaining packets before exiting
-			for len(peer.vBuf) > 0 {
-				<-peer.vBuf
+			// Drain remaining packets before exiting (non-blocking)
+			for {
+				select {
+				case <-peer.vBuf:
+				default:
+					return
+				}
 			}
-			return
 		case <-peer.flush:
-		loop:
+			// Drain both buffers (non-blocking)
+		drainLoop:
 			for {
 				select {
 				case <-peer.vBuf:
 				case <-peer.aBuf:
 				default:
-					break loop
+					break drainLoop
 				}
 			}
 		case pkt, ok := <-peer.vBuf:
@@ -135,11 +139,14 @@ func writeAudioPacketsToPeer(peer *peerTrack) {
 	for {
 		select {
 		case <-peer.done:
-			// Drain remaining packets before exiting
-			for len(peer.aBuf) > 0 {
-				<-peer.aBuf
+			// Drain remaining packets before exiting (non-blocking)
+			for {
+				select {
+				case <-peer.aBuf:
+				default:
+					return
+				}
 			}
-			return
 		case pkt, ok := <-peer.aBuf:
 			if !ok {
 				return

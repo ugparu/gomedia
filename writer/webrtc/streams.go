@@ -270,13 +270,6 @@ func (ss *sortedStreams) moveTrackToStream(str *stream, pu *peerURL, peerBuf []g
 	}
 
 	for _, bufPkt := range peerBuf {
-		// Use select with done channel to avoid writing to closed channels
-		select {
-		case <-pu.peerTrack.done:
-			return
-		default:
-		}
-
 		switch packet := bufPkt.(type) {
 		case gomedia.VideoPacket:
 			select {
@@ -392,13 +385,6 @@ func (ss *sortedStreams) seedTrack(str *stream, peer *peerTrack) error {
 
 	// Buffer packets for the peer
 	for _, bufPkt := range peerBuf {
-		// Check if peer is being removed
-		select {
-		case <-peer.done:
-			return nil
-		default:
-		}
-
 		switch packet := bufPkt.(type) {
 		case gomedia.VideoPacket:
 			select {
@@ -444,13 +430,6 @@ func (ss *sortedStreams) seedTrack(str *stream, peer *peerTrack) error {
 
 // bufferPacketForPeer adds a packet to peer's buffer
 func (ss *sortedStreams) bufferPacketForPeer(peer *peerTrack, pkt gomedia.Packet) {
-	// Check if peer is being removed
-	select {
-	case <-peer.done:
-		return
-	default:
-	}
-
 	switch packet := pkt.(type) {
 	case gomedia.VideoPacket:
 		select {
