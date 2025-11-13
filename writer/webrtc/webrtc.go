@@ -223,13 +223,13 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 		Type: webrtc.SDPTypeOffer,
 		SDP:  string(sdpB),
 	}
-	peer, err := api.NewPeerConnection(conf)
+	peer, err := api.NewPeerConnection(Conf)
 	peerTracks++
 	logger.Infof(element, "peerTracks added: %d", peerTracks)
-	runtime.SetFinalizer(peer, func(*webrtc.PeerConnection) {
+	runtime.AddCleanup(peer, func(struct{}) {
 		peerTracks--
 		logger.Infof(element, "peerTracks removed: %d", peerTracks)
-	})
+	}, struct{}{})
 
 	if err != nil {
 		inpPeer.Err = err
@@ -280,6 +280,33 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 	}
 	go dropRTCP(aRTPSender)
 
+	if err = peer.SetRemoteDescription(offer); err != nil {
+		inpPeer.Err = err
+		return inpPeer
+	}
+
+	answer, err := peer.CreateAnswer(nil)
+	if err != nil {
+		inpPeer.Err = err
+		return inpPeer
+	}
+	gatherCompletePromise := webrtc.GatheringCompletePromise(peer)
+
+	if err = peer.SetLocalDescription(answer); err != nil {
+		inpPeer.Err = err
+		return inpPeer
+	}
+
+	<-gatherCompletePromise
+
+	inpPeer.SDP = base64.StdEncoding.EncodeToString([]byte(peer.LocalDescription().SDP))
+
+	go func() {
+		time.Sleep(time.Second * 10)
+		println("!!!")
+		peer.Close()
+	}()
+
 	const bufSize = 1000
 	pt := &peerTrack{
 		PeerConnection: peer,
@@ -293,8 +320,8 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 		DataChannel:    nil,
 	}
 
-	go writeVideoPacketsToPeer(pt)
-	go writeAudioPacketsToPeer(pt)
+	go writeVideoPacketsToPeer(pt.done, pt.flush, pt.vBuf, pt.aBuf, pt.vt)
+	go writeAudioPacketsToPeer(pt.done, pt.flush, pt.aBuf, pt.at)
 
 	peer.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
 		logger.Infof(element, "Connection state has changed to %s", connectionState.String())
@@ -360,27 +387,6 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 		})
 	})
 
-	if err = peer.SetRemoteDescription(offer); err != nil {
-		inpPeer.Err = err
-		return inpPeer
-	}
-
-	answer, err := peer.CreateAnswer(nil)
-	if err != nil {
-		inpPeer.Err = err
-		return inpPeer
-	}
-	gatherCompletePromise := webrtc.GatheringCompletePromise(peer)
-
-	if err = peer.SetLocalDescription(answer); err != nil {
-		inpPeer.Err = err
-		return inpPeer
-	}
-
-	<-gatherCompletePromise
-
-	inpPeer.SDP = base64.StdEncoding.EncodeToString([]byte(peer.LocalDescription().SDP))
-
 	return inpPeer
 }
 
@@ -405,6 +411,10 @@ func (element *webRTCWriter) removePeer(peer *peerTrack) (err error) {
 	_ = peer.PeerConnection.Close()
 	logger.Infof(element, "Closing done channel")
 	close(peer.done)
+	peer.PeerConnection = nil
+	peer.DataChannel = nil
+	peer.vt = nil
+	peer.at = nil
 	return nil
 }
 

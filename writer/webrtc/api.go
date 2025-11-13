@@ -8,12 +8,12 @@ import (
 )
 
 var api *webrtc.API
-var conf webrtc.Configuration
+var Conf webrtc.Configuration
 
 // Init initializes the WebRTC configuration and API.
 func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer) {
 	// Configure WebRTC settings
-	conf = webrtc.Configuration{
+	Conf = webrtc.Configuration{
 		ICEServers:           iceServers,
 		ICETransportPolicy:   webrtc.ICETransportPolicyAll,
 		BundlePolicy:         webrtc.BundlePolicyBalanced,

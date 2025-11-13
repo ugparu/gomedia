@@ -73,24 +73,27 @@ type peerTrack struct {
 	*webrtc.DataChannel    // Data channel associated with the peer.
 }
 
-func writeVideoPacketsToPeer(peer *peerTrack) {
+func writeVideoPacketsToPeer(done chan struct{},
+	flush chan struct{},
+	vBuf chan gomedia.VideoPacket, aBuf chan gomedia.AudioPacket,
+	vt *webrtc.TrackLocalStaticSample) {
 	last := time.Now()
 	for {
 		select {
-		case <-peer.done:
-			logger.Infof(peer, "Video packets to peer done")
+		case <-done:
+			logger.Infof(done, "Video packets to peer done")
 			return
-		case <-peer.flush:
+		case <-flush:
 		loop:
 			for {
 				select {
-				case <-peer.vBuf:
-				case <-peer.aBuf:
+				case <-vBuf:
+				case <-aBuf:
 				default:
 					break loop
 				}
 			}
-		case pkt := <-peer.vBuf:
+		case pkt := <-vBuf:
 			sample := createSampleFromPacket(pkt)
 			if pkt.IsKeyFrame() {
 				sample.Data = appendCodecParameters(pkt.CodecParameters())
@@ -101,21 +104,21 @@ func writeVideoPacketsToPeer(peer *peerTrack) {
 				sample.Data = append(sample.Data, append([]byte{0, 0, 0, 1}, nalu...)...)
 			}
 
-			if err := peer.vt.WriteSample(sample); err != nil {
-				logger.Errorf(peer, "Error writing video sample: %v", err)
+			if err := vt.WriteSample(sample); err != nil {
+				logger.Errorf(done, "Error writing video sample: %v", err)
 			}
 
 			sleep := pkt.Duration() - time.Since(last) - time.Millisecond
-			if len(peer.vBuf) > bufLen {
+			if len(vBuf) > bufLen {
 				sleep -= time.Millisecond * bufCorStep
-			} else if len(peer.vBuf) < bufLen {
+			} else if len(vBuf) < bufLen {
 				sleep += time.Millisecond * bufCorStep
 			}
 
 			if sleep > 0 {
 				time.Sleep(sleep)
 			} else {
-				logger.Warningf(peer, "Buffer sleep time is negative: %v", sleep)
+				logger.Warningf(done, "Buffer sleep time is negative: %v", sleep)
 			}
 
 			last = time.Now()
@@ -123,16 +126,17 @@ func writeVideoPacketsToPeer(peer *peerTrack) {
 	}
 }
 
-func writeAudioPacketsToPeer(peer *peerTrack) {
+func writeAudioPacketsToPeer(done chan struct{}, flush chan struct{}, aBuf chan gomedia.AudioPacket, at *webrtc.TrackLocalStaticSample) {
 	for {
 		select {
-		case <-peer.done:
-			logger.Infof(peer, "Audio packets to peer done")
+		case <-done:
+			logger.Infof(done, "Audio packets to peer done")
 			return
-		case pkt := <-peer.aBuf:
+		case <-flush:
+		case pkt := <-aBuf:
 			sample := createSampleFromPacket(pkt)
-			if err := peer.at.WriteSample(sample); err != nil {
-				logger.Errorf(peer, "Error writing audio sample: %v", err)
+			if err := at.WriteSample(sample); err != nil {
+				logger.Errorf(done, "Error writing audio sample: %v", err)
 			}
 		}
 	}
