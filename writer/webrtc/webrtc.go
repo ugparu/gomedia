@@ -243,12 +243,12 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 		return inpPeer
 	}
 
-	vRTPSender, err := peer.AddTrack(vtrack)
+	_, err = peer.AddTrack(vtrack)
 	if err != nil {
 		inpPeer.Err = err
 		return inpPeer
 	}
-	go dropRTCP(vRTPSender)
+	// go dropRTCP(vRTPSender)
 
 	atrack, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{
 		MimeType:     webrtc.MimeTypePCMA,
@@ -262,12 +262,12 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 		return inpPeer
 	}
 
-	aRTPSender, err := peer.AddTrack(atrack)
+	_, err = peer.AddTrack(atrack)
 	if err != nil {
 		inpPeer.Err = err
 		return inpPeer
 	}
-	go dropRTCP(aRTPSender)
+	// go dropRTCP(aRTPSender)
 
 	const bufSize = 1000
 	pt := &peerTrack{
