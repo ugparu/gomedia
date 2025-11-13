@@ -78,6 +78,7 @@ func writeVideoPacketsToPeer(peer *peerTrack) {
 	for {
 		select {
 		case <-peer.done:
+			logger.Infof(peer, "Video packets to peer done")
 			return
 		case <-peer.flush:
 		loop:
@@ -126,6 +127,7 @@ func writeAudioPacketsToPeer(peer *peerTrack) {
 	for {
 		select {
 		case <-peer.done:
+			logger.Infof(peer, "Audio packets to peer done")
 			return
 		case pkt := <-peer.aBuf:
 			sample := createSampleFromPacket(pkt)

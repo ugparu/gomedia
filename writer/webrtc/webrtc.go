@@ -17,7 +17,7 @@ import (
 	"github.com/ugparu/gomedia/utils/logger"
 )
 
-var peeerTracks = 0
+var peerTracks = 0
 
 type webRTCWriter struct {
 	lifecycle.AsyncManager[*webRTCWriter]
@@ -224,11 +224,11 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 		SDP:  string(sdpB),
 	}
 	peer, err := api.NewPeerConnection(conf)
-	peeerTracks++
-	logger.Infof(element, "peeerTracks added: %d", peeerTracks)
+	peerTracks++
+	logger.Infof(element, "peerTracks added: %d", peerTracks)
 	runtime.SetFinalizer(peer, func(*webrtc.PeerConnection) {
-		peeerTracks--
-		logger.Infof(element, "peeerTracks removed: %d", peeerTracks)
+		peerTracks--
+		logger.Infof(element, "peerTracks removed: %d", peerTracks)
 	})
 
 	if err != nil {
@@ -388,19 +388,22 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 // closes the DataChannel, and closes the PeerConnection.
 func (element *webRTCWriter) removePeer(peer *peerTrack) (err error) {
 	for _, peers := range element.streams.streams {
+		logger.Infof(element, "Removing peer track from stream")
 		delete(peers.tracks, peer)
 		delete(peers.toAdd, peer)
 	}
 	senders := peer.GetSenders()
+	logger.Infof(element, "Removing peer track from senders")
 	for _, stream := range senders {
-		if err = peer.RemoveTrack(stream); err != nil {
-			return err
-		}
+		_ = peer.RemoveTrack(stream)
 	}
 	if peer.DataChannel != nil {
-		peer.DataChannel.Close()
+		logger.Infof(element, "Closing data channel")
+		_ = peer.DataChannel.Close()
 	}
-	peer.PeerConnection.Close()
+	logger.Infof(element, "Closing peer connection")
+	_ = peer.PeerConnection.Close()
+	logger.Infof(element, "Closing done channel")
 	close(peer.done)
 	return nil
 }

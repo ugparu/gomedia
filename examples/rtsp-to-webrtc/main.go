@@ -4,11 +4,14 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"runtime"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	pion "github.com/pion/webrtc/v4"
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/reader"
+	"github.com/ugparu/gomedia/utils/logger"
 	"github.com/ugparu/gomedia/writer/webrtc"
 )
 
@@ -22,6 +25,14 @@ type SDPResponse struct {
 }
 
 func main() {
+	go func() {
+		for {
+			runtime.GC()
+			logger.Infof(nil, "GC called")
+			time.Sleep(time.Second * 10)
+		}
+	}()
+
 	rdr := reader.NewRTSP(0)
 	rdr.Read()
 	defer rdr.Close()
