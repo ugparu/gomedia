@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"runtime"
 	"strings"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 	"github.com/ugparu/gomedia/utils/lifecycle"
 	"github.com/ugparu/gomedia/utils/logger"
 )
+
+var peeerTracks = 0
 
 type webRTCWriter struct {
 	lifecycle.AsyncManager[*webRTCWriter]
@@ -220,6 +223,13 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 		SDP:  string(sdpB),
 	}
 	peer, err := api.NewPeerConnection(conf)
+	peeerTracks++
+	logger.Infof(element, "peeerTracks added: %d", peeerTracks)
+	runtime.SetFinalizer(peer, func() {
+		peeerTracks--
+		logger.Infof(element, "peeerTracks removed: %d", peeerTracks)
+	})
+
 	if err != nil {
 		inpPeer.Err = err
 		return inpPeer
@@ -243,12 +253,12 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 		return inpPeer
 	}
 
-	_, err = peer.AddTrack(vtrack)
+	vRTPSender, err := peer.AddTrack(vtrack)
 	if err != nil {
 		inpPeer.Err = err
 		return inpPeer
 	}
-	// go dropRTCP(vRTPSender)
+	go dropRTCP(vRTPSender)
 
 	atrack, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{
 		MimeType:     webrtc.MimeTypePCMA,
@@ -262,12 +272,12 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 		return inpPeer
 	}
 
-	_, err = peer.AddTrack(atrack)
+	aRTPSender, err := peer.AddTrack(atrack)
 	if err != nil {
 		inpPeer.Err = err
 		return inpPeer
 	}
-	// go dropRTCP(aRTPSender)
+	go dropRTCP(aRTPSender)
 
 	const bufSize = 1000
 	pt := &peerTrack{
