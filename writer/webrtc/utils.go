@@ -69,6 +69,7 @@ type peerTrack struct {
 	vBuf                   chan gomedia.VideoPacket
 	flush                  chan struct{}
 	delay                  time.Duration
+	done                   chan struct{}
 	*webrtc.DataChannel    // Data channel associated with the peer.
 }
 
@@ -76,6 +77,8 @@ func writeVideoPacketsToPeer(peer *peerTrack) {
 	last := time.Now()
 	for {
 		select {
+		case <-peer.done:
+			return
 		case <-peer.flush:
 		loop:
 			for {
@@ -120,11 +123,15 @@ func writeVideoPacketsToPeer(peer *peerTrack) {
 }
 
 func writeAudioPacketsToPeer(peer *peerTrack) {
-	for pkt := range peer.aBuf {
-		sample := createSampleFromPacket(pkt)
-
-		if err := peer.at.WriteSample(sample); err != nil {
-			logger.Errorf(peer, "Error writing audio sample: %v", err)
+	for {
+		select {
+		case <-peer.done:
+			return
+		case pkt := <-peer.aBuf:
+			sample := createSampleFromPacket(pkt)
+			if err := peer.at.WriteSample(sample); err != nil {
+				logger.Errorf(peer, "Error writing audio sample: %v", err)
+			}
 		}
 	}
 }

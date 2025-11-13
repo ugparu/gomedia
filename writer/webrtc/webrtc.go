@@ -278,6 +278,7 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 		aBuf:           make(chan gomedia.AudioPacket, bufSize),
 		vBuf:           make(chan gomedia.VideoPacket, bufSize),
 		flush:          make(chan struct{}),
+		done:           make(chan struct{}),
 		DataChannel:    nil,
 	}
 
@@ -385,6 +386,7 @@ func (element *webRTCWriter) removePeer(peer *peerTrack) (err error) {
 		peer.DataChannel.Close()
 	}
 	peer.PeerConnection.Close()
+	close(peer.done)
 	return nil
 }
 
