@@ -225,7 +225,7 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 	peer, err := api.NewPeerConnection(conf)
 	peeerTracks++
 	logger.Infof(element, "peeerTracks added: %d", peeerTracks)
-	runtime.SetFinalizer(peer, func() {
+	runtime.SetFinalizer(peer, func(*webrtc.PeerConnection) {
 		peeerTracks--
 		logger.Infof(element, "peeerTracks removed: %d", peeerTracks)
 	})
