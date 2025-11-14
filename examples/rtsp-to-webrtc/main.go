@@ -38,7 +38,7 @@ func main() {
 	defer rdr.Close()
 	rdr.AddURL() <- os.Getenv("RTSP_URL")
 
-	webrtc.Init(2000, 2100, []string{"192.168.1.145"}, []pion.ICEServer{
+	webrtc.Init(2000, 2100, []string{"192.168.0.182"}, []pion.ICEServer{
 		{
 			URLs: []string{"stun:stun.l.google.com:19302"},
 		},

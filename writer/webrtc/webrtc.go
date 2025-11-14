@@ -236,92 +236,14 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 		return inpPeer
 	}
 
-	codecType := element.streams.streams[element.streams.sortedURLs[0]].codecPar.VideoCodecParameters.Type()
-	mimeType := webrtc.MimeTypeH264
-	if codecType == gomedia.H265 {
-		mimeType = webrtc.MimeTypeH265
-	}
-
-	vtrack, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{
-		MimeType:     mimeType,
-		ClockRate:    90000, //nolint:mnd // 90k
-		Channels:     0,
-		SDPFmtpLine:  extractFmtpLineFromSDP(offer.SDP, codecType),
-		RTCPFeedback: []webrtc.RTCPFeedback{},
-	}, "video", "pion-video")
-	if err != nil {
-		inpPeer.Err = err
-		return inpPeer
-	}
-
-	vRTPSender, err := peer.AddTrack(vtrack)
-	if err != nil {
-		inpPeer.Err = err
-		return inpPeer
-	}
-	go dropRTCP(vRTPSender)
-
-	atrack, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{
-		MimeType:     webrtc.MimeTypePCMA,
-		ClockRate:    8000,
-		Channels:     1,
-		SDPFmtpLine:  "",
-		RTCPFeedback: []webrtc.RTCPFeedback{},
-	}, "audio", "pion-audio")
-	if err != nil {
-		inpPeer.Err = err
-		return inpPeer
-	}
-
-	aRTPSender, err := peer.AddTrack(atrack)
-	if err != nil {
-		inpPeer.Err = err
-		return inpPeer
-	}
-	go dropRTCP(aRTPSender)
-
-	if err = peer.SetRemoteDescription(offer); err != nil {
-		inpPeer.Err = err
-		return inpPeer
-	}
-
-	answer, err := peer.CreateAnswer(nil)
-	if err != nil {
-		inpPeer.Err = err
-		return inpPeer
-	}
-	gatherCompletePromise := webrtc.GatheringCompletePromise(peer)
-
-	if err = peer.SetLocalDescription(answer); err != nil {
-		inpPeer.Err = err
-		return inpPeer
-	}
-
-	<-gatherCompletePromise
-
-	inpPeer.SDP = base64.StdEncoding.EncodeToString([]byte(peer.LocalDescription().SDP))
-
-	go func() {
-		time.Sleep(time.Second * 10)
-		println("!!!")
-		peer.Close()
-	}()
-
-	const bufSize = 1000
-	pt := &peerTrack{
-		PeerConnection: peer,
-		vt:             vtrack,
-		at:             atrack,
-		delay:          time.Second * time.Duration(inpPeer.Delay),
-		aBuf:           make(chan gomedia.AudioPacket, bufSize),
-		vBuf:           make(chan gomedia.VideoPacket, bufSize),
-		flush:          make(chan struct{}),
-		done:           make(chan struct{}),
-		DataChannel:    nil,
-	}
-
-	go writeVideoPacketsToPeer(pt.done, pt.flush, pt.vBuf, pt.aBuf, pt.vt)
-	go writeAudioPacketsToPeer(pt.done, pt.flush, pt.aBuf, pt.at)
+	pt := new(peerTrack)
+	pt.PeerConnection = peer
+	pt.delay = time.Second * time.Duration(inpPeer.Delay)
+	pt.flush = make(chan struct{})
+	pt.done = make(chan struct{})
+	const bufSize = 100
+	pt.vBuf = make(chan gomedia.VideoPacket, bufSize)
+	pt.aBuf = make(chan gomedia.AudioPacket, bufSize)
 
 	peer.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
 		logger.Infof(element, "Connection state has changed to %s", connectionState.String())
@@ -386,6 +308,76 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 			}
 		})
 	})
+
+	codecType := element.streams.streams[element.streams.sortedURLs[0]].codecPar.VideoCodecParameters.Type()
+	mimeType := webrtc.MimeTypeH264
+	if codecType == gomedia.H265 {
+		mimeType = webrtc.MimeTypeH265
+	}
+
+	vtrack, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{
+		MimeType:     mimeType,
+		ClockRate:    90000, //nolint:mnd // 90k
+		Channels:     0,
+		SDPFmtpLine:  extractFmtpLineFromSDP(offer.SDP, codecType),
+		RTCPFeedback: []webrtc.RTCPFeedback{},
+	}, "video", "pion-video")
+	if err != nil {
+		inpPeer.Err = err
+		return inpPeer
+	}
+	pt.vt = vtrack
+
+	vRTPSender, err := peer.AddTrack(vtrack)
+	if err != nil {
+		inpPeer.Err = err
+		return inpPeer
+	}
+	go dropRTCP(vRTPSender)
+
+	atrack, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{
+		MimeType:     webrtc.MimeTypePCMA,
+		ClockRate:    8000,
+		Channels:     1,
+		SDPFmtpLine:  "",
+		RTCPFeedback: []webrtc.RTCPFeedback{},
+	}, "audio", "pion-audio")
+	if err != nil {
+		inpPeer.Err = err
+		return inpPeer
+	}
+	pt.at = atrack
+
+	aRTPSender, err := peer.AddTrack(atrack)
+	if err != nil {
+		inpPeer.Err = err
+		return inpPeer
+	}
+	go dropRTCP(aRTPSender)
+
+	if err = peer.SetRemoteDescription(offer); err != nil {
+		inpPeer.Err = err
+		return inpPeer
+	}
+
+	answer, err := peer.CreateAnswer(nil)
+	if err != nil {
+		inpPeer.Err = err
+		return inpPeer
+	}
+	gatherCompletePromise := webrtc.GatheringCompletePromise(peer)
+
+	if err = peer.SetLocalDescription(answer); err != nil {
+		inpPeer.Err = err
+		return inpPeer
+	}
+
+	<-gatherCompletePromise
+
+	inpPeer.SDP = base64.StdEncoding.EncodeToString([]byte(peer.LocalDescription().SDP))
+
+	go writeVideoPacketsToPeer(pt.done, pt.flush, pt.vBuf, pt.aBuf, pt.vt)
+	go writeAudioPacketsToPeer(pt.done, pt.flush, pt.aBuf, pt.at)
 
 	return inpPeer
 }
