@@ -245,10 +245,10 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 	pt.vBuf = make(chan gomedia.VideoPacket, bufSize)
 	pt.aBuf = make(chan gomedia.AudioPacket, bufSize)
 
+	var once sync.Once
 	peer.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
 		logger.Infof(element, "Connection state has changed to %s", connectionState.String())
 
-		var once sync.Once
 		if connectionState == webrtc.ICEConnectionStateDisconnected ||
 			connectionState == webrtc.ICEConnectionStateClosed || connectionState == webrtc.ICEConnectionStateFailed {
 			once.Do(func() {
@@ -390,7 +390,7 @@ func (element *webRTCWriter) removePeer(peer *peerTrack) (err error) {
 		delete(peers.tracks, peer)
 		delete(peers.toAdd, peer)
 	}
-	senders := peer.GetSenders()
+	senders := peer.PeerConnection.GetSenders()
 	logger.Infof(element, "Removing peer track from senders")
 	for _, stream := range senders {
 		_ = peer.RemoveTrack(stream)
@@ -403,10 +403,6 @@ func (element *webRTCWriter) removePeer(peer *peerTrack) (err error) {
 	_ = peer.PeerConnection.Close()
 	logger.Infof(element, "Closing done channel")
 	close(peer.done)
-	peer.PeerConnection = nil
-	peer.DataChannel = nil
-	peer.vt = nil
-	peer.at = nil
 	return nil
 }
 
