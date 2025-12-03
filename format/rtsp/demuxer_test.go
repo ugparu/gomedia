@@ -1,14 +1,13 @@
 package rtsp
 
 import (
-	"os"
 	"testing"
 
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 )
 
-var rtspURL = os.Getenv("RTSP_URL")
+var rtspURL = "rtsp://83.234.151.179/Streaming/Channels/1"
 
 func BenchmarkReader(b *testing.B) {
 	logrus.SetLevel(logrus.DebugLevel)

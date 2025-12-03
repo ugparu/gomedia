@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ugparu/gomedia/utils"
+	"github.com/ugparu/gomedia/utils/buffer"
 	"github.com/ugparu/gomedia/utils/logger"
 	"github.com/ugparu/gomedia/utils/sdp"
 )
@@ -341,16 +341,17 @@ func (c *client) describe() (sdps []sdp.Media, err error) {
 		return nil, err
 	}
 
-	sdpBuffer := utils.GetBuffer(contentLen)
-	defer utils.PutBuffer(sdpBuffer)
+	sdpBuffer := buffer.Get(contentLen)
+	sdpBuffer.AddRef()
+	defer buffer.Put(sdpBuffer)
 
 	if err = c.conn.SetReadDeadline(time.Now().Add(readWriteTimeout)); err != nil {
 		return
 	}
-	if _, err = io.ReadFull(c.connRW, sdpBuffer.Buffer); err != nil {
+	if _, err = io.ReadFull(c.connRW, sdpBuffer.Data()); err != nil {
 		return nil, err
 	}
-	_, sdps = sdp.Parse(string(sdpBuffer.Buffer))
+	_, sdps = sdp.Parse(string(sdpBuffer.Data()))
 
 	return sdps, nil
 }

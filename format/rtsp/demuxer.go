@@ -14,7 +14,7 @@ import (
 
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/format/rtp"
-	"github.com/ugparu/gomedia/utils"
+	"github.com/ugparu/gomedia/utils/buffer"
 	"github.com/ugparu/gomedia/utils/logger"
 	"github.com/ugparu/gomedia/utils/sdp"
 )
@@ -33,7 +33,7 @@ type innerRTSPDemuxer struct {
 	buffer           *bytes.Buffer
 	packets          []gomedia.Packet
 	noVideo, noAudio bool
-	readBuffer       *utils.Buffer
+	readBuffer       buffer.RefBuffer
 }
 
 func New(url string, inpPars ...gomedia.InputParameter) gomedia.Demuxer {
@@ -52,7 +52,7 @@ func New(url string, inpPars ...gomedia.InputParameter) gomedia.Demuxer {
 		packets:      []gomedia.Packet{},
 		noVideo:      false,
 		noAudio:      false,
-		readBuffer:   utils.GetBuffer(0),
+		readBuffer:   buffer.Get(0),
 	}
 	for _, inpPar := range inpPars {
 		switch inpPar {
@@ -219,21 +219,21 @@ func (dmx *innerRTSPDemuxer) ReadPacket() (packet gomedia.Packet, err error) {
 			return
 		}
 
-		dmx.readBuffer.Grow(1)
-		if err = dmx.client.Read(dmx.readBuffer.Buffer); err != nil {
+		dmx.readBuffer.Resize(1)
+		if err = dmx.client.Read(dmx.readBuffer.Data()); err != nil {
 			return
 		}
-		header[0] = dmx.readBuffer.Buffer[0]
+		header[0] = dmx.readBuffer.Data()[0]
 		if header[0] != rtspPacket && header[0] != rtpPacket {
 			logger.Warningf(dmx, "packet reading desync: first symbol is %s. Trying to recover", string(header[0]))
 			continue
 		}
 
-		dmx.readBuffer.Grow(headerSize - 1)
-		if err = dmx.client.Read(dmx.readBuffer.Buffer); err != nil {
+		dmx.readBuffer.Resize(headerSize - 1)
+		if err = dmx.client.Read(dmx.readBuffer.Data()); err != nil {
 			return
 		}
-		copy(header[1:], dmx.readBuffer.Buffer)
+		copy(header[1:], dmx.readBuffer.Data())
 		break
 	}
 
@@ -262,8 +262,8 @@ func (dmx *innerRTSPDemuxer) ReadPacket() (packet gomedia.Packet, err error) {
 			return
 		}
 
-		dmx.readBuffer.Grow(int(length))
-		if err = dmx.client.Read(dmx.readBuffer.Buffer); err != nil {
+		dmx.readBuffer.Resize(int(length))
+		if err = dmx.client.Read(dmx.readBuffer.Data()); err != nil {
 			return
 		}
 
@@ -274,7 +274,7 @@ func (dmx *innerRTSPDemuxer) ReadPacket() (packet gomedia.Packet, err error) {
 		if _, err = dmx.buffer.Write(header[:]); err != nil {
 			return
 		}
-		if _, err = dmx.buffer.Write(dmx.readBuffer.Buffer[:length]); err != nil {
+		if _, err = dmx.buffer.Write(dmx.readBuffer.Data()[:length]); err != nil {
 			return
 		}
 
@@ -319,11 +319,11 @@ func (dmx *innerRTSPDemuxer) processRTSPPacket(header [headerSize]byte) (err err
 	var idx int
 
 	for {
-		dmx.readBuffer.Grow(1)
-		if err = dmx.client.Read(dmx.readBuffer.Buffer); err != nil {
+		dmx.readBuffer.Resize(1)
+		if err = dmx.client.Read(dmx.readBuffer.Data()); err != nil {
 			return err
 		}
-		dummyBuffer[idx] = dmx.readBuffer.Buffer[0]
+		dummyBuffer[idx] = dmx.readBuffer.Data()[0]
 		idx++
 
 		if idx >= maxRTSPHeadersMessageSize {
@@ -342,8 +342,8 @@ func (dmx *innerRTSPDemuxer) processRTSPPacket(header [headerSize]byte) (err err
 				return err
 			}
 
-			dmx.readBuffer.Grow(si)
-			if err = dmx.client.Read(dmx.readBuffer.Buffer); err != nil {
+			dmx.readBuffer.Resize(si)
+			if err = dmx.client.Read(dmx.readBuffer.Data()); err != nil {
 				return err
 			}
 		}
