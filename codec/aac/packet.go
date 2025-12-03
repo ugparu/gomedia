@@ -14,6 +14,8 @@ type Packet struct {
 
 func NewPacket(data []byte, ts time.Duration, url string,
 	absTime time.Time, codecPar *CodecParameters, dur time.Duration) *Packet {
+	buf := codec.GetMemBuffer()
+	buf.SetData(data)
 	return &Packet{
 		AudioPacket: codec.AudioPacket[*CodecParameters]{
 			BasePacket: codec.BasePacket[*CodecParameters]{
@@ -21,7 +23,7 @@ func NewPacket(data []byte, ts time.Duration, url string,
 				RelativeTime: ts,
 				Dur:          dur,
 				InpURL:       url,
-				Buffer:       data,
+				Buffer:       buf,
 				AbsoluteTime: absTime,
 				CodecPar:     codecPar,
 			},

@@ -3,6 +3,7 @@ package mp4
 import (
 	"encoding/binary"
 	"io"
+	"os"
 	"time"
 
 	"github.com/ugparu/gomedia"
@@ -361,7 +362,9 @@ func (s *Stream) readPacket(tm time.Duration, url string) (pkt gomedia.Packet, e
 
 				if s.h265SlicedPacket != nil {
 					// Add to existing sliced packet buffer
-					s.h265SlicedPacket.Buffer = append(s.h265SlicedPacket.Buffer, naluWithHeader...)
+					existingData := s.h265SlicedPacket.Buffer.Data()
+					newData := append(existingData, naluWithHeader...)
+					s.h265SlicedPacket.Buffer.SetData(newData)
 				} else {
 					// Create new packet for parameter sets
 					pkt = h265.NewPacket(false, tm, time.Now(), naluWithHeader, url, h265Par)
@@ -387,7 +390,9 @@ func (s *Stream) readPacket(tm time.Duration, url string) (pkt gomedia.Packet, e
 					s.h265BufferHasKey = sliceIsKey
 				} else if s.h265SlicedPacket != nil {
 					// Subsequent slice: add to current buffered packet
-					s.h265SlicedPacket.Buffer = append(s.h265SlicedPacket.Buffer, naluWithHeader...)
+					existingData := s.h265SlicedPacket.Buffer.Data()
+					newData := append(existingData, naluWithHeader...)
+					s.h265SlicedPacket.Buffer.SetData(newData)
 					s.h265SlicedPacket.IsKeyFrm = s.h265SlicedPacket.IsKeyFrm || sliceIsKey
 					s.h265BufferHasKey = s.h265BufferHasKey || sliceIsKey
 				} else {
@@ -454,11 +459,14 @@ func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
 			sps := h264Par.SPS()
 			pps := h264Par.PPS()
 
-			binary.BigEndian.PutUint32(buf, uint32(len(pps)))               //nolint:gosec
-			h264Pkt.Buffer = append(buf, append(pps, h264Pkt.Buffer...)...) //nolint:gocritic
+			existingData := h264Pkt.Buffer.Data()
+			binary.BigEndian.PutUint32(buf, uint32(len(pps))) //nolint:gosec
+			newData := append(buf, append(pps, existingData...)...)
 
-			binary.BigEndian.PutUint32(buf, uint32(len(sps)))               //nolint:gosec
-			h264Pkt.Buffer = append(buf, append(sps, h264Pkt.Buffer...)...) //nolint:gocritic
+			buf = make([]byte, 4)                             //nolint:mnd // size of header
+			binary.BigEndian.PutUint32(buf, uint32(len(sps))) //nolint:gosec
+			newData = append(buf, append(sps, newData...)...)
+			h264Pkt.Buffer.SetData(newData)
 		case *h265.CodecParameters:
 			h265Pkt, _ := pkt.(*h265.Packet)
 			h265Par, _ := h265Pkt.CodecParameters().(*h265.CodecParameters)
@@ -466,14 +474,18 @@ func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
 			pps := h265Par.PPS()
 			vps := h265Par.VPS()
 
-			binary.BigEndian.PutUint32(buf, uint32(len(pps)))               //nolint:gosec
-			h265Pkt.Buffer = append(buf, append(pps, h265Pkt.Buffer...)...) //nolint:gocritic
+			existingData := h265Pkt.Buffer.Data()
+			binary.BigEndian.PutUint32(buf, uint32(len(pps))) //nolint:gosec
+			newData := append(buf, append(pps, existingData...)...)
 
-			binary.BigEndian.PutUint32(buf, uint32(len(sps)))               //nolint:gosec
-			h265Pkt.Buffer = append(buf, append(sps, h265Pkt.Buffer...)...) //nolint:gocritic
+			buf = make([]byte, 4)                             //nolint:mnd // size of header
+			binary.BigEndian.PutUint32(buf, uint32(len(sps))) //nolint:gosec
+			newData = append(buf, append(sps, newData...)...)
 
-			binary.BigEndian.PutUint32(buf, uint32(len(vps)))               //nolint:gosec
-			h265Pkt.Buffer = append(buf, append(vps, h265Pkt.Buffer...)...) //nolint:gocritic
+			buf = make([]byte, 4)                             //nolint:mnd // size of header
+			binary.BigEndian.PutUint32(buf, uint32(len(vps))) //nolint:gosec
+			newData = append(buf, append(vps, newData...)...)
+			h265Pkt.Buffer.SetData(newData)
 		}
 	}
 
@@ -517,6 +529,17 @@ func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
 	s.sampleIndex++
 	s.sample.ChunkOffset.Entries = append(s.sample.ChunkOffset.Entries, uint32(s.muxer.writePosition)) //nolint:gosec
 	s.sample.SampleSize.Entries = append(s.sample.SampleSize.Entries, uint32(len(pkt.Data())))         //nolint:gosec
+
+	f, ok := s.muxer.writer.(*os.File)
+	if ok {
+		if err = s.muxer.bufferedWriter.Flush(); err != nil {
+			return
+		}
+
+		if err = s.lastPacket.SwitchToMmap(f, s.muxer.lastPacketStart, int64(len(s.lastPacket.Data()))); err != nil {
+			return
+		}
+	}
 
 	// Update write position.
 	s.muxer.writePosition += int64(len(pkt.Data()))

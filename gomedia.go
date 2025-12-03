@@ -3,6 +3,7 @@ package gomedia
 import (
 	"context"
 	"image"
+	"os"
 	"time"
 )
 
@@ -41,18 +42,19 @@ type CodecParametersPair struct {
 
 // Packet defines the interface for multimedia data containers.
 type Packet interface {
-	Clone(copyData bool) Packet // Creates a packet copy, optionally copying the underlying data.
-	URL() string                // Returns the source URL of the packet.
-	SetURL(string)              // Sets the source URL for the packet.
-	StreamIndex() uint8         // Returns the stream index this packet belongs to.
-	SetStreamIndex(uint8)       // Sets the stream index for this packet.
-	Timestamp() time.Duration   // Returns the presentation timestamp.
-	SetTimestamp(time.Duration) // Sets the presentation timestamp.
-	StartTime() time.Time       // Returns the absolute start time.
-	SetStartTime(time.Time)     // Sets the absolute start time.
-	Duration() time.Duration    // Returns the duration of the packet content.
-	SetDuration(time.Duration)  // Sets the duration of the packet content.
-	Data() []byte               // Returns the raw packet data.
+	Clone(copyData bool) Packet                                    // Creates a packet copy, optionally copying the underlying data.
+	URL() string                                                   // Returns the source URL of the packet.
+	SetURL(string)                                                 // Sets the source URL for the packet.
+	StreamIndex() uint8                                            // Returns the stream index this packet belongs to.
+	SetStreamIndex(uint8)                                          // Sets the stream index for this packet.
+	Timestamp() time.Duration                                      // Returns the presentation timestamp.
+	SetTimestamp(time.Duration)                                    // Sets the presentation timestamp.
+	StartTime() time.Time                                          // Returns the absolute start time.
+	SetStartTime(time.Time)                                        // Sets the absolute start time.
+	Duration() time.Duration                                       // Returns the duration of the packet content.
+	SetDuration(time.Duration)                                     // Sets the duration of the packet content.
+	Data() []byte                                                  // Returns the raw packet data.
+	SwitchToMmap(f *os.File, offset int64, size int64) (err error) // Switches the buffer of the packet.
 }
 
 // VideoPacket extends Packet with video-specific functionality.

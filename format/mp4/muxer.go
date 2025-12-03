@@ -14,10 +14,11 @@ import (
 
 // Muxer represents an MP4 muxer that combines multiple media streams into a single MP4 file.
 type Muxer struct {
-	writer         io.WriteSeeker // The underlying writer for the MP4 file.
-	bufferedWriter *bufio.Writer  // Buffered writer for efficient write operations.
-	writePosition  int64          // Current write position in the file.
-	streams        []*Stream      // List of media streams to be muxed.
+	writer          io.WriteSeeker // The underlying writer for the MP4 file.
+	bufferedWriter  *bufio.Writer  // Buffered writer for efficient write operations.
+	writePosition   int64          // Current write position in the file.
+	streams         []*Stream      // List of media streams to be muxed.
+	lastPacketStart int64          // Start offset of the last written packet.
 }
 
 // NewMuxer creates a new Muxer instance with the given writer.
@@ -226,6 +227,7 @@ func (mux *Muxer) Mux(streams gomedia.CodecParametersPair) (err error) {
 
 // WritePacket writes a media packet to the muxer.
 func (mux *Muxer) WritePacket(pkt gomedia.Packet) (err error) {
+	mux.lastPacketStart = mux.writePosition
 	return mux.streams[pkt.StreamIndex()].writePacket(pkt)
 }
 

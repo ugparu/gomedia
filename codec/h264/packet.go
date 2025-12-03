@@ -13,6 +13,8 @@ type Packet struct {
 
 func NewPacket(key bool, timestamp time.Duration, absTime time.Time,
 	data []byte, url string, param *CodecParameters) *Packet {
+	buf := codec.GetMemBuffer()
+	buf.SetData(data)
 	return &Packet{
 		VideoPacket: codec.VideoPacket[*CodecParameters]{
 			BasePacket: codec.BasePacket[*CodecParameters]{
@@ -20,7 +22,7 @@ func NewPacket(key bool, timestamp time.Duration, absTime time.Time,
 				RelativeTime: timestamp,
 				Dur:          0,
 				InpURL:       url,
-				Buffer:       data,
+				Buffer:       buf,
 				AbsoluteTime: absTime,
 				CodecPar:     param,
 			},

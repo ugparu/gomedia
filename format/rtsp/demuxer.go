@@ -33,7 +33,7 @@ type innerRTSPDemuxer struct {
 	buffer           *bytes.Buffer
 	packets          []gomedia.Packet
 	noVideo, noAudio bool
-	readBuffer       *utils.RefBuffer
+	readBuffer       *utils.Buffer
 }
 
 func New(url string, inpPars ...gomedia.InputParameter) gomedia.Demuxer {
@@ -52,7 +52,7 @@ func New(url string, inpPars ...gomedia.InputParameter) gomedia.Demuxer {
 		packets:      []gomedia.Packet{},
 		noVideo:      false,
 		noAudio:      false,
-		readBuffer:   utils.GetRefBuffer(0),
+		readBuffer:   utils.GetBuffer(0),
 	}
 	for _, inpPar := range inpPars {
 		switch inpPar {

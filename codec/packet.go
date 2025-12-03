@@ -2,6 +2,7 @@ package codec
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/ugparu/gomedia"
@@ -12,7 +13,7 @@ type BasePacket[T gomedia.CodecParameters] struct {
 	RelativeTime time.Duration
 	Dur          time.Duration
 	InpURL       string
-	Buffer       []byte
+	Buffer       RefBuffer
 	AbsoluteTime time.Time
 	CodecPar     T
 }
@@ -28,8 +29,8 @@ func (pkt *BasePacket[T]) Clone(copyData bool) BasePacket[T] {
 		CodecPar:     pkt.CodecPar,
 	}
 	if copyData {
-		newPkt.Buffer = make([]byte, len(pkt.Buffer))
-		copy(newPkt.Buffer, pkt.Buffer)
+		newPkt.Buffer = GetMemBuffer()
+		newPkt.Buffer.SetData(pkt.Buffer.Data())
 	} else {
 		newPkt.Buffer = pkt.Buffer
 	}
@@ -65,7 +66,7 @@ func (pkt *BasePacket[T]) Timestamp() time.Duration {
 }
 
 func (pkt *BasePacket[T]) Data() []byte {
-	return pkt.Buffer
+	return pkt.Buffer.Data()
 }
 
 func (pkt *BasePacket[T]) SetDuration(dur time.Duration) {
@@ -84,7 +85,12 @@ func (pkt *BasePacket[T]) String() string {
 	if pkt == nil {
 		return "EMPTY_PACKET"
 	}
-	return fmt.Sprintf("PACKET sz=%d", len(pkt.Buffer))
+	return fmt.Sprintf("PACKET sz=%d", pkt.Buffer.Len())
+}
+
+func (pkt *BasePacket[T]) SwitchToMmap(f *os.File, offset int64, size int64) (err error) {
+	pkt.Buffer = GetFileBuffer(f, offset, size)
+	return nil
 }
 
 type VideoPacket[T gomedia.VideoCodecParameters] struct {

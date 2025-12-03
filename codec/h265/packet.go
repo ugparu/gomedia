@@ -19,6 +19,8 @@ func NewPacket(
 	url string,
 	param *CodecParameters,
 ) *Packet {
+	buf := codec.GetMemBuffer()
+	buf.SetData(data)
 	return &Packet{
 		VideoPacket: codec.VideoPacket[*CodecParameters]{
 			BasePacket: codec.BasePacket[*CodecParameters]{
@@ -26,7 +28,7 @@ func NewPacket(
 				RelativeTime: timestamp,
 				Dur:          0,
 				InpURL:       url,
-				Buffer:       data,
+				Buffer:       buf,
 				AbsoluteTime: absTime,
 				CodecPar:     param,
 			},

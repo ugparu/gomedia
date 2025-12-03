@@ -11,17 +11,15 @@ const (
 var (
 	refBufPool = sync.Pool{
 		New: func() any {
-			return &RefBuffer{
+			return &Buffer{
 				Buffer: make([]byte, 0, defaultBufSize),
-				ref:    1,
 			}
 		},
 	}
 )
 
-func GetRefBuffer(size int) *RefBuffer {
-	buf, _ := refBufPool.Get().(*RefBuffer)
-	buf.ref = 1
+func GetBuffer(size int) *Buffer {
+	buf, _ := refBufPool.Get().(*Buffer)
 	if cap(buf.Buffer) < size {
 		buf.Buffer = make([]byte, size)
 	}
@@ -29,28 +27,15 @@ func GetRefBuffer(size int) *RefBuffer {
 	return buf
 }
 
-func PutRefBuffer(b *RefBuffer) {
-	b.ref--
-	if b.ref > 0 {
-		return
-	}
+func PutBuffer(b *Buffer) {
 	refBufPool.Put(b)
 }
 
-type RefBuffer struct {
+type Buffer struct {
 	Buffer []byte
-	ref    int
 }
 
-func (b *RefBuffer) AddRef() {
-	b.ref++
-}
-
-func (b *RefBuffer) Release() {
-	b.ref--
-}
-
-func (b *RefBuffer) Grow(size int) []byte {
+func (b *Buffer) Grow(size int) []byte {
 	if cap(b.Buffer) < size {
 		b.Buffer = make([]byte, size)
 	}

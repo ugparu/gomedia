@@ -102,8 +102,10 @@ func (d *h265Demuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 						time.Duration(d.timestamp/clockrate)*time.Millisecond, time.Now(),
 						append(binSize(len(pktData)), pktData...), "", d.codec)
 				} else if d.slicedPacket != nil {
-					d.slicedPacket.Buffer = append(d.slicedPacket.Buffer, binSize(len(pktData))...)
-					d.slicedPacket.Buffer = append(d.slicedPacket.Buffer, pktData...)
+					existingData := d.slicedPacket.Buffer.Data()
+					newData := append(existingData, binSize(len(pktData))...)
+					newData = append(newData, pktData...)
+					d.slicedPacket.Buffer.SetData(newData)
 					d.slicedPacket.IsKeyFrm = d.slicedPacket.IsKeyFrm || h265.IsKey(fuNaluType)
 				}
 				d.bufferHasKey = false
@@ -119,8 +121,10 @@ func (d *h265Demuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 					time.Duration(d.timestamp/clockrate)*time.Millisecond, time.Now(),
 					append(binSize(len(nal)), nal...), "", d.codec)
 			} else if d.slicedPacket != nil {
-				d.slicedPacket.Buffer = append(d.slicedPacket.Buffer, binSize(len(nal))...)
-				d.slicedPacket.Buffer = append(d.slicedPacket.Buffer, nal...)
+				existingData := d.slicedPacket.Buffer.Data()
+				newData := append(existingData, binSize(len(nal))...)
+				newData = append(newData, nal...)
+				d.slicedPacket.Buffer.SetData(newData)
 			}
 		}
 	}
