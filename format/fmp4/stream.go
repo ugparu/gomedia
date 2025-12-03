@@ -22,13 +22,13 @@ const (
 type Stream struct {
 	gomedia.CodecParameters
 	packets         []gomedia.Packet
+	bufSize         int
 	firstPacketTime time.Duration
 	trackAtom       *mp4io.Track
 	timeScale       int64
 	duration        time.Duration
 	sample          *mp4io.SampleTable
 	sampleIndex     int
-	buffer          []byte
 }
 
 func (s *Stream) timeToTS(tm time.Duration) int64 {
@@ -204,8 +204,7 @@ func (s *Stream) writePacket(pkt gomedia.Packet) error {
 	}
 	s.packets = append(s.packets, pkt)
 	s.duration += pkt.Duration()
-	s.buffer = append(s.buffer, pkt.Data()...)
 	s.sampleIndex++
-
+	s.bufSize += len(pkt.Data())
 	return nil
 }

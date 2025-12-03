@@ -311,9 +311,10 @@ func (mxr *muxer) GetSegment(ctx context.Context, index uint64) ([]byte, error) 
 	}
 	select {
 	case <-ctx.Done():
+		return nil, ctx.Err()
 	case <-seg.finished:
 	}
-	return seg.mp4Buf, nil
+	return seg.getMp4Buffer(), nil
 }
 
 // GetFragment returns the MP4 content of a specific fragment within a segment.

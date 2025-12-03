@@ -1,8 +1,8 @@
 package codec
 
 import (
-	"io"
 	"os"
+	"syscall"
 
 	"github.com/ugparu/gomedia/utils/logger"
 )
@@ -46,27 +46,34 @@ func (b *memBuffer) Close() {
 	b.data = nil
 }
 
-// fileBuffer reads data from file using ReadAt instead of memory mapping
+// fileBuffer reads data from file using memory mapping
 type fileBuffer struct {
-	file   *os.File
-	offset int64
-	size   int64
-	data   []byte
+	file      *os.File
+	offset    int64
+	size      int
+	data      []byte // slice pointing to actual data within mapped region
+	mappedMem []byte // full mapped memory region (for unmapping)
 }
 
 // GetFileBuffer creates a buffer that reads data from a file at the specified offset
-func GetFileBuffer(f *os.File, offset int64, size int64) RefBuffer {
-	data := make([]byte, size)
-	n, err := f.ReadAt(data, offset)
-	if err != nil && err != io.EOF {
-		logger.Errorf(f, "failed to read file: %v", err)
+func GetFileBuffer(f *os.File, offset int64, size int) RefBuffer {
+	// mmap requires page-aligned offset
+	pageSize := int64(syscall.Getpagesize())
+	alignedOffset := offset &^ (pageSize - 1)   // round down to page boundary
+	offsetInPage := int(offset - alignedOffset) // offset within the page
+	mappedSize := offsetInPage + size           // total size to map
+
+	mappedMem, err := syscall.Mmap(int(f.Fd()), alignedOffset, mappedSize, syscall.PROT_READ, syscall.MAP_SHARED)
+	if err != nil {
+		logger.Errorf(f, "failed to mmap file: %v", err)
 		return nil
 	}
 	return &fileBuffer{
-		file:   f,
-		offset: offset,
-		size:   int64(n),
-		data:   data[:n],
+		file:      f,
+		offset:    offset,
+		size:      size,
+		data:      mappedMem[offsetInPage : offsetInPage+size],
+		mappedMem: mappedMem,
 	}
 }
 
@@ -87,5 +94,9 @@ func (b *fileBuffer) Len() int {
 }
 
 func (b *fileBuffer) Close() {
+	if b.mappedMem != nil {
+		_ = syscall.Munmap(b.mappedMem)
+		b.mappedMem = nil
+	}
 	b.data = nil
 }

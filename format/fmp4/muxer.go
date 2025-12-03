@@ -398,9 +398,7 @@ func (m *Muxer) createSegmentIndex(s *Stream, _ int) mp4io.SegmentIndex {
 	// Safe conversion with validation for Timescale
 	timeScaleInt32 := m.safeInt32Conversion(s.timeScale, "timeScale")
 
-	// Safe conversion for ReferencedSize
-	bufferSize := len(s.buffer)
-	referencedSize := m.safeInt32Conversion(int64(bufferSize), "buffer size")
+	referencedSize := m.safeInt32Conversion(int64(s.bufSize), "buffer size")
 
 	// Safe conversion for SubsegmentDuration
 	durationValue := int64(s.duration) * s.timeScale / int64(time.Second)
@@ -438,8 +436,10 @@ func (m *Muxer) processDataOffsets(moof *mp4io.MovieFrag, startMOOF int, out []b
 		dataOffset := m.safeUint32Conversion(offset, "data offset")
 		moof.Tracks[i].Run.DataOffset = dataOffset
 
-		copy(out[n:], s.buffer)
-		n += len(s.buffer)
+		for _, pkt := range s.packets {
+			copy(out[n:], pkt.Data())
+			n += len(pkt.Data())
+		}
 	}
 	return n
 }
@@ -537,7 +537,7 @@ func (m *Muxer) GetMP4Fragment(buf []byte) []byte {
 
 	bufSz := moof.Len() + styp.Len() + 8
 	for i, s := range m.strs {
-		bufSz += len(s.buffer)
+		bufSz += s.bufSize
 		sidx = append(sidx, m.createSegmentIndex(s, i))
 		bufSz += sidx[i].Len()
 	}

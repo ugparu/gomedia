@@ -35,7 +35,7 @@ const segSize = 6 * time.Second
 
 // Writers
 var (
-	hlsWr    = hls.New(1, 3, segSize, 100)
+	hlsWr    = hls.New(1, 6, segSize, 100)
 	webrtcWr gomedia.WebRTCStreamer
 	seg      gomedia.Segmenter
 )
@@ -69,7 +69,7 @@ func main() {
 	logrus.Info("WebRTC writer initialized")
 
 	// Initialize Segmenter for MP4 recording
-	seg = segmenter.New("./recordings/", segSize, gomedia.Always, 100)
+	seg = segmenter.New("./recordings/", time.Second*30, gomedia.Always, 100)
 	seg.Write()
 	logrus.Info("Segmenter initialized for MP4 recording")
 

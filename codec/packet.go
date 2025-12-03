@@ -89,7 +89,11 @@ func (pkt *BasePacket[T]) String() string {
 }
 
 func (pkt *BasePacket[T]) SwitchToMmap(f *os.File, offset int64, size int64) (err error) {
-	pkt.Buffer = GetFileBuffer(f, offset, size)
+	buf := GetFileBuffer(f, offset, int(size))
+	if buf == nil {
+		return fmt.Errorf("failed to mmap file at offset %d with size %d", offset, size)
+	}
+	pkt.Buffer = buf
 	return nil
 }
 
