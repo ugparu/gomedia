@@ -92,7 +92,7 @@ func (d *mjpegDemuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 
 	// Extract RTP marker bit from second byte of RTP header
 	// The marker bit is bit 0 of the second byte (payload[5])
-	d.markerBit = (d.baseDemuxer.payload[5] & 0x80) != 0
+	d.markerBit = (d.baseDemuxer.payload.Data()[5] & 0x80) != 0
 
 	// Parse MJPEG RTP payload
 	if err = d.parseMJPEGPacket(); err != nil {
@@ -115,7 +115,7 @@ func (d *mjpegDemuxer) parseMJPEGPacket() error {
 	}
 
 	// Parse main JPEG header (8 bytes)
-	headerData := d.payload[d.offset : d.offset+mjpegHeaderSize]
+	headerData := d.payload.Data()[d.offset : d.offset+mjpegHeaderSize]
 
 	// typeSpecific := headerData[0]
 	fragOffset := binary.BigEndian.Uint32([]byte{0, headerData[1], headerData[2], headerData[3]})
@@ -132,7 +132,7 @@ func (d *mjpegDemuxer) parseMJPEGPacket() error {
 			return errors.New("incomplete restart marker header")
 		}
 
-		restartData := d.payload[d.offset : d.offset+restartHeaderSize]
+		restartData := d.payload.Data()[d.offset : d.offset+restartHeaderSize]
 		restartInterval := binary.BigEndian.Uint16(restartData[0:2])
 		// F bit is bit 7 of byte 2, L bit is bit 6 of byte 2
 		fBit := (restartData[2] & 0x80) != 0
@@ -152,7 +152,7 @@ func (d *mjpegDemuxer) parseMJPEGPacket() error {
 			return errors.New("incomplete quantization table header")
 		}
 
-		qtableHeader := d.payload[d.offset : d.offset+qtableHeaderSize]
+		qtableHeader := d.payload.Data()[d.offset : d.offset+qtableHeaderSize]
 		qtableLength := binary.BigEndian.Uint16(qtableHeader[2:4])
 
 		d.offset += qtableHeaderSize
@@ -161,7 +161,7 @@ func (d *mjpegDemuxer) parseMJPEGPacket() error {
 			if d.end-d.offset < int(qtableLength) {
 				return errors.New("incomplete quantization table data")
 			}
-			qtableData = d.payload[d.offset : d.offset+int(qtableLength)]
+			qtableData = d.payload.Data()[d.offset : d.offset+int(qtableLength)]
 			d.offset += int(qtableLength)
 		}
 	}
@@ -201,7 +201,7 @@ func (d *mjpegDemuxer) parseMJPEGPacket() error {
 
 	// Add this fragment to our collection
 	payloadData := make([]byte, d.end-d.offset)
-	copy(payloadData, d.payload[d.offset:d.end])
+	copy(payloadData, d.payload.Data()[d.offset:d.end])
 
 	d.fragments = append(d.fragments, mjpegFragment{
 		fragOffset: fragOffset,

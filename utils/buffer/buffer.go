@@ -32,19 +32,6 @@ func Get(size int) RefBuffer {
 	return buf
 }
 
-func Put(b RefBuffer) {
-	buf, ok := b.(*memBuffer)
-	if !ok {
-		return
-	}
-	buf.ref--
-	if buf.ref > 0 || buf.Len() > maxBufSize {
-		return
-	}
-	buf.Reset()
-	bufPool.Put(b)
-}
-
 func (b *memBuffer) Resize(size int) {
 	b.size = size
 	if b.size > b.Cap() {
@@ -55,6 +42,17 @@ func (b *memBuffer) Resize(size int) {
 
 func (b *memBuffer) Data() []byte {
 	return b.Buffer.Bytes()[:b.size]
+}
+
+func (b *memBuffer) Close() {
+	b.ref--
+	if b.ref > 0 || b.Len() > maxBufSize {
+		return
+	}
+	b.Reset()
+	b.ref = 0
+	b.size = 0
+	bufPool.Put(b)
 }
 
 type memBuffer struct {

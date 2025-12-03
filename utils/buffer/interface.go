@@ -7,4 +7,5 @@ type RefBuffer interface {
 	Data() []byte
 	AddRef()
 	Resize(int)
+	Close()
 }

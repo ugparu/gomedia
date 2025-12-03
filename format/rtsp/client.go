@@ -343,7 +343,7 @@ func (c *client) describe() (sdps []sdp.Media, err error) {
 
 	sdpBuffer := buffer.Get(contentLen)
 	sdpBuffer.AddRef()
-	defer buffer.Put(sdpBuffer)
+	defer sdpBuffer.Close()
 
 	if err = c.conn.SetReadDeadline(time.Now().Add(readWriteTimeout)); err != nil {
 		return

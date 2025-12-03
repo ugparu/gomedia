@@ -42,7 +42,7 @@ func (d *aacDemuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 		return
 	}
 
-	buf := d.payload[d.offset:d.end]
+	buf := d.payload.Data()[d.offset:d.end]
 
 	ts := (time.Duration(d.timestamp) * time.Second) / time.Duration(d.sdp.TimeScale)
 	duration := (1024 * time.Second / time.Duration(d.sdp.TimeScale))

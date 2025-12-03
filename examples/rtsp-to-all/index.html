@@ -506,13 +506,13 @@
         function initHLSPlayer() {
             if (Hls.isSupported()) {
                 hlsInstance = new Hls({
-                    lowLatencyMode: true,
+                    lowLatencyMode: false,
                     backBufferLength: 10,
-                    liveSyncDurationCount: 1,
-                    liveMaxLatencyDurationCount: 3,
+                    liveSyncDurationCount: 2,
+                    liveMaxLatencyDurationCount: 5,
                     liveDurationInfinity: true,
                     maxBufferLength: 30,
-                    liveBackBufferLength: 0,
+                    liveBackBufferLength: 5,
                     maxMaxBufferLength: 60,
                     emeEnabled: false,
                     debug: false

@@ -106,8 +106,8 @@ func (d *h264Demuxer) processSTAPA(nalU []byte) error {
 
 // processLFUA handles FU-A NAL units
 func (d *h264Demuxer) processLFUA() error {
-	fuIndicator := d.payload[d.offset]
-	fuHeader := d.payload[d.offset+1]
+	fuIndicator := d.payload.Data()[d.offset]
+	fuHeader := d.payload.Data()[d.offset+1]
 	isStart := fuHeader&0x80 != 0 //nolint:mnd
 	isEnd := fuHeader&0x40 != 0   //nolint:mnd
 
@@ -119,7 +119,7 @@ func (d *h264Demuxer) processLFUA() error {
 	}
 
 	if d.fuStarted {
-		d.BufferRTPPacket.Write(d.payload[d.offset+2 : d.end])
+		d.BufferRTPPacket.Write(d.payload.Data()[d.offset+2 : d.end])
 		if isEnd {
 			return d.finalizeFUAPacket()
 		}

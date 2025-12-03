@@ -33,7 +33,7 @@ func (d *alawDemuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 	}
 
 	buf := make([]byte, d.end-d.offset)
-	copy(buf, d.payload[d.offset:d.end])
+	copy(buf, d.payload.Data()[d.offset:d.end])
 	pkt = pcm.NewPacket(buf, (time.Duration(d.timestamp)*time.Second)/time.Duration(d.sdp.TimeScale),
 		"", time.Now(), d.CodecParameters,
 		(time.Duration(len(buf))*time.Second)/time.Duration(d.sdp.TimeScale)) //nolint:mnd

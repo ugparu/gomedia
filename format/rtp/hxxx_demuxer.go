@@ -26,7 +26,7 @@ func (d *hxxxDemuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 		return
 	}
 
-	d.nals, _ = nal.SplitNALUs(d.payload[d.offset:d.end])
+	d.nals, _ = nal.SplitNALUs(d.payload.Data()[d.offset:d.end])
 	if len(d.nals) == 0 || len(d.nals[0]) == 0 {
 		err = errors.New("empty nal unit")
 		return
