@@ -3,7 +3,6 @@ package mp4
 import (
 	"encoding/binary"
 	"io"
-	"os"
 	"time"
 
 	"github.com/ugparu/gomedia"
@@ -530,16 +529,16 @@ func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
 	s.sample.ChunkOffset.Entries = append(s.sample.ChunkOffset.Entries, uint32(s.muxer.writePosition)) //nolint:gosec
 	s.sample.SampleSize.Entries = append(s.sample.SampleSize.Entries, uint32(len(pkt.Data())))         //nolint:gosec
 
-	f, ok := s.muxer.writer.(*os.File)
-	if ok {
-		if err = s.muxer.bufferedWriter.Flush(); err != nil {
-			return
-		}
+	// f, ok := s.muxer.writer.(*os.File)
+	// if ok {
+	// 	if err = s.muxer.bufferedWriter.Flush(); err != nil {
+	// 		return
+	// 	}
 
-		if err = s.lastPacket.SwitchToMmap(f, s.muxer.lastPacketStart, int64(len(s.lastPacket.Data()))); err != nil {
-			return
-		}
-	}
+	// 	if err = s.lastPacket.SwitchToMmap(f, s.muxer.lastPacketStart, int64(len(s.lastPacket.Data()))); err != nil {
+	// 		return
+	// 	}
+	// }
 
 	// Update write position.
 	s.muxer.writePosition += int64(len(pkt.Data()))

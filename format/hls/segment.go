@@ -3,7 +3,6 @@ package hls
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/ugparu/gomedia"
@@ -22,12 +21,10 @@ type segment struct {
 	manifestEntry      string                      // HLS manifest entry for the segment.
 	codecPars          gomedia.CodecParametersPair // Codec parameters for the segment.
 	cacheEntry         string                      // Cache entry for manifest generation.
-	mp4Buf             []byte                      // Buffer for the finalized MP4 content.
 	fragments          []*fragment                 // List of fragments in the segment.
 	time               time.Time                   // Time when the segment was created.
 	sMux               *fmp4.Muxer
 	fMux               *fmp4.Muxer
-	generateOnce       sync.Once // Ensures MP4 buffer is generated only once.
 }
 
 // newSegment creates a new segment with the specified parameters.
@@ -49,13 +46,11 @@ func newSegment(
 		finished:           make(chan struct{}),
 		duration:           0,
 		time:               time.Now(),
-		mp4Buf:             nil,
 		cacheEntry:         "",
 		curFragment:        nil,
 		manifestEntry:      "",
 		sMux:               sMux,
 		fMux:               fMux,
-		generateOnce:       sync.Once{},
 	}
 	seg.manifestEntry = seg.fragments[0].manifestEntry
 	seg.curFragment = seg.fragments[0]
@@ -110,10 +105,7 @@ func (element *segment) close() (err error) {
 // getMp4Buffer returns the MP4 buffer, generating it on first access.
 // Uses sync.Once to ensure the buffer is generated only once and reused.
 func (element *segment) getMp4Buffer() []byte {
-	element.generateOnce.Do(func() {
-		element.mp4Buf = element.sMux.GetMP4Fragment(element.mp4Buf)
-	})
-	return element.mp4Buf
+	return element.sMux.GetMP4Fragment(nil)
 }
 
 // getFragment gets the MP4 content of a specific fragment in the segment.

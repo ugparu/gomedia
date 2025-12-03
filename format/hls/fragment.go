@@ -2,7 +2,6 @@ package hls
 
 import (
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/ugparu/gomedia"
@@ -20,8 +19,6 @@ type fragment struct {
 	finished       chan struct{} // Channel to signal completion of the fragment.
 	manifestEntry  string        // HLS manifest entry.
 	mux            *fmp4.Muxer
-	mp4Buff        []byte    // Buffer for the finalized MP4 content.
-	generateOnce   sync.Once // Ensures MP4 buffer is generated only once.
 }
 
 // newFragment creates a new fragment with the specified parameters.
@@ -33,10 +30,8 @@ func newFragment(id uint8, segID uint64, targetDuration time.Duration, mux *fmp4
 		independent:    false,
 		duration:       0,
 		finished:       make(chan struct{}),
-		mp4Buff:        nil,
 		manifestEntry:  "",
 		mux:            mux,
-		generateOnce:   sync.Once{},
 	}
 	// Initialize the manifest entry with a preload hint.
 	frag.manifestEntry = fmt.Sprintf("#EXT-X-PRELOAD-HINT:TYPE=PART,URI=\"fragment/%d/%d/cubic.m4s\"\n", segID, id)
@@ -98,10 +93,7 @@ func (fr *fragment) close() error {
 // getMp4Buffer returns the MP4 buffer, generating it on first access.
 // Uses sync.Once to ensure the buffer is generated only once and reused.
 func (fr *fragment) getMp4Buffer() []byte {
-	fr.generateOnce.Do(func() {
-		fr.mp4Buff = fr.mux.GetMP4Fragment(fr.mp4Buff)
-	})
-	return fr.mp4Buff
+	return fr.mux.GetMP4Fragment(nil)
 }
 
 // String returns a string representation of the fragment.
