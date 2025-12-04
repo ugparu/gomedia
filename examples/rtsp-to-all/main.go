@@ -120,8 +120,8 @@ func main() {
 		for {
 			select {
 			case smpl := <-audioDecoder.Samples():
-				aacEnc.Samples() <- smpl
-
+				aacEnc.Samples() <- smpl.Clone(false).(gomedia.AudioPacket)
+				smpl.Close()
 			case pkt := <-aacEnc.Packets():
 				// Send transcoded audio to HLS
 				for _, url := range rtspURLs {
@@ -129,7 +129,7 @@ func main() {
 					clonePkt.SetURL(url)
 					hlsWr.Packets() <- clonePkt
 				}
-
+				pkt.Close()
 			case pkt := <-rdr.Packets():
 				if inPkt, ok := pkt.(gomedia.AudioPacket); ok {
 					// Transcode audio for HLS (only first stream)

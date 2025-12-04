@@ -58,6 +58,7 @@ func (e *audioEncoder) Step(doneCh <-chan struct{}) error {
 		if !ok {
 			return fmt.Errorf("invalid packet type: %T", pkt)
 		}
+		defer aPkt.Close()
 
 		if pkt.CodecParameters() != e.inpCodecPar {
 			e.inpCodecPar, _ = pkt.CodecParameters().(*pcm.CodecParameters)

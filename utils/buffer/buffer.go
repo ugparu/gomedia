@@ -17,7 +17,7 @@ var bigTotal, total int
 var bufPool = sync.Pool{
 	New: func() any {
 		total++
-		if total%100 == 0 {
+		if total%1 == 0 {
 			println("total", total)
 		}
 		return &memBuffer{
@@ -30,7 +30,7 @@ var bufPool = sync.Pool{
 var bigBufPool = sync.Pool{
 	New: func() any {
 		bigTotal++
-		if bigTotal%100 == 0 {
+		if bigTotal%1 == 0 {
 			println("bigTotal", bigTotal)
 		}
 		return &memBuffer{
