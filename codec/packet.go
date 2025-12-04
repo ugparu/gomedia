@@ -141,11 +141,6 @@ func (pkt *BasePacket[T]) Retain() {
 }
 
 func (pkt *BasePacket[T]) SwitchToFile(f *os.File, offset int64, size int64, closeFn func() error) (err error) {
-	// Sync file to ensure writes are flushed before mmap
-	if err = f.Sync(); err != nil {
-		return err
-	}
-
 	buf, err := buffer.GetMmap(f, offset, int(size), closeFn)
 	if err != nil {
 		return err
