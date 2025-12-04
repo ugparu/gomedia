@@ -10,6 +10,7 @@ import (
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/format/mp4/mp4io"
 	"github.com/ugparu/gomedia/utils/bits/pio"
+	"github.com/ugparu/gomedia/utils/buffer"
 )
 
 // Muxer represents an MP4 muxer that combines multiple media streams into a single MP4 file.
@@ -182,11 +183,13 @@ func (mux *Muxer) Mux(streams gomedia.CodecParametersPair) (err error) {
 	// Write the ftyp atom.
 	ftyp := mp4io.NewFileType()
 
-	buffer := make([]byte, ftyp.Len())
+	buf := buffer.Get(ftyp.Len())
+	defer buf.Release()
 
-	ftyp.Marshal(buffer)
+	bufData := buf.Data()
+	ftyp.Marshal(bufData)
 
-	if _, err = mux.writer.Write(buffer); err != nil {
+	if _, err = mux.writer.Write(bufData); err != nil {
 		return
 	}
 	mux.writePosition += int64(ftyp.Len())
@@ -198,20 +201,20 @@ func (mux *Muxer) Mux(streams gomedia.CodecParametersPair) (err error) {
 		},
 	}
 
-	buffer = buffer[:8]
+	bufData = bufData[:8]
 
-	free.Marshal(buffer)
+	free.Marshal(bufData)
 
-	if _, err = mux.writer.Write(buffer); err != nil {
+	if _, err = mux.writer.Write(bufData); err != nil {
 		return
 	}
 	mux.writePosition += int64(free.Len())
 
-	buffer = buffer[:16]
+	bufData = bufData[:16]
 
-	pio.PutU32BE(buffer, 1)
-	pio.PutU32BE(buffer[4:], uint32(mp4io.MDAT))
-	if _, err = mux.writer.Write(buffer); err != nil {
+	pio.PutU32BE(bufData, 1)
+	pio.PutU32BE(bufData[4:], uint32(mp4io.MDAT))
+	if _, err = mux.writer.Write(bufData); err != nil {
 		return
 	}
 	mux.writePosition += 16

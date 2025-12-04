@@ -42,7 +42,6 @@ var bigBufPool = sync.Pool{
 
 // Get получает буфер из пула с заданной длиной (len)
 func Get(size int) PooledBuffer {
-	println(size)
 	var b *memBuffer
 	if size >= bigBufSize {
 		b = bigBufPool.Get().(*memBuffer)
