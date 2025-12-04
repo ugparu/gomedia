@@ -61,6 +61,10 @@ type Stream struct {
 	// H.265 sliced packet buffering support
 	h265SlicedPacket *h265.Packet // Buffer for accumulating H.265 slices that belong to the same frame
 	h265BufferHasKey bool         // Track if the current buffered frame contains key frame slices
+
+	// Tracking for mmap support - where the packet data starts (after SPS/PPS/VPS for keyframes)
+	lastPacketDataOffset int64
+	lastPacketDataSize   int64
 }
 
 // timeToTS converts a duration to a timestamp based on the stream's time scale.
@@ -492,8 +496,16 @@ func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
 		}
 	}
 
+	// Track where the actual packet data starts (after SPS/PPS/VPS)
+	s.lastPacketDataOffset = s.muxer.writePosition + int64(pktSize-len(pkt.Data()))
+	s.lastPacketDataSize = int64(len(pkt.Data()))
+
 	// Write the packet data to the buffered writer.
 	if _, err = s.muxer.bufferedWriter.Write(pkt.Data()); err != nil {
+		return
+	}
+
+	if err = s.muxer.bufferedWriter.Flush(); err != nil {
 		return
 	}
 
@@ -532,17 +544,6 @@ func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
 	s.sampleIndex++
 	s.sample.ChunkOffset.Entries = append(s.sample.ChunkOffset.Entries, uint32(s.muxer.writePosition)) //nolint:gosec
 	s.sample.SampleSize.Entries = append(s.sample.SampleSize.Entries, uint32(len(pkt.Data())))         //nolint:gosec
-
-	// f, ok := s.muxer.writer.(*os.File)
-	// if ok {
-	// 	if err = s.muxer.bufferedWriter.Flush(); err != nil {
-	// 		return
-	// 	}
-
-	// 	if err = s.lastPacket.SwitchToMmap(f, s.muxer.lastPacketStart, int64(len(s.lastPacket.Data()))); err != nil {
-	// 		return
-	// 	}
-	// }
 
 	// Update write position.
 	s.muxer.writePosition += int64(len(pkt.Data()))

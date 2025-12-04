@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/ugparu/gomedia"
@@ -21,6 +22,7 @@ type activeFile struct {
 	folder    string
 	name      string
 	duration  time.Duration
+	wg        sync.WaitGroup // WaitGroup to track mmap buffer releases
 }
 
 // ringBuffer holds a window of packets for Event mode pre-buffering
@@ -184,6 +186,7 @@ func (s *segmenter) openNewFile(startTime time.Time) error {
 		folder:    folder,
 		name:      name,
 		duration:  0,
+		wg:        sync.WaitGroup{},
 	}
 
 	return nil
@@ -209,22 +212,22 @@ func (s *segmenter) closeActiveFile(stopChan <-chan struct{}) error {
 		return err
 	}
 
-	if closeErr := af.file.Close(); closeErr != nil {
-		return closeErr
-	}
+	// Close file in separate goroutine after all mmap buffers are released
+	go func(stopTime time.Time) {
+		af.wg.Wait()
+		_ = af.file.Close()
 
-	stopTime := af.startTime.Add(af.duration)
-
-	select {
-	case s.outInfoCh <- gomedia.FileInfo{
-		Name:  af.folder + af.name,
-		Start: af.startTime,
-		Stop:  stopTime,
-		Size:  int(fi.Size()),
-	}:
-	case <-stopChan:
-		return &lifecycle.BreakError{}
-	}
+		select {
+		case s.outInfoCh <- gomedia.FileInfo{
+			Name:  af.folder + af.name,
+			Start: af.startTime,
+			Stop:  stopTime,
+			Size:  int(fi.Size()),
+		}:
+		case <-stopChan:
+			return
+		}
+	}(af.startTime.Add(af.duration))
 
 	return nil
 }
@@ -235,13 +238,35 @@ func (s *segmenter) writePacketToFile(pkt gomedia.Packet) error {
 		return errors.New("no active file")
 	}
 
-	if err := s.activeFile.muxer.WritePacket(pkt); err != nil {
+	af := s.activeFile
+
+	// Get the pre-last packet (the one that will be written)
+	preLastPkt := af.muxer.GetPreLastPacket(pkt.StreamIndex())
+
+	if err := af.muxer.WritePacket(pkt); err != nil {
 		return err
+	}
+
+	// Switch pre-last packet to file if it was written
+	if preLastPkt != nil {
+		// Get the actual packet data offset and size (excluding SPS/PPS/VPS for keyframes)
+		dataOffset, dataSize := af.muxer.GetLastPacketDataInfo(pkt.StreamIndex())
+		if dataSize > 0 {
+			af.wg.Add(1)
+			done := func() error {
+				af.wg.Done()
+				return nil
+			}
+			if err := preLastPkt.SwitchToFile(af.file, dataOffset, dataSize, done); err != nil {
+				af.wg.Done() // Decrement on error since SwitchToFile won't call done
+				return err
+			}
+		}
 	}
 
 	// Only count video packet durations for segment timing
 	if _, ok := pkt.(gomedia.VideoPacket); ok {
-		s.activeFile.duration += pkt.Duration()
+		af.duration += pkt.Duration()
 	}
 
 	return nil

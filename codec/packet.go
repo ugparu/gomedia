@@ -1,6 +1,7 @@
 package codec
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"time"
@@ -90,12 +91,32 @@ func (pkt *BasePacket[T]) String() string {
 	return fmt.Sprintf("PACKET sz=%d", pkt.Buffer.Len())
 }
 
-func (pkt *BasePacket[T]) SwitchToMmap(f *os.File, offset int64, size int64) (err error) {
-	// buf := GetFileBuffer(f, offset, int(size))
-	// if buf == nil {
-	// 	return fmt.Errorf("failed to mmap file at offset %d with size %d", offset, size)
-	// }
+func BuffersEqual(a, b buffer.PooledBuffer) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	da, db := a.Data(), b.Data()
+	if len(da) != len(db) {
+		return false
+	}
+	return bytes.Equal(da, db)
+}
+
+func (pkt *BasePacket[T]) SwitchToFile(f *os.File, offset int64, size int64, closeFn func() error) (err error) {
+	// Sync file to ensure writes are flushed before mmap
+	if err = f.Sync(); err != nil {
+		return err
+	}
+
+	buf, err := buffer.GetMmap(f, offset, int(size), closeFn)
+	if err != nil {
+		return err
+	}
+	println(BuffersEqual(pkt.Buffer, buf))
+
+	// pkt.Buffer.Release()
 	// pkt.Buffer = buf
+
 	return nil
 }
 

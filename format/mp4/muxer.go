@@ -31,6 +31,29 @@ func NewMuxer(writer io.WriteSeeker) *Muxer {
 	}
 }
 
+func (mux *Muxer) GetWritePosition() int64 {
+	return mux.writePosition
+}
+
+// GetPreLastPacket returns the pre-last packet (the packet that will be written on next WritePacket call)
+// for the given stream index. Returns nil if no packet is buffered for that stream.
+func (mux *Muxer) GetPreLastPacket(streamIndex uint8) gomedia.Packet {
+	if int(streamIndex) >= len(mux.streams) {
+		return nil
+	}
+	return mux.streams[streamIndex].lastPacket
+}
+
+// GetLastPacketDataInfo returns the offset and size of the last written packet's data
+// (excluding SPS/PPS/VPS that may be prepended for keyframes)
+func (mux *Muxer) GetLastPacketDataInfo(streamIndex uint8) (offset int64, size int64) {
+	if int(streamIndex) >= len(mux.streams) {
+		return 0, 0
+	}
+	stream := mux.streams[streamIndex]
+	return stream.lastPacketDataOffset, stream.lastPacketDataSize
+}
+
 // newStream creates a new media stream based on the provided codec parameters and adds it to the muxer.
 func (mux *Muxer) newStream(codec gomedia.CodecParameters) (err error) {
 	// Check if the codec type is supported.

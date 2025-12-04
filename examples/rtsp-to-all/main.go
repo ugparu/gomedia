@@ -22,6 +22,7 @@ import (
 	"github.com/ugparu/gomedia/decoder/pcm"
 	"github.com/ugparu/gomedia/encoder"
 	"github.com/ugparu/gomedia/encoder/aac"
+	pcmEnc "github.com/ugparu/gomedia/encoder/pcm"
 	"github.com/ugparu/gomedia/reader"
 	"github.com/ugparu/gomedia/utils/logger"
 	"github.com/ugparu/gomedia/writer/hls"
@@ -39,6 +40,9 @@ var (
 	webrtcWr gomedia.WebRTCStreamer
 	seg      gomedia.Segmenter
 )
+
+// Audio processing state
+var audioPktType gomedia.CodecType
 
 // WebRTC SDP request/response
 type SDPRequest struct {
@@ -95,6 +99,9 @@ func main() {
 	aacEnc := encoder.NewAudioEncoder(100, aac.NewAacEncoder)
 	aacEnc.Encode()
 
+	alawEnc := encoder.NewAudioEncoder(100, pcmEnc.NewAlawEncoder)
+	alawEnc.Encode()
+
 	audioDecoder := decoder.NewAudioDecoder(100, map[gomedia.CodecType]func() decoder.InnerAudioDecoder{
 		gomedia.PCMAlaw: pcm.NewALAWDecoder,
 		gomedia.PCMUlaw: pcm.NewULAWDecoder,
@@ -120,29 +127,19 @@ func main() {
 		for {
 			select {
 			case smpl := <-audioDecoder.Samples():
-				aacEnc.Samples() <- smpl
-
+				processDecodedAudioPacket(smpl, aacEnc, alawEnc)
 			case pkt := <-aacEnc.Packets():
-				// Send transcoded audio to HLS
-				for _, url := range rtspURLs {
-					clonePkt := pkt.Clone(false)
-					clonePkt.SetURL(url)
-					hlsWr.Packets() <- clonePkt
-				}
-
+				aPacket := pkt.Clone(false)
+				aPacket.SetURL(rtspURLs[0]) // Use first URL for recording
+				seg.Packets() <- aPacket
+				processEncodedAudioPacket(pkt, hlsWr)
+			case pkt := <-alawEnc.Packets():
+				processEncodedAudioPacket(pkt, webrtcWr)
 			case pkt := <-rdr.Packets():
-				if inPkt, ok := pkt.(gomedia.AudioPacket); ok {
-					// Transcode audio for HLS (only first stream)
-					if inPkt.URL() == rtspURLs[0] {
-						audioDecoder.Packets() <- inPkt.Clone(false).(gomedia.AudioPacket)
-					}
-					// Send audio to WebRTC
-					webrtcWr.Packets() <- pkt.Clone(false)
-				} else if inPkt, ok := pkt.(gomedia.VideoPacket); ok {
-					// Send video to all writers
-					hlsWr.Packets() <- inPkt.Clone(false)
-					webrtcWr.Packets() <- inPkt.Clone(false)
-					seg.Packets() <- inPkt.Clone(false)
+				if audioPkt, ok := pkt.(gomedia.AudioPacket); ok {
+					processInputAudioPacket(audioPkt, audioDecoder, hlsWr, webrtcWr, seg)
+				} else if videoPkt, ok := pkt.(gomedia.VideoPacket); ok {
+					processVideoPacket(videoPkt, hlsWr, webrtcWr, seg)
 				}
 				packetCount++
 
@@ -419,4 +416,67 @@ func GetCodecInfo(c *gin.Context) {
 func GetIndexHTML(c *gin.Context) {
 	logrus.Debug("Index HTML page requested")
 	c.File("index.html")
+}
+
+// Audio packet processing functions following the example pattern
+
+func processInputAudioPacket(packet gomedia.AudioPacket, audioDecoder gomedia.AudioDecoder, hlsWr gomedia.HLSStreamer, webrtcWr gomedia.WebRTCStreamer, seg gomedia.Segmenter) {
+	// Only process audio from the first stream if there are multiple URLs
+	if len(rtspURLs) > 1 && packet.URL() != rtspURLs[0] {
+		return
+	}
+
+	// Always send to decoder
+	audioDecoder.Packets() <- packet.Clone(false).(gomedia.AudioPacket)
+
+	// Track the audio packet type
+	audioPktType = packet.CodecParameters().Type()
+
+	switch audioPktType {
+	case gomedia.AAC:
+		// Send AAC directly to HLS for all URLs
+		for _, url := range rtspURLs {
+			clonePkt := packet.Clone(false)
+			clonePkt.SetURL(url)
+			hlsWr.Packets() <- clonePkt
+		}
+		// Send to segmenter for recording
+		aPacket := packet.Clone(false)
+		aPacket.SetURL(rtspURLs[0]) // Use first URL for recording
+		seg.Packets() <- aPacket
+	case gomedia.PCMAlaw:
+		// Send PCMAlaw directly to WebRTC
+		webrtcWr.Packets() <- packet.Clone(false)
+	}
+}
+
+func processDecodedAudioPacket(packet gomedia.AudioPacket, aacEnc gomedia.AudioEncoder, alawEnc gomedia.AudioEncoder) {
+	// If audio type is NOT AAC, send to AAC encoder for HLS
+	if audioPktType != gomedia.AAC {
+		aacEnc.Samples() <- packet.Clone(false).(gomedia.AudioPacket)
+	}
+	// If audio type is NOT PCMAlaw, send to ALAW encoder for WebRTC
+	if audioPktType != gomedia.PCMAlaw {
+		alawEnc.Samples() <- packet.Clone(false).(gomedia.AudioPacket)
+	}
+	packet.Close()
+}
+
+func processEncodedAudioPacket(packet gomedia.Packet, wr gomedia.Writer) {
+	// Distribute encoded packets to all URLs
+	for _, url := range rtspURLs {
+		pkt := packet.Clone(false)
+		pkt.SetURL(url)
+		wr.Packets() <- pkt
+	}
+	packet.Close()
+}
+
+func processVideoPacket(packet gomedia.VideoPacket, hlsWr gomedia.HLSStreamer, webrtcWr gomedia.WebRTCStreamer, seg gomedia.Segmenter) {
+	// Send video to HLS
+	hlsWr.Packets() <- packet.Clone(false)
+	// Send video to WebRTC
+	webrtcWr.Packets() <- packet.Clone(false)
+	// Send video to segmenter for recording
+	seg.Packets() <- packet.Clone(false)
 }
