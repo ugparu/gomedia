@@ -62,6 +62,10 @@ type Stream struct {
 	// H.265 sliced packet buffering support
 	h265SlicedPacket *h265.Packet // Buffer for accumulating H.265 slices that belong to the same frame
 	h265BufferHasKey bool         // Track if the current buffered frame contains key frame slices
+
+	// Tracking for mmap support - where the packet data starts (after SPS/PPS/VPS for keyframes)
+	lastPacketDataOffset int64
+	lastPacketDataSize   int64
 }
 
 // timeToTS converts a duration to a timestamp based on the stream's time scale.
@@ -362,10 +366,10 @@ func (s *Stream) readPacket(tm time.Duration, url string) (pkt gomedia.Packet, e
 
 				if s.h265SlicedPacket != nil {
 					// Add to existing sliced packet buffer
-					existingData := s.h265SlicedPacket.Buffer.Data()
+					existingData := s.h265SlicedPacket.Buffer().Data()
 					newData := append(existingData, naluWithHeader...)
-					s.h265SlicedPacket.Buffer.Resize(len(newData))
-					copy(s.h265SlicedPacket.Buffer.Data(), newData)
+					s.h265SlicedPacket.Buffer().Resize(len(newData))
+					copy(s.h265SlicedPacket.Buffer().Data(), newData)
 				} else {
 					// Create new packet for parameter sets
 					pkt = h265.NewPacket(false, tm, time.Now(), naluWithHeader, url, h265Par)
@@ -391,10 +395,10 @@ func (s *Stream) readPacket(tm time.Duration, url string) (pkt gomedia.Packet, e
 					s.h265BufferHasKey = sliceIsKey
 				} else if s.h265SlicedPacket != nil {
 					// Subsequent slice: add to current buffered packet
-					existingData := s.h265SlicedPacket.Buffer.Data()
+					existingData := s.h265SlicedPacket.Buffer().Data()
 					newData := append(existingData, naluWithHeader...)
-					s.h265SlicedPacket.Buffer.Resize(len(newData))
-					copy(s.h265SlicedPacket.Buffer.Data(), newData)
+					s.h265SlicedPacket.Buffer().Resize(len(newData))
+					copy(s.h265SlicedPacket.Buffer().Data(), newData)
 					s.h265SlicedPacket.IsKeyFrm = s.h265SlicedPacket.IsKeyFrm || sliceIsKey
 					s.h265BufferHasKey = s.h265BufferHasKey || sliceIsKey
 				} else {
@@ -517,8 +521,16 @@ func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
 		}
 	}
 
+	// Track where the actual packet data starts (after SPS/PPS/VPS)
+	s.lastPacketDataOffset = s.muxer.writePosition + int64(pktSize-len(pkt.Data()))
+	s.lastPacketDataSize = int64(len(pkt.Data()))
+
 	// Write the packet data to the buffered writer.
 	if _, err = s.muxer.bufferedWriter.Write(pkt.Data()); err != nil {
+		return
+	}
+
+	if err = s.muxer.bufferedWriter.Flush(); err != nil {
 		return
 	}
 
@@ -557,17 +569,6 @@ func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
 	s.sampleIndex++
 	s.sample.ChunkOffset.Entries = append(s.sample.ChunkOffset.Entries, uint32(s.muxer.writePosition)) //nolint:gosec
 	s.sample.SampleSize.Entries = append(s.sample.SampleSize.Entries, uint32(pktSize))                 //nolint:gosec
-
-	// f, ok := s.muxer.writer.(*os.File)
-	// if ok {
-	// 	if err = s.muxer.bufferedWriter.Flush(); err != nil {
-	// 		return
-	// 	}
-
-	// 	if err = s.lastPacket.SwitchToMmap(f, s.muxer.lastPacketStart, int64(len(s.lastPacket.Data()))); err != nil {
-	// 		return
-	// 	}
-	// }
 
 	// Update write position.
 	s.muxer.writePosition += int64(pktSize)

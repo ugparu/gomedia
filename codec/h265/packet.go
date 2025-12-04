@@ -24,15 +24,15 @@ func NewPacket(
 	copy(buf.Data(), data)
 	return &Packet{
 		VideoPacket: codec.VideoPacket[*CodecParameters]{
-			BasePacket: codec.BasePacket[*CodecParameters]{
-				Idx:          param.StreamIndex(),
-				RelativeTime: timestamp,
-				Dur:          0,
-				InpURL:       url,
-				Buffer:       buf,
-				AbsoluteTime: absTime,
-				CodecPar:     param,
-			},
+			BasePacket: codec.NewBasePacket(
+				param.StreamIndex(),
+				timestamp,
+				0,
+				url,
+				buf,
+				absTime,
+				param,
+			),
 			IsKeyFrm: key,
 		},
 	}

@@ -6,7 +6,8 @@ type PooledBuffer interface {
 	Len() int
 	Cap() int
 
-	Retain()
+	// Release returns the buffer to the pool. After calling Release,
+	// the buffer should not be used.
 	Release()
 
 	Resize(int)

@@ -1,22 +1,52 @@
 package codec
 
 import (
+	"bytes"
 	"fmt"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/utils/buffer"
 )
 
+// sharedBuffer holds the buffer and reference count, shared between packet clones.
+// This ensures all clones see the same buffer when it's swapped (e.g., via SwitchToFile).
+type sharedBuffer struct {
+	buf buffer.PooledBuffer
+	ref int32
+}
+
 type BasePacket[T gomedia.CodecParameters] struct {
 	Idx          uint8
 	RelativeTime time.Duration
 	Dur          time.Duration
 	InpURL       string
-	Buffer       buffer.PooledBuffer
+	shared       *sharedBuffer // shared between clones
 	AbsoluteTime time.Time
 	CodecPar     T
+}
+
+// NewBasePacket creates a new BasePacket with the given buffer properly initialized.
+func NewBasePacket[T gomedia.CodecParameters](
+	idx uint8,
+	relativeTime time.Duration,
+	dur time.Duration,
+	url string,
+	buf buffer.PooledBuffer,
+	absTime time.Time,
+	codecPar T,
+) BasePacket[T] {
+	return BasePacket[T]{
+		Idx:          idx,
+		RelativeTime: relativeTime,
+		Dur:          dur,
+		InpURL:       url,
+		shared:       &sharedBuffer{buf: buf, ref: 1},
+		AbsoluteTime: absTime,
+		CodecPar:     codecPar,
+	}
 }
 
 func (pkt *BasePacket[T]) Clone(copyData bool) BasePacket[T] {
@@ -25,16 +55,18 @@ func (pkt *BasePacket[T]) Clone(copyData bool) BasePacket[T] {
 		RelativeTime: pkt.RelativeTime,
 		Dur:          pkt.Dur,
 		InpURL:       pkt.InpURL,
-		Buffer:       nil,
+		shared:       nil,
 		AbsoluteTime: pkt.AbsoluteTime,
 		CodecPar:     pkt.CodecPar,
 	}
 	if copyData {
-		newPkt.Buffer = buffer.Get(len(pkt.Buffer.Data()))
-		copy(newPkt.Buffer.Data(), pkt.Buffer.Data())
+		buf := buffer.Get(len(pkt.shared.buf.Data()))
+		copy(buf.Data(), pkt.shared.buf.Data())
+		newPkt.shared = &sharedBuffer{buf: buf, ref: 1}
 	} else {
-		newPkt.Buffer = pkt.Buffer
-		newPkt.Buffer.Retain()
+		// Share the same buffer - all clones will see buffer changes (e.g., SwitchToFile)
+		atomic.AddInt32(&pkt.shared.ref, 1)
+		newPkt.shared = pkt.shared
 	}
 	return newPkt
 }
@@ -68,7 +100,7 @@ func (pkt *BasePacket[T]) Timestamp() time.Duration {
 }
 
 func (pkt *BasePacket[T]) Data() []byte {
-	return pkt.Buffer.Data()
+	return pkt.shared.buf.Data()
 }
 
 func (pkt *BasePacket[T]) SetDuration(dur time.Duration) {
@@ -84,23 +116,72 @@ func (pkt *BasePacket[T]) Duration() time.Duration {
 }
 
 func (pkt *BasePacket[T]) String() string {
-	if pkt == nil {
+	if pkt == nil || pkt.shared == nil {
 		return "EMPTY_PACKET"
 	}
-	return fmt.Sprintf("PACKET sz=%d", pkt.Buffer.Len())
+	return fmt.Sprintf("PACKET sz=%d", pkt.shared.buf.Len())
 }
 
-func (pkt *BasePacket[T]) SwitchToMmap(f *os.File, offset int64, size int64) (err error) {
-	// buf := GetFileBuffer(f, offset, int(size))
-	// if buf == nil {
-	// 	return fmt.Errorf("failed to mmap file at offset %d with size %d", offset, size)
-	// }
-	// pkt.Buffer = buf
+// Buffer returns the underlying buffer. Use Data() for the byte slice.
+func (pkt *BasePacket[T]) Buffer() buffer.PooledBuffer {
+	if pkt.shared == nil {
+		return nil
+	}
+	return pkt.shared.buf
+}
+
+// SetBuffer sets the buffer for a new packet. Only call this once during packet creation.
+func (pkt *BasePacket[T]) SetBuffer(buf buffer.PooledBuffer) {
+	pkt.shared = &sharedBuffer{buf: buf, ref: 1}
+}
+
+// Retain increases the reference count. Use this when you need to keep a reference
+// to the packet beyond its original scope.
+func (pkt *BasePacket[T]) Retain() {
+	atomic.AddInt32(&pkt.shared.ref, 1)
+}
+
+func BuffersEqual(a, b buffer.PooledBuffer) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	da, db := a.Data(), b.Data()
+	if len(da) != len(db) {
+		return false
+	}
+	return bytes.Equal(da, db)
+}
+
+func (pkt *BasePacket[T]) SwitchToFile(f *os.File, offset int64, size int64, closeFn func() error) (err error) {
+	// Sync file to ensure writes are flushed before mmap
+	if err = f.Sync(); err != nil {
+		return err
+	}
+
+	buf, err := buffer.GetMmap(f, offset, int(size), closeFn)
+	if err != nil {
+		return err
+	}
+
+	// Replace the buffer in the shared structure.
+	// All clones will see this change since they share the same sharedBuffer pointer.
+	oldBuf := pkt.shared.buf
+	pkt.shared.buf = buf
+	oldBuf.Release()
+
 	return nil
 }
 
 func (pkt *BasePacket[T]) Close() {
-	pkt.Buffer.Release()
+	if pkt.shared == nil {
+		return
+	}
+	count := atomic.AddInt32(&pkt.shared.ref, -1)
+	if count == 0 {
+		pkt.shared.buf.Release()
+	} else if count < 0 {
+		panic("packet reference count is negative")
+	}
 }
 
 type VideoPacket[T gomedia.VideoCodecParameters] struct {

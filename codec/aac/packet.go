@@ -19,15 +19,15 @@ func NewPacket(data []byte, ts time.Duration, url string,
 	copy(buf.Data(), data)
 	return &Packet{
 		AudioPacket: codec.AudioPacket[*CodecParameters]{
-			BasePacket: codec.BasePacket[*CodecParameters]{
-				Idx:          codecPar.StreamIndex(),
-				RelativeTime: ts,
-				Dur:          dur,
-				InpURL:       url,
-				Buffer:       buf,
-				AbsoluteTime: absTime,
-				CodecPar:     codecPar,
-			},
+			BasePacket: codec.NewBasePacket(
+				codecPar.StreamIndex(),
+				ts,
+				dur,
+				url,
+				buf,
+				absTime,
+				codecPar,
+			),
 		},
 	}
 }
