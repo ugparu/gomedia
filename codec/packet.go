@@ -1,7 +1,6 @@
 package codec
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"sync/atomic"
@@ -141,33 +140,22 @@ func (pkt *BasePacket[T]) Retain() {
 	atomic.AddInt32(&pkt.shared.ref, 1)
 }
 
-func BuffersEqual(a, b buffer.PooledBuffer) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	da, db := a.Data(), b.Data()
-	if len(da) != len(db) {
-		return false
-	}
-	return bytes.Equal(da, db)
-}
-
 func (pkt *BasePacket[T]) SwitchToFile(f *os.File, offset int64, size int64, closeFn func() error) (err error) {
-	// Sync file to ensure writes are flushed before mmap
-	if err = f.Sync(); err != nil {
-		return err
-	}
+	// // Sync file to ensure writes are flushed before mmap
+	// if err = f.Sync(); err != nil {
+	// 	return err
+	// }
 
-	buf, err := buffer.GetMmap(f, offset, int(size), closeFn)
-	if err != nil {
-		return err
-	}
+	// buf, err := buffer.GetMmap(f, offset, int(size), closeFn)
+	// if err != nil {
+	// 	return err
+	// }
 
-	// Replace the buffer in the shared structure.
-	// All clones will see this change since they share the same sharedBuffer pointer.
-	oldBuf := pkt.shared.buf
-	pkt.shared.buf = buf
-	oldBuf.Release()
+	// // Replace the buffer in the shared structure.
+	// // All clones will see this change since they share the same sharedBuffer pointer.
+	// oldBuf := pkt.shared.buf
+	// pkt.shared.buf = buf
+	// oldBuf.Release()
 
 	return nil
 }
