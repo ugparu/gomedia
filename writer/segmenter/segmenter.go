@@ -303,9 +303,15 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 		// Update codec parameters if changed
 		if vPkt, ok := inpPkt.(gomedia.VideoPacket); ok && vPkt.CodecParameters() != s.codecPar.VideoCodecParameters {
 			s.codecPar.VideoCodecParameters = vPkt.CodecParameters()
+			if err = s.closeActiveFile(s.Done()); err != nil {
+				return
+			}
 		}
 		if aPkt, ok := inpPkt.(gomedia.AudioPacket); ok && aPkt.CodecParameters() != s.codecPar.AudioCodecParameters {
 			s.codecPar.AudioCodecParameters = aPkt.CodecParameters()
+			if err = s.closeActiveFile(s.Done()); err != nil {
+				return
+			}
 		}
 
 		// Wait for first keyframe
@@ -322,9 +328,9 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 		// Handle based on record mode
 		switch s.recordMode {
 		case gomedia.Always:
-			err = s.handleAlwaysMode(stopCh, inpPkt, isVideo, isKeyframe)
+			err = s.handleAlwaysMode(stopCh, inpPkt, isKeyframe)
 		case gomedia.Event:
-			err = s.handleEventMode(stopCh, inpPkt, isVideo, isKeyframe)
+			err = s.handleEventMode(stopCh, inpPkt, isKeyframe)
 		case gomedia.Never:
 			// Should not reach here due to earlier check
 		}
@@ -333,7 +339,7 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 }
 
 // handleAlwaysMode handles packet processing in Always record mode
-func (s *segmenter) handleAlwaysMode(stopCh <-chan struct{}, pkt gomedia.Packet, isVideo, isKeyframe bool) error {
+func (s *segmenter) handleAlwaysMode(stopCh <-chan struct{}, pkt gomedia.Packet, isKeyframe bool) error {
 	// Check if we need to rotate file (on keyframe when duration exceeded)
 	if isKeyframe && s.activeFile != nil && s.activeFile.duration >= s.targetDuration {
 		if err := s.closeActiveFile(stopCh); err != nil {
@@ -362,7 +368,7 @@ func (s *segmenter) handleAlwaysMode(stopCh <-chan struct{}, pkt gomedia.Packet,
 }
 
 // handleEventMode handles packet processing in Event record mode
-func (s *segmenter) handleEventMode(stopCh <-chan struct{}, pkt gomedia.Packet, _ bool, isKeyframe bool) error {
+func (s *segmenter) handleEventMode(stopCh <-chan struct{}, pkt gomedia.Packet, isKeyframe bool) error {
 	// If we have an active file, handle writing or closing
 	if s.activeFile != nil {
 		return s.handleEventModeActiveFile(stopCh, pkt, isKeyframe)
