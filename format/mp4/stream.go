@@ -364,7 +364,7 @@ func (s *Stream) readPacket(tm time.Duration, url string) (pkt gomedia.Packet, e
 					existingData := s.h265SlicedPacket.Buffer.Data()
 					newData := append(existingData, naluWithHeader...)
 					s.h265SlicedPacket.Buffer.Resize(len(newData))
-					s.h265SlicedPacket.Buffer.Write(newData)
+					copy(s.h265SlicedPacket.Buffer.Data(), newData)
 				} else {
 					// Create new packet for parameter sets
 					pkt = h265.NewPacket(false, tm, time.Now(), naluWithHeader, url, h265Par)
@@ -393,7 +393,7 @@ func (s *Stream) readPacket(tm time.Duration, url string) (pkt gomedia.Packet, e
 					existingData := s.h265SlicedPacket.Buffer.Data()
 					newData := append(existingData, naluWithHeader...)
 					s.h265SlicedPacket.Buffer.Resize(len(newData))
-					s.h265SlicedPacket.Buffer.Write(newData)
+					copy(s.h265SlicedPacket.Buffer.Data(), newData)
 					s.h265SlicedPacket.IsKeyFrm = s.h265SlicedPacket.IsKeyFrm || sliceIsKey
 					s.h265BufferHasKey = s.h265BufferHasKey || sliceIsKey
 				} else {
@@ -468,7 +468,7 @@ func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
 			binary.BigEndian.PutUint32(buf, uint32(len(sps))) //nolint:gosec
 			newData = append(buf, append(sps, newData...)...)
 			h264Pkt.Buffer.Resize(len(newData))
-			h264Pkt.Buffer.Write(newData)
+			copy(h264Pkt.Buffer.Data(), newData)
 		case *h265.CodecParameters:
 			h265Pkt, _ := pkt.(*h265.Packet)
 			h265Par, _ := h265Pkt.CodecParameters().(*h265.CodecParameters)
@@ -488,7 +488,7 @@ func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
 			binary.BigEndian.PutUint32(buf, uint32(len(vps))) //nolint:gosec
 			newData = append(buf, append(vps, newData...)...)
 			h265Pkt.Buffer.Resize(len(newData))
-			h265Pkt.Buffer.Write(newData)
+			copy(h265Pkt.Buffer.Data(), newData)
 		}
 	}
 

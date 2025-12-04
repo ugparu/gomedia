@@ -22,7 +22,7 @@ func NewPacket(
 	duration time.Duration,
 ) *Packet {
 	buf := buffer.Get(len(data))
-	buf.Write(data)
+	copy(buf.Data(), data)
 	return &Packet{
 		AudioPacket: codec.AudioPacket[*CodecParameters]{
 			BasePacket: codec.BasePacket[*CodecParameters]{

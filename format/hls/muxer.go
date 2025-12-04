@@ -17,8 +17,8 @@ import (
 
 // Constants defining fragment and part parameters.
 const (
-	fragmentDuration = time.Millisecond * 495
-	partTarget       = 0.5
+	fragmentDuration = time.Millisecond * 95
+	partTarget       = 1
 	maxTS            = time.Hour
 )
 
@@ -41,7 +41,11 @@ func (s *segments) removeSegment(id uint64) {
 
 	seg, ok := s.segments[id]
 	if ok {
-		seg.sMux.Close()
+		for _, fragment := range seg.fragments {
+			for _, packet := range fragment.packets {
+				packet.Close()
+			}
+		}
 	}
 
 	delete(s.segments, id)
@@ -76,8 +80,6 @@ type muxer struct {
 	indexChan        chan struct{}               // Channel for signaling index changes.
 	header           string                      // Initial part of the HLS playlist.
 	codecPars        gomedia.CodecParametersPair // Codec parameters for video and audio.
-	mp4Buf           []byte                      // Buffer for the finalized MP4 content.
-	mux              *fmp4.Muxer
 }
 
 // NewHLSMuxer creates a new HLS muxer with the specified segment duration and segment count.
@@ -103,8 +105,6 @@ func NewHLSMuxer(segmentDuration time.Duration, segmentCount uint8) gomedia.HLSM
 #EXT-X-PART-INF:PART-TARGET=%.5f
 `, int(segmentDuration.Seconds()), segmentDuration.Seconds(), partTarget),
 		codecPars: gomedia.CodecParametersPair{AudioCodecParameters: nil, VideoCodecParameters: nil, URL: ""},
-		mp4Buf:    []byte{},
-		mux:       fmp4.NewMuxer(),
 	}
 	newHLS.Manager = lifecycle.NewDefaultManager(newHLS)
 	return newHLS
@@ -118,21 +118,15 @@ func (mxr *muxer) Mux(codecPars gomedia.CodecParametersPair) (err error) {
 			return &utils.NoCodecDataError{}
 		}
 
-		if err = mxr.mux.Mux(codecPars); err != nil {
+		mux := fmp4.NewMuxer()
+		if err = mux.Mux(codecPars); err != nil {
 			return err
 		}
 
 		mxr.codecPars = codecPars
 		// Create a new segment and set it as the current segment.
-		newSeg := newSegment(0, mxr.fragmentDuration, mxr.segmentDuration, codecPars, mxr.mux)
+		newSeg := newSegment(0, mxr.fragmentDuration, mxr.segmentDuration, codecPars)
 		mxr.addSegment(newSeg)
-		mux := fmp4.NewMuxer()
-
-		// Initialize the MP4 buffer with the init segment.
-		if err = mux.Mux(mxr.codecPars); err != nil {
-			return err
-		}
-		mxr.mp4Buf = mux.GetInit()
 
 		return nil
 	}
@@ -145,10 +139,9 @@ func (mxr *muxer) WritePacket(inpPkt gomedia.Packet) (err error) {
 		return &utils.NilPacketError{}
 	}
 
-	pkt := inpPkt.Clone(false)
-	pkt.SetTimestamp(pkt.Timestamp() % maxTS)
+	inpPkt.SetTimestamp(inpPkt.Timestamp() % maxTS)
 
-	if err = mxr.getCurSegment().writePacket(pkt); err != nil {
+	if err = mxr.getCurSegment().writePacket(inpPkt); err != nil {
 		return err
 	}
 
@@ -156,7 +149,7 @@ func (mxr *muxer) WritePacket(inpPkt gomedia.Packet) (err error) {
 	case <-mxr.getCurSegment().finished:
 		// The current segment has finished, create a new one and update the segment list.
 		newSegID := mxr.getCurSegment().id + 1
-		newSeg := newSegment(newSegID, mxr.fragmentDuration, mxr.segmentDuration, mxr.codecPars, mxr.mux)
+		newSeg := newSegment(newSegID, mxr.fragmentDuration, mxr.segmentDuration, mxr.codecPars)
 		mxr.addSegment(newSeg)
 		// Manage the number of segments to keep.
 		segCount := len(mxr.segIDs)
@@ -303,10 +296,16 @@ func (mxr *muxer) waitForSegmentOrPart(ctx context.Context, needSeg int64, needP
 
 // GetInit returns the MP4 initialization segment.
 func (mxr *muxer) GetInit() ([]byte, error) {
-	if len(mxr.mp4Buf) == 0 {
+	mux := fmp4.NewMuxer()
+	if err := mux.Mux(mxr.codecPars); err != nil {
+		return nil, err
+	}
+	buf := mux.GetInit()
+	defer buf.Release()
+	if len(buf.Data()) == 0 {
 		return nil, errors.New("empty init buffer")
 	}
-	return mxr.mp4Buf, nil
+	return buf.Data(), nil
 }
 
 // GetSegment returns the MP4 content of a specific segment.
@@ -320,7 +319,9 @@ func (mxr *muxer) GetSegment(ctx context.Context, index uint64) ([]byte, error) 
 		return nil, ctx.Err()
 	case <-seg.finished:
 	}
-	return seg.getMp4Buffer(), nil
+	buf := seg.getMp4Buffer()
+	defer buf.Release()
+	return buf.Data(), nil
 }
 
 // GetFragment returns the MP4 content of a specific fragment within a segment.
@@ -333,7 +334,9 @@ func (mxr *muxer) GetFragment(ctx context.Context, segindex uint64, index uint8)
 	// waitFragment doesn't return an error, so don't try to handle one
 	seg.waitFragment(ctx, index)
 
-	bytes := seg.getFragment(ctx, index)
+	buf := seg.getFragment(ctx, index)
+	defer buf.Release()
+	bytes := buf.Data()
 
 	if len(bytes) == 0 {
 		return nil, errors.New("fragment not found")

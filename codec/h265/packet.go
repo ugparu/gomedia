@@ -21,7 +21,7 @@ func NewPacket(
 	param *CodecParameters,
 ) *Packet {
 	buf := buffer.Get(len(data))
-	buf.Write(data)
+	copy(buf.Data(), data)
 	return &Packet{
 		VideoPacket: codec.VideoPacket[*CodecParameters]{
 			BasePacket: codec.BasePacket[*CodecParameters]{

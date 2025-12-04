@@ -33,7 +33,7 @@ const (
 type baseDemuxer struct {
 	rdr       io.Reader
 	sdp       sdp.Media
-	payload   buffer.RefBuffer
+	payload   buffer.PooledBuffer
 	offset    int
 	end       int
 	timestamp uint32
@@ -50,7 +50,7 @@ func newBaseDemuxer(rdr io.Reader, sdp sdp.Media, index uint8) *baseDemuxer {
 		timestamp: 0,
 		index:     index,
 	}
-	b.payload.AddRef()
+	b.payload.Retain()
 	return b
 }
 
@@ -126,7 +126,7 @@ func (d *baseDemuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 }
 
 func (d *baseDemuxer) Close() {
-	d.payload.Close()
+	d.payload.Release()
 }
 
 func (d *baseDemuxer) isRTCPPacket() bool {

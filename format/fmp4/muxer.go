@@ -9,6 +9,7 @@ import (
 	"github.com/ugparu/gomedia/codec/aac"
 	"github.com/ugparu/gomedia/format/mp4/mp4io"
 	"github.com/ugparu/gomedia/utils/bits/pio"
+	"github.com/ugparu/gomedia/utils/buffer"
 	"github.com/ugparu/gomedia/utils/logger"
 )
 
@@ -18,22 +19,18 @@ const (
 )
 
 type Muxer struct {
-	Idx     int
-	strs    []*Stream
-	params  gomedia.CodecParametersPair
-	initBuf []byte
+	strs   []*Stream
+	params gomedia.CodecParametersPair
 }
 
 func NewMuxer() *Muxer {
 	return &Muxer{
-		Idx:  0,
 		strs: []*Stream{},
 		params: gomedia.CodecParametersPair{
 			URL:                  "",
 			AudioCodecParameters: nil,
 			VideoCodecParameters: nil,
 		},
-		initBuf: nil,
 	}
 }
 
@@ -206,11 +203,7 @@ func (m *Muxer) WriteTrailer() (err error) {
 	return
 }
 
-func (m *Muxer) GetInit() []byte {
-	if m.initBuf != nil {
-		return m.initBuf
-	}
-
+func (m *Muxer) GetInit() buffer.PooledBuffer {
 	moov := &mp4io.Movie{
 		Header: mp4io.NewMovieHeader(),
 		MovieExtend: &mp4io.MovieExtend{
@@ -258,13 +251,10 @@ func (m *Muxer) GetInit() []byte {
 	ftype := mp4io.NewFileType()
 	ftype.CompatibleBrands[3] = pio.U32BE([]byte("dash"))
 
-	buf := make([]byte, moov.Len()+ftype.Len())
-	ftype.Marshal(buf)
-	moov.Marshal(buf[ftype.Len():])
-
-	m.initBuf = buf
-
-	return m.initBuf
+	buf := buffer.Get(moov.Len() + ftype.Len())
+	ftype.Marshal(buf.Data())
+	moov.Marshal(buf.Data()[ftype.Len():])
+	return buf
 }
 
 func (m *Muxer) WritePacket(pkt gomedia.Packet) error {
@@ -276,7 +266,6 @@ func (m *Muxer) WritePacket(pkt gomedia.Packet) error {
 // to reduce cyclomatic complexity
 func (m *Muxer) processMuxer() {
 	m.strs = m.strs[:0]
-	m.Idx++
 
 	if m.params.VideoCodecParameters != nil {
 		if err := m.newStream(m.params.VideoCodecParameters); err != nil {
@@ -446,7 +435,7 @@ func (m *Muxer) processDataOffsets(moof *mp4io.MovieFrag, startMOOF int, out []b
 
 // GetMP4Fragment returns an MP4 fragment
 // This function is complex but has been refactored to reduce cyclomatic complexity
-func (m *Muxer) GetMP4Fragment(buf []byte) []byte {
+func (m *Muxer) GetMP4Fragment(idx int) buffer.PooledBuffer {
 	defer m.processMuxer()
 
 	moof := new(mp4io.MovieFrag)
@@ -454,7 +443,7 @@ func (m *Muxer) GetMP4Fragment(buf []byte) []byte {
 		Version: 0,
 		Flags:   0,
 		// Safe conversion with validation
-		Seqnum: m.safeUint32Conversion(m.Idx, "sequence number"),
+		Seqnum: m.safeUint32Conversion(idx, "sequence number"),
 		AtomPos: mp4io.AtomPos{
 			Offset: 0,
 			Size:   0,
@@ -542,16 +531,12 @@ func (m *Muxer) GetMP4Fragment(buf []byte) []byte {
 		bufSz += sidx[i].Len()
 	}
 
-	if cap(buf) < bufSz {
-		buf = make([]byte, 0, bufSz)
-	}
-
-	buf = buf[:bufSz]
+	buf := buffer.Get(bufSz)
 
 	var n int
-	n += styp.Marshal(buf)
+	n += styp.Marshal(buf.Data())
 	for _, s := range sidx {
-		n += s.Marshal(buf[n:])
+		n += s.Marshal(buf.Data()[n:])
 	}
 
 	startMOOF := n
@@ -560,22 +545,15 @@ func (m *Muxer) GetMP4Fragment(buf []byte) []byte {
 	mdatStart := n
 
 	n += 4
-	pio.PutU32BE(buf[n:], uint32(mp4io.MDAT))
+	pio.PutU32BE(buf.Data()[n:], uint32(mp4io.MDAT))
 	n += 4
 
-	n = m.processDataOffsets(moof, startMOOF, buf, n)
-	moof.Marshal(buf[startMOOF:])
+	n = m.processDataOffsets(moof, startMOOF, buf.Data(), n)
+	moof.Marshal(buf.Data()[startMOOF:])
 
 	// Safe conversion with validation
 	mdatSizeValue := n - mdatStart
 	mdatSize := m.safeUint32Conversion(mdatSizeValue, "MDAT size")
-	pio.PutU32BE(buf[mdatStart:], mdatSize)
-
+	pio.PutU32BE(buf.Data()[mdatStart:], mdatSize)
 	return buf
-}
-
-func (m *Muxer) Close() {
-	for _, stream := range m.strs {
-		stream.Close()
-	}
 }

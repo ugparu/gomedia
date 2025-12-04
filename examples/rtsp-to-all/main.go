@@ -31,7 +31,7 @@ import (
 
 var rtspURLs = strings.Split(os.Getenv("RTSP_URLS"), ",")
 
-const segSize = 6 * time.Second
+const segSize = 5 * time.Second
 
 // Writers
 var (
@@ -64,7 +64,7 @@ func main() {
 			URLs: []string{"stun:stun.l.google.com:19302"},
 		},
 	})
-	webrtcWr = webrtc.New(0)
+	webrtcWr = webrtc.New(100, time.Second*10)
 	webrtcWr.Write()
 	logrus.Info("WebRTC writer initialized")
 
@@ -140,9 +140,9 @@ func main() {
 					webrtcWr.Packets() <- pkt.Clone(false)
 				} else if inPkt, ok := pkt.(gomedia.VideoPacket); ok {
 					// Send video to all writers
-					hlsWr.Packets() <- inPkt
-					webrtcWr.Packets() <- pkt.Clone(false)
-					seg.Packets() <- pkt.Clone(false)
+					hlsWr.Packets() <- inPkt.Clone(false)
+					webrtcWr.Packets() <- inPkt.Clone(false)
+					seg.Packets() <- inPkt.Clone(false)
 				}
 				packetCount++
 
@@ -152,6 +152,7 @@ func main() {
 					packetCount = 0
 					lastLog = time.Now()
 				}
+				pkt.Close()
 			}
 		}
 	}()

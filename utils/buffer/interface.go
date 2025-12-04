@@ -1,13 +1,13 @@
 package buffer
 
-import "io"
-
-type RefBuffer interface {
-	io.ReadWriter
+type PooledBuffer interface {
 	Data() []byte
+
 	Len() int
 	Cap() int
-	AddRef()
+
+	Retain()
+	Release()
+
 	Resize(int)
-	Close()
 }

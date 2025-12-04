@@ -33,7 +33,7 @@ func main() {
 		}
 	}()
 
-	rdr := reader.NewRTSP(0)
+	rdr := reader.NewRTSP(100)
 	rdr.Read()
 	defer rdr.Close()
 	rdr.AddURL() <- os.Getenv("RTSP_URL")
@@ -44,7 +44,7 @@ func main() {
 		},
 	})
 
-	webrtc := webrtc.New(0)
+	webrtc := webrtc.New(100, time.Second*6)
 	webrtc.Write()
 	defer webrtc.Close()
 

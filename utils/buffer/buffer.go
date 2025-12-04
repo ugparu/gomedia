@@ -1,126 +1,119 @@
 package buffer
 
 import (
-	"bytes"
 	"sync"
+	"sync/atomic"
 )
 
 const (
-	defaultBufSize = 0
-	maxBufSize     = 1024 * 1024 // 1MB
+	defaultBufSize = 4 * 1024        // Начальный размер 4KB
+	bigBufSize     = 64 * 1024       // 1MB
+	maxBufSize     = 1 * 1024 * 1024 // 1MB предел для возврата в пул
 )
 
-var total int
+var bigTotal, total int
 
-var (
-	bufPool = sync.Pool{
-		New: func() any {
-			total++
-			println("total", total)
-			return &memBuffer{
-				Buffer: bytes.NewBuffer(make([]byte, 0, defaultBufSize)),
-				ref:    0,
-				size:   defaultBufSize,
-			}
-		},
-	}
-)
-
-func Get(size int) RefBuffer {
-	buf, _ := bufPool.Get().(*memBuffer)
-	buf.Reset()
-	if buf.Cap() < size {
-		buf.Grow(size)
-	}
-	buf.size = size
-	return buf
+// Пул объектов memBuffer
+var bufPool = sync.Pool{
+	New: func() any {
+		total++
+		println("total", total)
+		return &memBuffer{
+			buf: make([]byte, 0, defaultBufSize),
+			ref: 1, // Новый буфер рождается с 1 владельцем
+		}
+	},
 }
 
-func (b *memBuffer) Resize(size int) {
-	b.size = size
-	if b.size > b.Cap() {
-		b.Buffer.Reset()
-		b.Buffer.Grow(b.size)
-	}
+var bigBufPool = sync.Pool{
+	New: func() any {
+		bigTotal++
+		println("bigTotal", bigTotal)
+		return &memBuffer{
+			buf: make([]byte, 0, bigBufSize),
+			ref: 1, // Новый буфер рождается с 1 владельцем
+		}
+	},
 }
 
-func (b *memBuffer) Data() []byte {
-	return b.Buffer.Bytes()[:b.size]
-}
-
-func (b *memBuffer) Close() {
-	b.ref--
-	println(b.ref)
-	if b.ref > 0 || b.Len() > maxBufSize {
-		return
+// Get получает буфер из пула с заданной длиной (len)
+func Get(size int) PooledBuffer {
+	println(size)
+	var b *memBuffer
+	if size >= bigBufSize {
+		b = bigBufPool.Get().(*memBuffer)
+	} else {
+		b = bufPool.Get().(*memBuffer)
 	}
-	b.Reset()
-	b.ref = 0
-	b.size = 0
-	bufPool.Put(b)
+	b.ref = 1 // Сбрасываем счетчик (на случай, если пул вернул грязный объект)
+
+	// Убеждаемся, что емкости хватает
+	if cap(b.buf) < size {
+		b.buf = make([]byte, size)
+	}
+
+	// Устанавливаем рабочую длину слайса
+	b.buf = b.buf[:size]
+	return b
 }
 
 type memBuffer struct {
-	*bytes.Buffer
-	ref  int
-	size int
+	buf []byte // Прямой слайс байт
+	ref int32  // Атомарный счетчик
 }
 
-func (b *memBuffer) AddRef() {
-	b.ref++
+// Data возвращает сам слайс
+func (b *memBuffer) Data() []byte {
+	return b.buf
 }
 
-// // fileBuffer reads data from file using memory mapping
-// type fileBuffer struct {
-// 	file      *os.File
-// 	offset    int64
-// 	size      int
-// 	data      []byte // slice pointing to actual data within mapped region
-// 	mappedMem []byte // full mapped memory region (for unmapping)
-// }
+func (b *memBuffer) Len() int {
+	return len(b.buf)
+}
 
-// // GetFileBuffer creates a buffer that reads data from a file at the specified offset
-// func GetFileBuffer(f *os.File, offset int64, size int) RefBuffer {
-// 	// mmap requires page-aligned offset
-// 	pageSize := int64(syscall.Getpagesize())
-// 	alignedOffset := offset &^ (pageSize - 1)   // round down to page boundary
-// 	offsetInPage := int(offset - alignedOffset) // offset within the page
-// 	mappedSize := offsetInPage + size           // total size to map
+func (b *memBuffer) Cap() int {
+	return cap(b.buf)
+}
 
-// 	mappedMem, err := syscall.Mmap(int(f.Fd()), alignedOffset, mappedSize, syscall.PROT_READ, syscall.MAP_SHARED)
-// 	if err != nil {
-// 		logger.Errorf(f, "failed to mmap file: %v", err)
-// 		return nil
-// 	}
-// 	return &fileBuffer{
-// 		file:      f,
-// 		offset:    offset,
-// 		size:      size,
-// 		data:      mappedMem[offsetInPage : offsetInPage+size],
-// 		mappedMem: mappedMem,
-// 	}
-// }
+// Resize меняет длину слайса (len), не меняя емкость (cap), если влезает
+func (b *memBuffer) Resize(size int) {
+	if size > cap(b.buf) {
+		// Если просят больше чем есть памяти, придется выделить новую
+		newBuf := make([]byte, size)
+		copy(newBuf, b.buf)
+		b.buf = newBuf
+	} else {
+		b.buf = b.buf[:size]
+	}
+}
 
-// func (b *fileBuffer) Data() []byte {
-// 	return b.data
-// }
+// Retain атомарно увеличивает счетчик
+func (b *memBuffer) Retain() {
+	atomic.AddInt32(&b.ref, 1)
+}
 
-// func (b *fileBuffer) SetData(data []byte) {
-// 	if cap(b.data) < len(data) {
-// 		b.data = make([]byte, len(data))
-// 	}
-// 	b.data = b.data[:len(data)]
-// 	copy(b.data, data)
-// }
+// Release атомарно уменьшает счетчик и возвращает в пул при 0
+func (b *memBuffer) Release() {
+	count := atomic.AddInt32(&b.ref, -1)
+	if count == 0 {
+		b.recycle()
+	} else if count < 0 {
+		panic("buffer reference count is negative")
+	}
+}
 
-// func (b *fileBuffer) Len() int {
-// 	return len(b.data)
-// }
+func (b *memBuffer) recycle() {
+	// Защита от утечки памяти: если буфер разросся слишком сильно,
+	// лучше позволить GC собрать его, чем держать в пуле.
+	if cap(b.buf) > maxBufSize {
+		return
+	}
 
-// func (b *fileBuffer) Close() {
-// 	if b.mappedMem != nil {
-// 		_ = syscall.Munmap(b.mappedMem)
-// 		b.mappedMem = nil
-// 	}
-// 	b.data = nil
-// }
+	// "Стирать" данные нулями не обязательно, просто сбрасываем длину
+	b.buf = b.buf[:0]
+	if cap(b.buf) >= bigBufSize {
+		bigBufPool.Put(b)
+	} else {
+		bufPool.Put(b)
+	}
+}

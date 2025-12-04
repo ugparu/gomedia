@@ -22,8 +22,9 @@ type stream struct {
 
 // sortedStreams is a map of sorted stream URLs based on their sizes.
 type sortedStreams struct {
-	sortedURLs []string           // Sorted list of stream URLs based on their sizes.
-	streams    map[string]*stream // Map of streams indexed by their URLs.
+	sortedURLs     []string           // Sorted list of stream URLs based on their sizes.
+	streams        map[string]*stream // Map of streams indexed by their URLs.
+	targetDuration time.Duration
 }
 
 // Exists checks if a stream URL exists in the sortedStreams.
@@ -116,7 +117,7 @@ func (ss *sortedStreams) Add(url string, newCodecPar gomedia.CodecParameters) {
 		buffer: &Buffer{
 			gops:           nil,
 			duration:       0,
-			targetDuration: time.Second * 10,
+			targetDuration: ss.targetDuration,
 		},
 		codecPar: pair,
 	}

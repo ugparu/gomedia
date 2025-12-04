@@ -32,12 +32,13 @@ type webRTCWriter struct {
 
 // New creates a new Streamer with the given channel size.
 // It initializes an innerWriter and embeds it into an outerWebRTC, providing synchronization and lifecycle management.
-func New(chanSize int) gomedia.WebRTCStreamer {
+func New(chanSize int, targetDuration time.Duration) gomedia.WebRTCStreamer {
 	wr := &webRTCWriter{
 		AsyncManager: nil,
 		streams: &sortedStreams{
-			sortedURLs: []string{},
-			streams:    map[string]*stream{},
+			sortedURLs:     []string{},
+			streams:        map[string]*stream{},
+			targetDuration: targetDuration,
 		},
 		peersChan:        make(chan gomedia.WebRTCPeer),
 		changePeersChan:  make(chan *peerURL, chanSize),
@@ -372,7 +373,24 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 		return inpPeer
 	}
 
-	<-gatherCompletePromise
+	select {
+	case inpPkt := <-element.inpPktCh:
+		switch pkt := inpPkt.(type) {
+		case gomedia.VideoPacket:
+			if err = element.checkCodecParameters(inpPkt.URL(), pkt.CodecParameters()); err != nil {
+				logger.Error(element, err.Error())
+			}
+		case gomedia.AudioPacket:
+			if err = element.checkCodecParameters(inpPkt.URL(), pkt.CodecParameters()); err != nil {
+				logger.Error(element, err.Error())
+			}
+		}
+
+		if err = element.streams.writePacket(inpPkt); err != nil {
+			logger.Error(element, err.Error())
+		}
+	case <-gatherCompletePromise:
+	}
 
 	inpPeer.SDP = base64.StdEncoding.EncodeToString([]byte(peer.LocalDescription().SDP))
 

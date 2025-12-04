@@ -7,6 +7,7 @@ import (
 
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/format/fmp4"
+	"github.com/ugparu/gomedia/utils/buffer"
 	"github.com/ugparu/gomedia/utils/logger"
 )
 
@@ -23,8 +24,6 @@ type segment struct {
 	cacheEntry         string                      // Cache entry for manifest generation.
 	fragments          []*fragment                 // List of fragments in the segment.
 	time               time.Time                   // Time when the segment was created.
-	sMux               *fmp4.Muxer
-	fMux               *fmp4.Muxer
 }
 
 // newSegment creates a new segment with the specified parameters.
@@ -33,24 +32,19 @@ func newSegment(
 	targetFragmentDuration,
 	targetDuration time.Duration,
 	codecPars gomedia.CodecParametersPair,
-	sMux *fmp4.Muxer,
 ) *segment {
-	fMux := fmp4.NewMuxer()
-	_ = fMux.Mux(codecPars)
 	seg := &segment{
 		id:                 id,
 		codecPars:          codecPars,
 		targetDuration:     targetDuration,
 		targetFragDuration: targetFragmentDuration,
-		fragments:          []*fragment{newFragment(0, id, targetFragmentDuration, fMux)},
+		fragments:          []*fragment{newFragment(0, id, targetFragmentDuration, codecPars)},
 		finished:           make(chan struct{}),
 		duration:           0,
 		time:               time.Now(),
 		cacheEntry:         "",
 		curFragment:        nil,
 		manifestEntry:      "",
-		sMux:               sMux,
-		fMux:               fMux,
 	}
 	seg.manifestEntry = seg.fragments[0].manifestEntry
 	seg.curFragment = seg.fragments[0]
@@ -63,9 +57,6 @@ func (element *segment) writePacket(packet gomedia.Packet) (err error) {
 	if err = curFrag.writePacket(packet); err != nil {
 		return
 	}
-	if err = element.sMux.WritePacket(packet); err != nil {
-		return err
-	}
 
 	select {
 	case <-curFrag.finished:
@@ -77,7 +68,7 @@ func (element *segment) writePacket(packet gomedia.Packet) (err error) {
 			return element.close()
 		} else {
 			newFragID := curFrag.id + 1
-			newFragment := newFragment(newFragID, element.id, element.targetFragDuration, element.fMux)
+			newFragment := newFragment(newFragID, element.id, element.targetFragDuration, element.codecPars)
 			element.fragments = append(element.fragments, newFragment)
 			element.curFragment = element.fragments[newFragID]
 
@@ -104,12 +95,21 @@ func (element *segment) close() (err error) {
 
 // getMp4Buffer returns the MP4 buffer, generating it on first access.
 // Uses sync.Once to ensure the buffer is generated only once and reused.
-func (element *segment) getMp4Buffer() []byte {
-	return element.sMux.GetMP4Fragment(nil)
+func (element *segment) getMp4Buffer() buffer.PooledBuffer {
+	mux := fmp4.NewMuxer()
+	if err := mux.Mux(element.codecPars); err != nil {
+		return nil
+	}
+	for _, fragment := range element.fragments {
+		for _, packet := range fragment.packets {
+			mux.WritePacket(packet)
+		}
+	}
+	return mux.GetMP4Fragment(int(element.id))
 }
 
 // getFragment gets the MP4 content of a specific fragment in the segment.
-func (element *segment) getFragment(ctx context.Context, id uint8) []byte {
+func (element *segment) getFragment(ctx context.Context, id uint8) buffer.PooledBuffer {
 	if id >= uint8(len(element.fragments)) {
 		return nil
 	}

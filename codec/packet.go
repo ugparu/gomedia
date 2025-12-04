@@ -7,7 +7,6 @@ import (
 
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/utils/buffer"
-	"github.com/ugparu/gomedia/utils/logger"
 )
 
 type BasePacket[T gomedia.CodecParameters] struct {
@@ -15,7 +14,7 @@ type BasePacket[T gomedia.CodecParameters] struct {
 	RelativeTime time.Duration
 	Dur          time.Duration
 	InpURL       string
-	Buffer       buffer.RefBuffer
+	Buffer       buffer.PooledBuffer
 	AbsoluteTime time.Time
 	CodecPar     T
 }
@@ -32,12 +31,10 @@ func (pkt *BasePacket[T]) Clone(copyData bool) BasePacket[T] {
 	}
 	if copyData {
 		newPkt.Buffer = buffer.Get(len(pkt.Buffer.Data()))
-		if _, err := newPkt.Buffer.Write(pkt.Buffer.Data()); err != nil {
-			logger.Errorf(newPkt, "failed to write packet data: %v", err)
-		}
+		copy(newPkt.Buffer.Data(), pkt.Buffer.Data())
 	} else {
 		newPkt.Buffer = pkt.Buffer
-		newPkt.Buffer.AddRef()
+		newPkt.Buffer.Retain()
 	}
 	return newPkt
 }
@@ -103,7 +100,7 @@ func (pkt *BasePacket[T]) SwitchToMmap(f *os.File, offset int64, size int64) (er
 }
 
 func (pkt *BasePacket[T]) Close() {
-	pkt.Buffer.Close()
+	pkt.Buffer.Release()
 }
 
 type VideoPacket[T gomedia.VideoCodecParameters] struct {

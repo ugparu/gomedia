@@ -30,10 +30,10 @@ type innerRTSPDemuxer struct {
 	lastPktRcv       time.Time
 	client           *client
 	ticker           *time.Ticker
-	buffer           buffer.RefBuffer
+	buffer           *bytes.Buffer
 	packets          []gomedia.Packet
 	noVideo, noAudio bool
-	readBuffer       buffer.RefBuffer
+	readBuffer       buffer.PooledBuffer
 }
 
 func New(url string, inpPars ...gomedia.InputParameter) gomedia.Demuxer {
@@ -48,14 +48,12 @@ func New(url string, inpPars ...gomedia.InputParameter) gomedia.Demuxer {
 		lastPktRcv:   time.Now(),
 		client:       newClient(),
 		ticker:       time.NewTicker(pingTimeout),
-		buffer:       buffer.Get(0),
+		buffer:       bytes.NewBuffer(nil),
 		packets:      []gomedia.Packet{},
 		noVideo:      false,
 		noAudio:      false,
 		readBuffer:   buffer.Get(0),
 	}
-	d.buffer.AddRef()
-	d.readBuffer.AddRef()
 	for _, inpPar := range inpPars {
 		switch inpPar {
 		case gomedia.NoVideo:
@@ -355,8 +353,7 @@ func (dmx *innerRTSPDemuxer) processRTSPPacket(header [headerSize]byte) (err err
 
 func (dmx *innerRTSPDemuxer) Close() {
 	dmx.client.Close()
-	dmx.buffer.Close()
-	dmx.readBuffer.Close()
+	dmx.readBuffer.Release()
 }
 
 func (dmx *innerRTSPDemuxer) String() string {
