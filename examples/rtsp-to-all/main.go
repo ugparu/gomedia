@@ -35,7 +35,7 @@ const segSize = 6 * time.Second
 
 // Writers
 var (
-	hlsWr    = hls.New(1, 6, segSize, 100)
+	hlsWr    = hls.New(1, 2, segSize, 100)
 	webrtcWr gomedia.WebRTCStreamer
 	seg      gomedia.Segmenter
 )
@@ -59,7 +59,7 @@ func main() {
 	logrus.Info("HLS writer initialized with: segments per playlist=1, fragment count=3, segment size=", segSize)
 
 	// Initialize WebRTC
-	webrtc.Init(2000, 2100, []string{"192.168.0.182"}, []pion.ICEServer{
+	webrtc.Init(2000, 2100, []string{"10.0.112.141"}, []pion.ICEServer{
 		{
 			URLs: []string{"stun:stun.l.google.com:19302"},
 		},
@@ -69,7 +69,7 @@ func main() {
 	logrus.Info("WebRTC writer initialized")
 
 	// Initialize Segmenter for MP4 recording
-	seg = segmenter.New("./recordings/", time.Second*30, gomedia.Always, 100)
+	seg = segmenter.New("./recordings/", time.Second*10, gomedia.Always, 100)
 	seg.Write()
 	logrus.Info("Segmenter initialized for MP4 recording")
 
@@ -125,7 +125,7 @@ func main() {
 			case pkt := <-aacEnc.Packets():
 				// Send transcoded audio to HLS
 				for _, url := range rtspURLs {
-					clonePkt := pkt.Clone(true)
+					clonePkt := pkt.Clone(false)
 					clonePkt.SetURL(url)
 					hlsWr.Packets() <- clonePkt
 				}
@@ -134,15 +134,15 @@ func main() {
 				if inPkt, ok := pkt.(gomedia.AudioPacket); ok {
 					// Transcode audio for HLS (only first stream)
 					if inPkt.URL() == rtspURLs[0] {
-						audioDecoder.Packets() <- inPkt
+						audioDecoder.Packets() <- inPkt.Clone(false).(gomedia.AudioPacket)
 					}
 					// Send audio to WebRTC
-					webrtcWr.Packets() <- pkt
+					webrtcWr.Packets() <- pkt.Clone(false)
 				} else if inPkt, ok := pkt.(gomedia.VideoPacket); ok {
 					// Send video to all writers
 					hlsWr.Packets() <- inPkt
-					webrtcWr.Packets() <- pkt.Clone(true)
-					seg.Packets() <- pkt.Clone(true)
+					webrtcWr.Packets() <- pkt.Clone(false)
+					seg.Packets() <- pkt.Clone(false)
 				}
 				packetCount++
 

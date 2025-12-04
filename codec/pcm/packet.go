@@ -5,6 +5,7 @@ import (
 
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/codec"
+	"github.com/ugparu/gomedia/utils/buffer"
 )
 
 type Packet struct {
@@ -13,8 +14,8 @@ type Packet struct {
 
 func NewPacket(data []byte, ts time.Duration, url string,
 	absTime time.Time, codecPar *CodecParameters, duration time.Duration) *Packet {
-	buf := codec.GetMemBuffer()
-	buf.SetData(data)
+	buf := buffer.Get(len(data))
+	buf.Write(data)
 	return &Packet{
 		AudioPacket: codec.AudioPacket[*CodecParameters]{
 			BasePacket: codec.BasePacket[*CodecParameters]{

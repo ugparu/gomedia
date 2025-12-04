@@ -363,7 +363,8 @@ func (s *Stream) readPacket(tm time.Duration, url string) (pkt gomedia.Packet, e
 					// Add to existing sliced packet buffer
 					existingData := s.h265SlicedPacket.Buffer.Data()
 					newData := append(existingData, naluWithHeader...)
-					s.h265SlicedPacket.Buffer.SetData(newData)
+					s.h265SlicedPacket.Buffer.Resize(len(newData))
+					s.h265SlicedPacket.Buffer.Write(newData)
 				} else {
 					// Create new packet for parameter sets
 					pkt = h265.NewPacket(false, tm, time.Now(), naluWithHeader, url, h265Par)
@@ -391,7 +392,8 @@ func (s *Stream) readPacket(tm time.Duration, url string) (pkt gomedia.Packet, e
 					// Subsequent slice: add to current buffered packet
 					existingData := s.h265SlicedPacket.Buffer.Data()
 					newData := append(existingData, naluWithHeader...)
-					s.h265SlicedPacket.Buffer.SetData(newData)
+					s.h265SlicedPacket.Buffer.Resize(len(newData))
+					s.h265SlicedPacket.Buffer.Write(newData)
 					s.h265SlicedPacket.IsKeyFrm = s.h265SlicedPacket.IsKeyFrm || sliceIsKey
 					s.h265BufferHasKey = s.h265BufferHasKey || sliceIsKey
 				} else {
@@ -465,7 +467,8 @@ func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
 			buf = make([]byte, 4)                             //nolint:mnd // size of header
 			binary.BigEndian.PutUint32(buf, uint32(len(sps))) //nolint:gosec
 			newData = append(buf, append(sps, newData...)...)
-			h264Pkt.Buffer.SetData(newData)
+			h264Pkt.Buffer.Resize(len(newData))
+			h264Pkt.Buffer.Write(newData)
 		case *h265.CodecParameters:
 			h265Pkt, _ := pkt.(*h265.Packet)
 			h265Par, _ := h265Pkt.CodecParameters().(*h265.CodecParameters)
@@ -484,7 +487,8 @@ func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
 			buf = make([]byte, 4)                             //nolint:mnd // size of header
 			binary.BigEndian.PutUint32(buf, uint32(len(vps))) //nolint:gosec
 			newData = append(buf, append(vps, newData...)...)
-			h265Pkt.Buffer.SetData(newData)
+			h265Pkt.Buffer.Resize(len(newData))
+			h265Pkt.Buffer.Write(newData)
 		}
 	}
 

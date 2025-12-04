@@ -45,7 +45,11 @@ func (b *Buffer) AdjustSize() {
 	}
 
 	b.duration -= b.gops[0].duration
+	gop := b.gops[0]
 	b.gops = b.gops[1:]
+	for _, packet := range gop.packets {
+		packet.Close()
+	}
 }
 
 func (b *Buffer) GetBuffer(ts time.Time) ([]gomedia.VideoPacket, []gomedia.Packet) {

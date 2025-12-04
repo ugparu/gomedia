@@ -38,6 +38,12 @@ func (s *segments) addSegment(seg *segment) {
 func (s *segments) removeSegment(id uint64) {
 	s.Lock()
 	defer s.Unlock()
+
+	seg, ok := s.segments[id]
+	if ok {
+		seg.sMux.Close()
+	}
+
 	delete(s.segments, id)
 	for i := 1; i < len(s.segIDs); i++ {
 		s.segIDs[i-1] = s.segIDs[i]

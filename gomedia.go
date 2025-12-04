@@ -55,6 +55,7 @@ type Packet interface {
 	SetDuration(time.Duration)                                     // Sets the duration of the packet content.
 	Data() []byte                                                  // Returns the raw packet data.
 	SwitchToMmap(f *os.File, offset int64, size int64) (err error) // Switches the buffer of the packet.
+	Close()                                                        // Closes the packet and releases resources.
 }
 
 // VideoPacket extends Packet with video-specific functionality.

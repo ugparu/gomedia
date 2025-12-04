@@ -208,3 +208,9 @@ func (s *Stream) writePacket(pkt gomedia.Packet) error {
 	s.bufSize += len(pkt.Data())
 	return nil
 }
+
+func (s *Stream) Close() {
+	for _, packet := range s.packets {
+		packet.Close()
+	}
+}

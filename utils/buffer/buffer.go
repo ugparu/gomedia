@@ -10,9 +10,13 @@ const (
 	maxBufSize     = 1024 * 1024 // 1MB
 )
 
+var total int
+
 var (
 	bufPool = sync.Pool{
 		New: func() any {
+			total++
+			println("total", total)
 			return &memBuffer{
 				Buffer: bytes.NewBuffer(make([]byte, 0, defaultBufSize)),
 				ref:    0,
@@ -46,6 +50,7 @@ func (b *memBuffer) Data() []byte {
 
 func (b *memBuffer) Close() {
 	b.ref--
+	println(b.ref)
 	if b.ref > 0 || b.Len() > maxBufSize {
 		return
 	}

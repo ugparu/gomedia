@@ -41,7 +41,7 @@ type baseDemuxer struct {
 }
 
 func newBaseDemuxer(rdr io.Reader, sdp sdp.Media, index uint8) *baseDemuxer {
-	return &baseDemuxer{
+	b := &baseDemuxer{
 		rdr:       rdr,
 		sdp:       sdp,
 		payload:   buffer.Get(headerSize),
@@ -50,6 +50,8 @@ func newBaseDemuxer(rdr io.Reader, sdp sdp.Media, index uint8) *baseDemuxer {
 		timestamp: 0,
 		index:     index,
 	}
+	b.payload.AddRef()
+	return b
 }
 
 func (d *baseDemuxer) Demux() (codecs gomedia.CodecParametersPair, err error) {

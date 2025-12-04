@@ -54,6 +54,8 @@ func New(url string, inpPars ...gomedia.InputParameter) gomedia.Demuxer {
 		noAudio:      false,
 		readBuffer:   buffer.Get(0),
 	}
+	d.buffer.AddRef()
+	d.readBuffer.AddRef()
 	for _, inpPar := range inpPars {
 		switch inpPar {
 		case gomedia.NoVideo:

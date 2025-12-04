@@ -573,3 +573,9 @@ func (m *Muxer) GetMP4Fragment(buf []byte) []byte {
 
 	return buf
 }
+
+func (m *Muxer) Close() {
+	for _, stream := range m.strs {
+		stream.Close()
+	}
+}

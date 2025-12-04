@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/ugparu/gomedia"
+	"github.com/ugparu/gomedia/utils/buffer"
+	"github.com/ugparu/gomedia/utils/logger"
 )
 
 type BasePacket[T gomedia.CodecParameters] struct {
@@ -13,7 +15,7 @@ type BasePacket[T gomedia.CodecParameters] struct {
 	RelativeTime time.Duration
 	Dur          time.Duration
 	InpURL       string
-	Buffer       RefBuffer
+	Buffer       buffer.RefBuffer
 	AbsoluteTime time.Time
 	CodecPar     T
 }
@@ -29,10 +31,13 @@ func (pkt *BasePacket[T]) Clone(copyData bool) BasePacket[T] {
 		CodecPar:     pkt.CodecPar,
 	}
 	if copyData {
-		newPkt.Buffer = GetMemBuffer()
-		newPkt.Buffer.SetData(pkt.Buffer.Data())
+		newPkt.Buffer = buffer.Get(len(pkt.Buffer.Data()))
+		if _, err := newPkt.Buffer.Write(pkt.Buffer.Data()); err != nil {
+			logger.Errorf(newPkt, "failed to write packet data: %v", err)
+		}
 	} else {
 		newPkt.Buffer = pkt.Buffer
+		newPkt.Buffer.AddRef()
 	}
 	return newPkt
 }
@@ -89,12 +94,16 @@ func (pkt *BasePacket[T]) String() string {
 }
 
 func (pkt *BasePacket[T]) SwitchToMmap(f *os.File, offset int64, size int64) (err error) {
-	buf := GetFileBuffer(f, offset, int(size))
-	if buf == nil {
-		return fmt.Errorf("failed to mmap file at offset %d with size %d", offset, size)
-	}
-	pkt.Buffer = buf
+	// buf := GetFileBuffer(f, offset, int(size))
+	// if buf == nil {
+	// 	return fmt.Errorf("failed to mmap file at offset %d with size %d", offset, size)
+	// }
+	// pkt.Buffer = buf
 	return nil
+}
+
+func (pkt *BasePacket[T]) Close() {
+	pkt.Buffer.Close()
 }
 
 type VideoPacket[T gomedia.VideoCodecParameters] struct {

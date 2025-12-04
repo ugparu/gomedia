@@ -116,7 +116,7 @@ func (ss *sortedStreams) Add(url string, newCodecPar gomedia.CodecParameters) {
 		buffer: &Buffer{
 			gops:           nil,
 			duration:       0,
-			targetDuration: time.Second * 15,
+			targetDuration: time.Second * 10,
 		},
 		codecPar: pair,
 	}

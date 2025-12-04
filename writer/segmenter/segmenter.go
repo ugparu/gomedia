@@ -296,6 +296,9 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 		if inpPkt == nil {
 			return &utils.NilPacketError{}
 		}
+		defer func() {
+			inpPkt.Close()
+		}()
 
 		// Update codec parameters if changed
 		if vPkt, ok := inpPkt.(gomedia.VideoPacket); ok && vPkt.CodecParameters() != s.codecPar.VideoCodecParameters {

@@ -5,6 +5,7 @@ import (
 
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/codec"
+	"github.com/ugparu/gomedia/utils/buffer"
 )
 
 // Packet represents an MJPEG video packet
@@ -21,8 +22,8 @@ func NewPacket(
 	url string,
 	param *CodecParameters,
 ) *Packet {
-	buf := codec.GetMemBuffer()
-	buf.SetData(data)
+	buf := buffer.Get(len(data))
+	buf.Write(data)
 	return &Packet{
 		VideoPacket: codec.VideoPacket[*CodecParameters]{
 			BasePacket: codec.BasePacket[*CodecParameters]{
