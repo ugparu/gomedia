@@ -62,6 +62,8 @@ func NewVideo(chanSize int, fps int, newDecoderFn func() InnerVideoDecoder) gome
 func (dec *videoDecoder) processPacket(inpPkt gomedia.VideoPacket, stopCh <-chan struct{}) (err error) {
 	logger.Tracef(dec, "Processing packet %v", inpPkt)
 
+	defer inpPkt.Close()
+
 	if inpPkt.CodecParameters() != dec.codecPar {
 		if inpPkt.CodecParameters().Type().String() == "UNKNOWN" {
 			return errors.New("unknown codec type")

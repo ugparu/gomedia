@@ -11,13 +11,9 @@ const (
 	maxBufSize     = 1 * 1024 * 1024 // 1MB предел для возврата в пул
 )
 
-var bigTotal, total int
-
 // Пул объектов memBuffer
 var bufPool = sync.Pool{
 	New: func() any {
-		total++
-		println("total", total)
 		return &memBuffer{
 			buf: make([]byte, 0, defaultBufSize),
 			ref: 1, // Новый буфер рождается с 1 владельцем
@@ -27,8 +23,6 @@ var bufPool = sync.Pool{
 
 var bigBufPool = sync.Pool{
 	New: func() any {
-		bigTotal++
-		println("bigTotal", bigTotal)
 		return &memBuffer{
 			buf: make([]byte, 0, bigBufSize),
 			ref: 1, // Новый буфер рождается с 1 владельцем
