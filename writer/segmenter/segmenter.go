@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/ugparu/gomedia"
@@ -22,7 +21,6 @@ type activeFile struct {
 	folder    string
 	name      string
 	duration  time.Duration
-	wg        sync.WaitGroup // WaitGroup to track mmap buffer releases
 }
 
 // ringBuffer holds a window of packets for Event mode pre-buffering
@@ -165,7 +163,7 @@ func (s *segmenter) openNewFile(startTime time.Time) error {
 	}
 
 	folder := fmt.Sprintf("%d/%d/%d/", startTime.Year(), startTime.Month(), startTime.Day())
-	name := startTime.Format("2006-01-02T15:04:05") + ".mp4"
+	name := startTime.Format("2006-01-02T15:04:05") + ".mp4.tmp"
 	filename := fmt.Sprintf("%s%s%s", s.dest, folder, name)
 
 	f, err := createFile(filename)
@@ -186,7 +184,6 @@ func (s *segmenter) openNewFile(startTime time.Time) error {
 		folder:    folder,
 		name:      name,
 		duration:  0,
-		wg:        sync.WaitGroup{},
 	}
 
 	return nil
@@ -206,28 +203,31 @@ func (s *segmenter) closeActiveFile(stopChan <-chan struct{}) error {
 		return err
 	}
 
-	fi, err := af.file.Stat()
-	if err != nil {
-		_ = af.file.Close()
-		return err
-	}
-
 	// Close file in separate goroutine after all mmap buffers are released
-	go func(stopTime time.Time) {
-		af.wg.Wait()
+	go func(af *activeFile) {
+		fi, err := af.file.Stat()
+		if err != nil {
+			_ = af.file.Close()
+			return
+		}
+
 		_ = af.file.Close()
+		filename := fmt.Sprintf("%s%s%s", s.dest, af.folder, af.name[:len(af.name)-4])
+		if err = os.Rename(filename+".tmp", filename); err != nil {
+			return
+		}
 
 		select {
 		case s.outInfoCh <- gomedia.FileInfo{
 			Name:  af.folder + af.name,
 			Start: af.startTime,
-			Stop:  stopTime,
+			Stop:  af.startTime.Add(af.duration),
 			Size:  int(fi.Size()),
 		}:
 		case <-stopChan:
 			return
 		}
-	}(af.startTime.Add(af.duration))
+	}(af)
 
 	return nil
 }
@@ -252,13 +252,10 @@ func (s *segmenter) writePacketToFile(pkt gomedia.Packet) error {
 		// Get the actual packet data offset and size (excluding SPS/PPS/VPS for keyframes)
 		dataOffset, dataSize := af.muxer.GetLastPacketDataInfo(pkt.StreamIndex())
 		if dataSize > 0 {
-			af.wg.Add(1)
 			done := func() error {
-				af.wg.Done()
 				return nil
 			}
 			if err := preLastPkt.SwitchToFile(af.file, dataOffset, dataSize, done); err != nil {
-				af.wg.Done() // Decrement on error since SwitchToFile won't call done
 				return err
 			}
 		}

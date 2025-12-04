@@ -141,21 +141,21 @@ func (pkt *BasePacket[T]) Retain() {
 }
 
 func (pkt *BasePacket[T]) SwitchToFile(f *os.File, offset int64, size int64, closeFn func() error) (err error) {
-	// // Sync file to ensure writes are flushed before mmap
-	// if err = f.Sync(); err != nil {
-	// 	return err
-	// }
+	// Sync file to ensure writes are flushed before mmap
+	if err = f.Sync(); err != nil {
+		return err
+	}
 
-	// buf, err := buffer.GetMmap(f, offset, int(size), closeFn)
-	// if err != nil {
-	// 	return err
-	// }
+	buf, err := buffer.GetMmap(f, offset, int(size), closeFn)
+	if err != nil {
+		return err
+	}
 
-	// // Replace the buffer in the shared structure.
-	// // All clones will see this change since they share the same sharedBuffer pointer.
-	// oldBuf := pkt.shared.buf
-	// pkt.shared.buf = buf
-	// oldBuf.Release()
+	// Replace the buffer in the shared structure.
+	// All clones will see this change since they share the same sharedBuffer pointer.
+	oldBuf := pkt.shared.buf
+	pkt.shared.buf = buf
+	oldBuf.Release()
 
 	return nil
 }
