@@ -219,7 +219,7 @@ func (s *segmenter) closeActiveFile(stopChan <-chan struct{}) error {
 
 		select {
 		case s.outInfoCh <- gomedia.FileInfo{
-			Name:  af.folder + af.name,
+			Name:  af.folder + af.name[:len(af.name)-4],
 			Start: af.startTime,
 			Stop:  af.startTime.Add(af.duration),
 			Size:  int(fi.Size()),
