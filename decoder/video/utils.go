@@ -12,6 +12,7 @@ import (
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/codec/h264"
 	"github.com/ugparu/gomedia/codec/h265"
+	"github.com/ugparu/gomedia/utils/buffer"
 )
 
 const errBufSize = 50
@@ -116,8 +117,8 @@ func PacketToFFmpeg(vPkt gomedia.VideoPacket, ptr unsafe.Pointer) error {
 		C.av_grow_packet(cPkt, C.int(pkt.Len()))
 
 		slice := unsafe.Slice((*byte)(cPkt.data), int(cPkt.size))
-		pkt.View(func(data []byte) {
-			copy(slice, data)
+		pkt.View(func(data buffer.PooledBuffer) {
+			copy(slice, data.Data())
 		})
 
 		if len(slice) != 0 {
@@ -137,10 +138,9 @@ func PacketToFFmpeg(vPkt gomedia.VideoPacket, ptr unsafe.Pointer) error {
 		C.av_grow_packet(cPkt, C.int(pkt.Len()))
 
 		slice := unsafe.Slice((*byte)(cPkt.data), int(cPkt.size))
-		pkt.View(func(data []byte) {
-			copy(slice, data)
+		pkt.View(func(data buffer.PooledBuffer) {
+			copy(slice, data.Data())
 		})
-
 		// Convert length-prefixed NAL units to Annex-B format for H.265
 		convertLengthPrefixedToAnnexB(slice)
 		return nil
