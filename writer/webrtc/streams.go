@@ -199,7 +199,7 @@ func (ss *sortedStreams) validatePacket(pkt gomedia.Packet) (*stream, error) {
 		return nil, &utils.NilPacketError{}
 	}
 
-	if len(pkt.Data()) < minPktSz {
+	if pkt.Len() < minPktSz {
 		return nil, ErrPacketTooSmall
 	}
 
@@ -358,7 +358,11 @@ func (ss *sortedStreams) seedTrack(str *stream, peer *peerTrack) error {
 				bufSample.Data = appendCodecParameters(vPkt.CodecParameters())
 			}
 
-			bufNalus, _ := nal.SplitNALUs(vPkt.Data())
+			var bufNalus [][]byte
+			vPkt.View(func(data []byte) {
+				bufNalus, _ = nal.SplitNALUs(data)
+			})
+
 			for _, nalu := range bufNalus {
 				bufSample.Data = append(bufSample.Data, append([]byte{0, 0, 0, 1}, nalu...)...)
 			}

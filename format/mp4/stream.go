@@ -454,7 +454,7 @@ func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
 	// }
 
 	pkt := s.lastPacket
-	pktSize := len(pkt.Data())
+	pktSize := pkt.Len()
 
 	if vPacket, casted := pkt.(gomedia.VideoPacket); casted && vPacket.IsKeyFrame() {
 		switch pkt.(gomedia.VideoPacket).CodecParameters().(type) {
@@ -468,18 +468,18 @@ func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
 			defer buf.Release()
 
 			binary.BigEndian.PutUint32(buf.Data(), uint32(len(pps))) //nolint:gosec
-			if _, err = s.muxer.bufferedWriter.Write(buf.Data()); err != nil {
+			if _, err = s.muxer.writer.Write(buf.Data()); err != nil {
 				return
 			}
-			if _, err = s.muxer.bufferedWriter.Write(pps); err != nil {
+			if _, err = s.muxer.writer.Write(pps); err != nil {
 				return
 			}
 
 			binary.BigEndian.PutUint32(buf.Data(), uint32(len(sps))) //nolint:gosec
-			if _, err = s.muxer.bufferedWriter.Write(buf.Data()); err != nil {
+			if _, err = s.muxer.writer.Write(buf.Data()); err != nil {
 				return
 			}
-			if _, err = s.muxer.bufferedWriter.Write(sps); err != nil {
+			if _, err = s.muxer.writer.Write(sps); err != nil {
 				return
 			}
 
@@ -495,26 +495,26 @@ func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
 			defer buf.Release()
 
 			binary.BigEndian.PutUint32(buf.Data(), uint32(len(pps))) //nolint:gosec
-			if _, err = s.muxer.bufferedWriter.Write(buf.Data()); err != nil {
+			if _, err = s.muxer.writer.Write(buf.Data()); err != nil {
 				return
 			}
-			if _, err = s.muxer.bufferedWriter.Write(pps); err != nil {
-				return
-			}
-
-			binary.BigEndian.PutUint32(buf.Data(), uint32(len(vps))) //nolint:gosec
-			if _, err = s.muxer.bufferedWriter.Write(buf.Data()); err != nil {
-				return
-			}
-			if _, err = s.muxer.bufferedWriter.Write(sps); err != nil {
+			if _, err = s.muxer.writer.Write(pps); err != nil {
 				return
 			}
 
 			binary.BigEndian.PutUint32(buf.Data(), uint32(len(vps))) //nolint:gosec
-			if _, err = s.muxer.bufferedWriter.Write(buf.Data()); err != nil {
+			if _, err = s.muxer.writer.Write(buf.Data()); err != nil {
 				return
 			}
-			if _, err = s.muxer.bufferedWriter.Write(vps); err != nil {
+			if _, err = s.muxer.writer.Write(sps); err != nil {
+				return
+			}
+
+			binary.BigEndian.PutUint32(buf.Data(), uint32(len(vps))) //nolint:gosec
+			if _, err = s.muxer.writer.Write(buf.Data()); err != nil {
+				return
+			}
+			if _, err = s.muxer.writer.Write(vps); err != nil {
 				return
 			}
 			pktSize += len(sps) + len(pps) + len(vps) + 12
@@ -522,17 +522,14 @@ func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
 	}
 
 	// Track where the actual packet data starts (after SPS/PPS/VPS)
-	s.lastPacketDataOffset = s.muxer.writePosition + int64(pktSize-len(pkt.Data()))
-	s.lastPacketDataSize = int64(len(pkt.Data()))
+	s.lastPacketDataOffset = s.muxer.writePosition + int64(pktSize-pkt.Len())
+	s.lastPacketDataSize = int64(pkt.Len())
 
-	// Write the packet data to the buffered writer.
-	if _, err = s.muxer.bufferedWriter.Write(pkt.Data()); err != nil {
-		return
-	}
-
-	if err = s.muxer.bufferedWriter.Flush(); err != nil {
-		return
-	}
+	pkt.View(func(data []byte) {
+		if _, err = s.muxer.writer.Write(data); err != nil {
+			return
+		}
+	})
 
 	// For video packets, update sync sample information.
 	if vPkt, casted := pkt.(gomedia.VideoPacket); casted {

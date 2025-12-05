@@ -205,7 +205,7 @@ func (s *Stream) writePacket(pkt gomedia.Packet) error {
 	s.packets = append(s.packets, pkt)
 	s.duration += pkt.Duration()
 	s.sampleIndex++
-	s.bufSize += len(pkt.Data())
+	s.bufSize += pkt.Len()
 	return nil
 }
 

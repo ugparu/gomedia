@@ -67,15 +67,10 @@ func (e *opusEncoder) Init(params *pcm.CodecParameters) error {
 }
 
 func (e *opusEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err error) {
-	inData := pkt.Data()
-	inData, err = e.r.Resample(inData)
-	if err != nil {
-		return nil, err
-	}
-
-	buf16 := unsafe.Slice((*int16)(unsafe.Pointer(&inData[0])), len(inData)/2)
-
-	e.buf = append(e.buf, buf16...)
+	pkt.View(func(data []byte) {
+		buf16 := unsafe.Slice((*int16)(unsafe.Pointer(&data[0])), len(data)/2)
+		e.buf = append(e.buf, buf16...)
+	})
 
 	for {
 		if len(e.buf) < e.frameSize {

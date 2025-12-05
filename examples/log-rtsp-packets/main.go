@@ -5,7 +5,6 @@ import (
 	"os"
 
 	"github.com/ugparu/gomedia/format/rtsp"
-	"github.com/ugparu/gomedia/utils/logger"
 )
 
 func main() {
@@ -23,7 +22,6 @@ func main() {
 			log.Fatal(err)
 		}
 		if packet != nil {
-			logger.Infof("DEMO", "packet %d; stream %d; size %d", i, packet.StreamIndex(), len(packet.Data()))
 			i++
 		}
 	}

@@ -96,11 +96,12 @@ func (v *aacEncoder) Init(codecPar *pcm.CodecParameters) (err error) {
 //
 //	because we will flush the encoder automatically to got the last frames.
 func (v *aacEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err error) {
-	pcm := pkt.Data()
-	v.buf = append(v.buf, pcm...)
+	pkt.View(func(data []byte) {
+		v.buf = append(v.buf, data...)
+	})
 
 	for len(v.buf) >= v.frameSize {
-		pcm = v.buf[:v.frameSize]
+		pcm := v.buf[:v.frameSize]
 		v.buf = v.buf[v.frameSize:]
 
 		// The maximum packet size is 8KB aka 768 bytes per channel.

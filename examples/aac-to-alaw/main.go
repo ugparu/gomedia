@@ -47,7 +47,9 @@ func main() {
 
 	packets := 0
 	for pkt := range alawEnc.Packets() {
-		f.Write(pkt.Data())
+		pkt.View(func(data []byte) {
+			f.Write(data)
+		})
 		packets++
 		if packets > 100 {
 			break

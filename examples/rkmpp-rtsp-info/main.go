@@ -105,7 +105,9 @@ func main() {
 						continue
 					}
 
-					totalDataSize += uint64(len(packet.Data()))
+					packet.View(func(data []byte) {
+						totalDataSize += uint64(len(data))
+					})
 
 					// Process video packets
 					if vPkt, ok := packet.(gomedia.VideoPacket); ok {
@@ -116,11 +118,10 @@ func main() {
 							elapsed := time.Since(startTime).Seconds()
 							dataRateMbps := float64(totalDataSize*8) / elapsed / 1000000
 
-							fmt.Printf("[Packet] Count: %d | Data rate: %.2f Mbps | Keyframe: %v | Size: %d bytes | PTS: %v\n",
+							fmt.Printf("[Packet] Count: %d | Data rate: %.2f Mbps | Keyframe: %v | PTS: %v\n",
 								packetCount,
 								dataRateMbps,
 								vPkt.IsKeyFrame(),
-								len(vPkt.Data()),
 								vPkt.Timestamp())
 							lastInfoTime = time.Now()
 						}
@@ -129,9 +130,8 @@ func main() {
 					} else if aPkt, ok := packet.(gomedia.AudioPacket); ok {
 						audioPacketCount++
 						if audioPacketCount%100 == 0 {
-							fmt.Printf("[Audio] Packets: %d | Size: %d bytes | PTS: %v\n",
+							fmt.Printf("[Audio] Packets: %d | PTS: %v\n",
 								audioPacketCount,
-								len(aPkt.Data()),
 								aPkt.Timestamp())
 						}
 					}

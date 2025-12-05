@@ -296,7 +296,7 @@ func (m *Muxer) processTrackHeader(track *mp4io.TrackFrag, s *Stream) {
 	}
 
 	// Safe conversion with validation for DefaultSize
-	pktSize := len(s.packets[0].Data())
+	pktSize := s.packets[0].Len()
 	if pktSize < 0 || pktSize > int(^uint32(0)) {
 		logger.Errorf(m, "Packet size %d is outside uint32 range", pktSize)
 		track.Header.DefaultSize = 0
@@ -325,7 +325,7 @@ func (m *Muxer) processTrackHeader(track *mp4io.TrackFrag, s *Stream) {
 // processPackets processes packets within a stream to reduce complexity
 func (m *Muxer) processPackets(track *mp4io.TrackFrag, s *Stream, streamIndex int) {
 	for j, pkt := range s.packets {
-		if len(pkt.Data()) != int(track.Header.DefaultSize) {
+		if pkt.Len() != int(track.Header.DefaultSize) {
 			track.Run.Flags |= mp4io.TRUNSampleSize
 		}
 
@@ -357,7 +357,7 @@ func (m *Muxer) processPackets(track *mp4io.TrackFrag, s *Stream, streamIndex in
 		}
 
 		var entrySize uint32
-		pktDataSize := len(pkt.Data())
+		pktDataSize := pkt.Len()
 		if pktDataSize < 0 || pktDataSize > int(^uint32(0)) {
 			logger.Errorf(m, "Packet data size %d is outside uint32 range, using 0", pktDataSize)
 			entrySize = 0
@@ -426,8 +426,10 @@ func (m *Muxer) processDataOffsets(moof *mp4io.MovieFrag, startMOOF int, out []b
 		moof.Tracks[i].Run.DataOffset = dataOffset
 
 		for _, pkt := range s.packets {
-			copy(out[n:], pkt.Data())
-			n += len(pkt.Data())
+			pkt.View(func(data []byte) {
+				copy(out[n:], data)
+				n += len(data)
+			})
 		}
 	}
 	return n

@@ -3,6 +3,7 @@ package codec
 import (
 	"fmt"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 type sharedBuffer struct {
 	buf buffer.PooledBuffer
 	ref int32
+	mu  *sync.RWMutex
 }
 
 type BasePacket[T gomedia.CodecParameters] struct {
@@ -42,7 +44,7 @@ func NewBasePacket[T gomedia.CodecParameters](
 		RelativeTime: relativeTime,
 		Dur:          dur,
 		InpURL:       url,
-		shared:       &sharedBuffer{buf: buf, ref: 1},
+		shared:       &sharedBuffer{buf: buf, ref: 1, mu: &sync.RWMutex{}},
 		AbsoluteTime: absTime,
 		CodecPar:     codecPar,
 	}
@@ -61,13 +63,20 @@ func (pkt *BasePacket[T]) Clone(copyData bool) BasePacket[T] {
 	if copyData {
 		buf := buffer.Get(len(pkt.shared.buf.Data()))
 		copy(buf.Data(), pkt.shared.buf.Data())
-		newPkt.shared = &sharedBuffer{buf: buf, ref: 1}
+		newPkt.shared = &sharedBuffer{buf: buf, ref: 1, mu: &sync.RWMutex{}}
 	} else {
 		// Share the same buffer - all clones will see buffer changes (e.g., SwitchToFile)
 		atomic.AddInt32(&pkt.shared.ref, 1)
 		newPkt.shared = pkt.shared
 	}
 	return newPkt
+}
+
+func (pkt *BasePacket[T]) Len() int {
+	pkt.shared.mu.RLock()
+	defer pkt.shared.mu.RUnlock()
+
+	return pkt.shared.buf.Len()
 }
 
 func (pkt *BasePacket[T]) URL() string {
@@ -98,10 +107,21 @@ func (pkt *BasePacket[T]) Timestamp() time.Duration {
 	return pkt.RelativeTime
 }
 
-func (pkt *BasePacket[T]) Data() []byte {
-	return pkt.shared.buf.Data()
-}
+// View предоставляет безопасный доступ к данным буфера.
+// Слайс b валиден ТОЛЬКО внутри функции fn.
+// Не сохраняйте b и не выносите его за пределы fn.
+func (pkt *BasePacket[T]) View(fn func(b []byte)) {
+	// Блокируем чтение указателя pkt.shared.buf
+	pkt.shared.mu.RLock()
+	defer pkt.shared.mu.RUnlock()
 
+	// Внутри лока данные гарантированно существуют и не будут зарелизины
+	if pkt.shared.buf != nil {
+		fn(pkt.shared.buf.Data())
+	} else {
+		fn(nil)
+	}
+}
 func (pkt *BasePacket[T]) SetDuration(dur time.Duration) {
 	pkt.Dur = dur
 }

@@ -113,10 +113,12 @@ func PacketToFFmpeg(vPkt gomedia.VideoPacket, ptr unsafe.Pointer) error {
 		cPkt.time_base.num = 1
 		cPkt.time_base.den = 1000000
 
-		C.av_grow_packet(cPkt, C.int(len(pkt.Data())))
+		C.av_grow_packet(cPkt, C.int(pkt.Len()))
 
 		slice := unsafe.Slice((*byte)(cPkt.data), int(cPkt.size))
-		copy(slice, pkt.Data())
+		pkt.View(func(data []byte) {
+			copy(slice, data)
+		})
 
 		if len(slice) != 0 {
 			slice[0] = 0
@@ -132,10 +134,12 @@ func PacketToFFmpeg(vPkt gomedia.VideoPacket, ptr unsafe.Pointer) error {
 		cPkt.time_base.num = 1
 		cPkt.time_base.den = 1000000
 
-		C.av_grow_packet(cPkt, C.int(len(pkt.Data())))
+		C.av_grow_packet(cPkt, C.int(pkt.Len()))
 
 		slice := unsafe.Slice((*byte)(cPkt.data), int(cPkt.size))
-		copy(slice, pkt.Data())
+		pkt.View(func(data []byte) {
+			copy(slice, data)
+		})
 
 		// Convert length-prefixed NAL units to Annex-B format for H.265
 		convertLengthPrefixedToAnnexB(slice)

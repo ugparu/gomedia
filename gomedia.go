@@ -53,7 +53,8 @@ type Packet interface {
 	SetStartTime(time.Time)                                                              // Sets the absolute start time.
 	Duration() time.Duration                                                             // Returns the duration of the packet content.
 	SetDuration(time.Duration)                                                           // Sets the duration of the packet content.
-	Data() []byte                                                                        // Returns the raw packet data.
+	View(fn func(b []byte))                                                              // View the raw packet data.
+	Len() int                                                                            // Returns the length of the packet data.
 	SwitchToFile(f *os.File, offset int64, size int64, closeFn func() error) (err error) // Switches the buffer of the packet.
 	Close()                                                                              // Closes the packet and releases resources.
 }

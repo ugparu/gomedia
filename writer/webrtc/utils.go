@@ -9,6 +9,7 @@ import (
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/codec/h264"
 	"github.com/ugparu/gomedia/codec/h265"
+	"github.com/ugparu/gomedia/utils/buffer"
 	"github.com/ugparu/gomedia/utils/logger"
 	"github.com/ugparu/gomedia/utils/nal"
 )
@@ -94,12 +95,29 @@ func writeVideoPacketsToPeer(done chan struct{},
 				}
 			}
 		case pkt := <-vBuf:
-			sample := createSampleFromPacket(pkt)
+			buf := buffer.Get(pkt.Len())
+			defer buf.Release()
+			pkt.View(func(data []byte) {
+				copy(buf.Data(), data)
+			})
+
+			sample := media.Sample{
+				Data:               buf.Data(),
+				Timestamp:          pkt.StartTime(),
+				Duration:           pkt.Duration(),
+				PacketTimestamp:    uint32(pkt.Timestamp()), //nolint:gosec
+				PrevDroppedPackets: 0,
+				Metadata:           nil,
+			}
+
 			if pkt.IsKeyFrame() {
 				sample.Data = appendCodecParameters(pkt.CodecParameters())
 			}
 
-			nalus, _ := nal.SplitNALUs(pkt.Data())
+			var nalus [][]byte
+			pkt.View(func(data []byte) {
+				nalus, _ = nal.SplitNALUs(data)
+			})
 			for _, nalu := range nalus {
 				sample.Data = append(sample.Data, append([]byte{0, 0, 0, 1}, nalu...)...)
 			}
@@ -134,22 +152,26 @@ func writeAudioPacketsToPeer(done chan struct{}, flush chan struct{}, aBuf chan 
 			return
 		case <-flush:
 		case pkt := <-aBuf:
-			sample := createSampleFromPacket(pkt)
-			if err := at.WriteSample(sample); err != nil {
+			buf := buffer.Get(pkt.Len())
+			pkt.View(func(data []byte) {
+				copy(buf.Data(), data)
+			})
+
+			sample := media.Sample{
+				Data:               buf.Data(),
+				Timestamp:          pkt.StartTime(),
+				Duration:           pkt.Duration(),
+				PacketTimestamp:    uint32(pkt.Timestamp()), //nolint:gosec
+				PrevDroppedPackets: 0,
+				Metadata:           nil,
+			}
+
+			err := at.WriteSample(sample)
+			buf.Release()
+			if err != nil {
 				logger.Errorf(done, "Error writing audio sample: %v", err)
 			}
 		}
-	}
-}
-
-func createSampleFromPacket(pkt gomedia.Packet) media.Sample {
-	return media.Sample{
-		Data:               pkt.Data(),
-		Timestamp:          pkt.StartTime(),
-		Duration:           pkt.Duration(),
-		PacketTimestamp:    uint32(pkt.Timestamp()), //nolint:gosec
-		PrevDroppedPackets: 0,
-		Metadata:           nil,
 	}
 }
 

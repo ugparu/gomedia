@@ -52,11 +52,12 @@ func (e *alawEncoder) Init(params *pcm.CodecParameters) error {
 }
 
 func (e *alawEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err error) {
-	inData := pkt.Data()
-	e.buf = append(e.buf, inData...)
+	pkt.View(func(data []byte) {
+		e.buf = append(e.buf, data...)
+	})
 
 	for len(e.buf) >= AlawFrameSize {
-		inData = e.buf[:AlawFrameSize]
+		inData := e.buf[:AlawFrameSize]
 		e.buf = e.buf[AlawFrameSize:]
 
 		var inBuf []byte

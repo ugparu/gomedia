@@ -76,8 +76,10 @@ func (d *audioDecoder) Step(stopCh <-chan struct{}) (err error) {
 			}
 		}
 
-		d.inBuf.Resize(len(p.Data()))
-		copy(d.inBuf.Data(), p.Data())
+		p.View(func(b []byte) {
+			d.inBuf.Resize(len(b))
+			copy(d.inBuf.Data(), b)
+		})
 
 		var dPCM []byte
 		if dPCM, err = d.InnerAudioDecoder.Decode(d.inBuf.Data()); err != nil || len(dPCM) == 0 {
