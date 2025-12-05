@@ -76,9 +76,9 @@ func (d *audioDecoder) Step(stopCh <-chan struct{}) (err error) {
 			}
 		}
 
-		p.View(func(b []byte) {
-			d.inBuf.Resize(len(b))
-			copy(d.inBuf.Data(), b)
+		p.View(func(b buffer.PooledBuffer) {
+			d.inBuf.Resize(b.Len())
+			copy(d.inBuf.Data(), b.Data())
 		})
 
 		var dPCM []byte

@@ -9,6 +9,7 @@ import (
 	"github.com/ugparu/gomedia/encoder"
 	"github.com/ugparu/gomedia/encoder/pcm"
 	"github.com/ugparu/gomedia/reader"
+	"github.com/ugparu/gomedia/utils/buffer"
 )
 
 func main() {
@@ -47,8 +48,8 @@ func main() {
 
 	packets := 0
 	for pkt := range alawEnc.Packets() {
-		pkt.View(func(data []byte) {
-			f.Write(data)
+		pkt.View(func(data buffer.PooledBuffer) {
+			f.Write(data.Data())
 		})
 		packets++
 		if packets > 100 {

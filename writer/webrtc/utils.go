@@ -97,8 +97,9 @@ func writeVideoPacketsToPeer(done chan struct{},
 		case pkt := <-vBuf:
 			buf := buffer.Get(pkt.Len())
 			defer buf.Release()
-			pkt.View(func(data []byte) {
-				copy(buf.Data(), data)
+			pkt.View(func(data buffer.PooledBuffer) {
+				buf.Resize(data.Len())
+				copy(buf.Data(), data.Data())
 			})
 
 			sample := media.Sample{
@@ -115,8 +116,10 @@ func writeVideoPacketsToPeer(done chan struct{},
 			}
 
 			var nalus [][]byte
-			pkt.View(func(data []byte) {
-				nalus, _ = nal.SplitNALUs(data)
+			pkt.View(func(data buffer.PooledBuffer) {
+				buf.Resize(data.Len())
+				copy(buf.Data(), data.Data())
+				nalus, _ = nal.SplitNALUs(data.Data())
 			})
 			for _, nalu := range nalus {
 				sample.Data = append(sample.Data, append([]byte{0, 0, 0, 1}, nalu...)...)
@@ -153,8 +156,9 @@ func writeAudioPacketsToPeer(done chan struct{}, flush chan struct{}, aBuf chan 
 		case <-flush:
 		case pkt := <-aBuf:
 			buf := buffer.Get(pkt.Len())
-			pkt.View(func(data []byte) {
-				copy(buf.Data(), data)
+			pkt.View(func(data buffer.PooledBuffer) {
+				buf.Resize(data.Len())
+				copy(buf.Data(), data.Data())
 			})
 
 			sample := media.Sample{

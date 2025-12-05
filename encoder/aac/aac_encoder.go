@@ -13,6 +13,7 @@ import (
 	"github.com/ugparu/gomedia/codec/aac"
 	"github.com/ugparu/gomedia/codec/pcm"
 	"github.com/ugparu/gomedia/encoder"
+	"github.com/ugparu/gomedia/utils/buffer"
 )
 
 type aacEncoder struct {
@@ -21,11 +22,14 @@ type aacEncoder struct {
 	frameSize     int
 	frameDuration time.Duration
 	buf           []uint8
+	aacBuf        buffer.PooledBuffer
 	param         *aac.CodecParameters
 }
 
 func NewAacEncoder() encoder.InnerAudioEncoder {
-	return new(aacEncoder)
+	return &aacEncoder{
+		aacBuf: buffer.Get(0),
+	}
 }
 
 // Initialize the encoder in LC profile.
@@ -96,8 +100,8 @@ func (v *aacEncoder) Init(codecPar *pcm.CodecParameters) (err error) {
 //
 //	because we will flush the encoder automatically to got the last frames.
 func (v *aacEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err error) {
-	pkt.View(func(data []byte) {
-		v.buf = append(v.buf, data...)
+	pkt.View(func(data buffer.PooledBuffer) {
+		v.buf = append(v.buf, data.Data()...)
 	})
 
 	for len(v.buf) >= v.frameSize {
@@ -106,9 +110,9 @@ func (v *aacEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err er
 
 		// The maximum packet size is 8KB aka 768 bytes per channel.
 		nbAac := int(C.aacenc_max_output_buffer_size(&v.m)) //nolint:gocritic // CGO function call
-		aacBuf := make([]byte, nbAac)
+		v.aacBuf.Resize(nbAac)
 
-		pAac := (*C.char)(unsafe.Pointer(&aacBuf[0]))
+		pAac := (*C.char)(unsafe.Pointer(&v.aacBuf.Data()[0]))
 		pAacSize := C.int(nbAac)
 
 		pPcm := (*C.char)(unsafe.Pointer(&pcm[0]))
@@ -124,39 +128,39 @@ func (v *aacEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err er
 
 		// when got nil packet, flush encoder.
 		if valid == 0 {
-			aacBuf, err = v.Flush()
+			err = v.Flush()
 			if err == nil {
-				resp = append(resp, aac.NewPacket(aacBuf, 0, pkt.URL(), pkt.StartTime(), v.param, v.frameDuration))
+				resp = append(resp, aac.NewPacket(v.aacBuf.Data(), 0, pkt.URL(), pkt.StartTime(), v.param, v.frameDuration))
 			}
 			break
 		}
 
-		resp = append(resp, aac.NewPacket(aacBuf[0:valid], pkt.Timestamp(), pkt.URL(), pkt.StartTime(), v.param, v.frameDuration))
+		resp = append(resp, aac.NewPacket(v.aacBuf.Data()[:valid], pkt.Timestamp(), pkt.URL(), pkt.StartTime(), v.param, v.frameDuration))
 	}
 	return
 }
 
 // Flush the encoder to get the cached aac frames.
 // @return when aac is nil, flush ok, should never flush anymore.
-func (v *aacEncoder) Flush() (aac []byte, err error) {
+func (v *aacEncoder) Flush() (err error) {
 	// The maximum packet size is 8KB aka 768 bytes per channel.
 	nbAac := int(C.aacenc_max_output_buffer_size(&v.m)) //nolint:gocritic // CGO function call
-	aac = make([]byte, nbAac)
+	v.aacBuf.Resize(nbAac)
 
-	pAac := (*C.char)(unsafe.Pointer(&aac[0]))
+	pAac := (*C.char)(unsafe.Pointer(&v.aacBuf.Data()[0]))
 	pAacSize := C.int(nbAac)
 
 	r := C.aacenc_encode(&v.m, nil, 0, 0, pAac, &pAacSize) //nolint:gocritic // CGO function call
 	if int(r) != 0 {
-		return nil, fmt.Errorf("Flush failed, code=%v", int(r))
+		return fmt.Errorf("Flush failed, code=%v", int(r))
 	}
 
 	valid := int(pAacSize)
 	if valid == 0 {
-		return nil, nil
+		return
 	}
 
-	return aac[0:valid], nil
+	return
 }
 
 // Get the channels of encoder.

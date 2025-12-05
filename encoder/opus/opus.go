@@ -11,6 +11,7 @@ import (
 	"github.com/ugparu/gomedia/codec/pcm"
 	"github.com/ugparu/gomedia/encoder"
 	"github.com/ugparu/gomedia/utils"
+	"github.com/ugparu/gomedia/utils/buffer"
 	"github.com/winlinvip/go-aresample/aresample"
 )
 
@@ -67,8 +68,8 @@ func (e *opusEncoder) Init(params *pcm.CodecParameters) error {
 }
 
 func (e *opusEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err error) {
-	pkt.View(func(data []byte) {
-		buf16 := unsafe.Slice((*int16)(unsafe.Pointer(&data[0])), len(data)/2)
+	pkt.View(func(data buffer.PooledBuffer) {
+		buf16 := unsafe.Slice((*int16)(unsafe.Pointer(&data.Data()[0])), data.Len()/2)
 		e.buf = append(e.buf, buf16...)
 	})
 

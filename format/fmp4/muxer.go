@@ -426,9 +426,9 @@ func (m *Muxer) processDataOffsets(moof *mp4io.MovieFrag, startMOOF int, out []b
 		moof.Tracks[i].Run.DataOffset = dataOffset
 
 		for _, pkt := range s.packets {
-			pkt.View(func(data []byte) {
-				copy(out[n:], data)
-				n += len(data)
+			pkt.View(func(data buffer.PooledBuffer) {
+				copy(out[n:], data.Data())
+				n += data.Len()
 			})
 		}
 	}

@@ -107,14 +107,14 @@ func (pkt *BasePacket[T]) Timestamp() time.Duration {
 // View предоставляет безопасный доступ к данным буфера.
 // Слайс b валиден ТОЛЬКО внутри функции fn.
 // Не сохраняйте b и не выносите его за пределы fn.
-func (pkt *BasePacket[T]) View(fn func(b []byte)) {
+func (pkt *BasePacket[T]) View(fn func(b buffer.PooledBuffer)) {
 	// Блокируем чтение указателя pkt.shared.buf
 	pkt.shared.mu.RLock()
 	defer pkt.shared.mu.RUnlock()
 
 	// Внутри лока данные гарантированно существуют и не будут зарелизины
 	if pkt.shared.buf != nil {
-		fn(pkt.shared.buf.Data())
+		fn(pkt.shared.buf)
 	} else {
 		fn(nil)
 	}
@@ -136,19 +136,6 @@ func (pkt *BasePacket[T]) String() string {
 		return "EMPTY_PACKET"
 	}
 	return fmt.Sprintf("PACKET sz=%d", pkt.shared.buf.Len())
-}
-
-// Buffer returns the underlying buffer. Use Data() for the byte slice.
-func (pkt *BasePacket[T]) Buffer() buffer.PooledBuffer {
-	if pkt.shared == nil {
-		return nil
-	}
-	return pkt.shared.buf
-}
-
-// SetBuffer sets the buffer for a new packet. Only call this once during packet creation.
-func (pkt *BasePacket[T]) SetBuffer(buf buffer.PooledBuffer) {
-	pkt.shared = &sharedBuffer{buf: buf, ref: 1}
 }
 
 // Retain increases the reference count. Use this when you need to keep a reference

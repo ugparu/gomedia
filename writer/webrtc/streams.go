@@ -9,6 +9,7 @@ import (
 	"github.com/pion/webrtc/v4/pkg/media"
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/utils"
+	"github.com/ugparu/gomedia/utils/buffer"
 	"github.com/ugparu/gomedia/utils/logger"
 	"github.com/ugparu/gomedia/utils/nal"
 )
@@ -359,8 +360,8 @@ func (ss *sortedStreams) seedTrack(str *stream, peer *peerTrack) error {
 			}
 
 			var bufNalus [][]byte
-			vPkt.View(func(data []byte) {
-				bufNalus, _ = nal.SplitNALUs(data)
+			vPkt.View(func(data buffer.PooledBuffer) {
+				bufNalus, _ = nal.SplitNALUs(data.Data())
 			})
 
 			for _, nalu := range bufNalus {

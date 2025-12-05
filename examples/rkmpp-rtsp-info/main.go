@@ -11,6 +11,7 @@ import (
 	"github.com/ugparu/gomedia/decoder"
 	"github.com/ugparu/gomedia/decoder/video/rkmpp"
 	"github.com/ugparu/gomedia/format/rtsp"
+	"github.com/ugparu/gomedia/utils/buffer"
 )
 
 func main() {
@@ -105,8 +106,8 @@ func main() {
 						continue
 					}
 
-					packet.View(func(data []byte) {
-						totalDataSize += uint64(len(data))
+					packet.View(func(data buffer.PooledBuffer) {
+						totalDataSize += uint64(data.Len())
 					})
 
 					// Process video packets
