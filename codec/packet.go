@@ -73,9 +73,6 @@ func (pkt *BasePacket[T]) Clone(copyData bool) BasePacket[T] {
 }
 
 func (pkt *BasePacket[T]) Len() int {
-	// pkt.shared.mu.RLock()
-	// defer pkt.shared.mu.RUnlock()
-
 	return pkt.shared.buf.Len()
 }
 
@@ -112,8 +109,8 @@ func (pkt *BasePacket[T]) Timestamp() time.Duration {
 // Не сохраняйте b и не выносите его за пределы fn.
 func (pkt *BasePacket[T]) View(fn func(b []byte)) {
 	// Блокируем чтение указателя pkt.shared.buf
-	// pkt.shared.mu.RLock()
-	// defer pkt.shared.mu.RUnlock()
+	pkt.shared.mu.RLock()
+	defer pkt.shared.mu.RUnlock()
 
 	// Внутри лока данные гарантированно существуют и не будут зарелизины
 	if pkt.shared.buf != nil {
@@ -161,6 +158,9 @@ func (pkt *BasePacket[T]) Retain() {
 }
 
 func (pkt *BasePacket[T]) SwitchToFile(f *os.File, offset int64, size int64, closeFn func() error) (err error) {
+	pkt.shared.mu.Lock()
+	defer pkt.shared.mu.Unlock()
+
 	buf, err := buffer.GetMmap(f, offset, int(size), closeFn)
 	if err != nil {
 		return err
