@@ -148,7 +148,7 @@ func createFile(path string) (*os.File, error) {
 
 	// Create parent directory
 	dir := filepath.Dir(path)
-	if err = os.MkdirAll(dir, 0o750); err != nil { //nolint:mnd
+	if err = os.MkdirAll(dir, os.ModePerm); err != nil { //nolint:mnd
 		return nil, err
 	}
 

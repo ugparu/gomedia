@@ -115,12 +115,12 @@ func (pkt *BasePacket[T]) View(fn func(b []byte)) {
 	pkt.shared.mu.RLock()
 	defer pkt.shared.mu.RUnlock()
 
-	// Внутри лока данные гарантированно существуют и не будут зарелизины
-	if pkt.shared.buf != nil {
-		fn(pkt.shared.buf.Data())
-	} else {
-		fn(nil)
-	}
+	// // Внутри лока данные гарантированно существуют и не будут зарелизины
+	// if pkt.shared.buf != nil {
+	// 	fn(pkt.shared.buf.Data())
+	// } else {
+	// 	fn(nil)
+	// }
 }
 func (pkt *BasePacket[T]) SetDuration(dur time.Duration) {
 	pkt.Dur = dur
