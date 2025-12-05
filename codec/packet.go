@@ -115,12 +115,12 @@ func (pkt *BasePacket[T]) View(fn func(b []byte)) {
 	pkt.shared.mu.RLock()
 	defer pkt.shared.mu.RUnlock()
 
-	// // Внутри лока данные гарантированно существуют и не будут зарелизины
-	// if pkt.shared.buf != nil {
-	// 	fn(pkt.shared.buf.Data())
-	// } else {
-	// 	fn(nil)
-	// }
+	// Внутри лока данные гарантированно существуют и не будут зарелизины
+	if pkt.shared.buf != nil {
+		fn(pkt.shared.buf.Data())
+	} else {
+		fn(nil)
+	}
 }
 func (pkt *BasePacket[T]) SetDuration(dur time.Duration) {
 	pkt.Dur = dur
@@ -161,16 +161,17 @@ func (pkt *BasePacket[T]) Retain() {
 }
 
 func (pkt *BasePacket[T]) SwitchToFile(f *os.File, offset int64, size int64, closeFn func() error) (err error) {
-	buf, err := buffer.GetMmap(f, offset, int(size), closeFn)
-	if err != nil {
-		return err
-	}
 
-	// Replace the buffer in the shared structure.
-	// All clones will see this change since they share the same sharedBuffer pointer.
-	oldBuf := pkt.shared.buf
-	pkt.shared.buf = buf
-	oldBuf.Release()
+	// buf, err := buffer.GetMmap(f, offset, int(size), closeFn)
+	// if err != nil {
+	// 	return err
+	// }
+
+	// // Replace the buffer in the shared structure.
+	// // All clones will see this change since they share the same sharedBuffer pointer.
+	// oldBuf := pkt.shared.buf
+	// pkt.shared.buf = buf
+	// oldBuf.Release()
 
 	return nil
 }
