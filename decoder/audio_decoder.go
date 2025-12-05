@@ -5,6 +5,7 @@ import (
 
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/codec/pcm"
+	"github.com/ugparu/gomedia/utils/buffer"
 	"github.com/ugparu/gomedia/utils/lifecycle"
 )
 
@@ -22,6 +23,7 @@ type audioDecoder struct {
 	outPackets chan gomedia.AudioPacket
 	codecPar   gomedia.AudioCodecParameters
 	pcmPar     *pcm.CodecParameters
+	inBuf      buffer.PooledBuffer
 }
 
 func NewAudioDecoder(chanSize int, factory map[gomedia.CodecType]func() InnerAudioDecoder) gomedia.AudioDecoder {
@@ -33,6 +35,7 @@ func NewAudioDecoder(chanSize int, factory map[gomedia.CodecType]func() InnerAud
 		outPackets:        make(chan gomedia.AudioPacket, chanSize),
 		codecPar:          nil,
 		pcmPar:            nil,
+		inBuf:             buffer.Get(0),
 	}
 
 	d.AsyncManager = lifecycle.NewFailSafeAsyncManager(d)
@@ -73,8 +76,11 @@ func (d *audioDecoder) Step(stopCh <-chan struct{}) (err error) {
 			}
 		}
 
+		d.inBuf.Resize(len(p.Data()))
+		copy(d.inBuf.Data(), p.Data())
+
 		var dPCM []byte
-		if dPCM, err = d.InnerAudioDecoder.Decode(p.Data()); err != nil || len(dPCM) == 0 {
+		if dPCM, err = d.InnerAudioDecoder.Decode(d.inBuf.Data()); err != nil || len(dPCM) == 0 {
 			return
 		}
 		select {
@@ -110,6 +116,7 @@ func (d *audioDecoder) Close_() { //nolint:revive // required by lifecycle.Async
 		d.InnerAudioDecoder.Close()
 	}
 	close(d.outPackets)
+	d.inBuf.Release()
 }
 
 func (d *audioDecoder) String() string {
