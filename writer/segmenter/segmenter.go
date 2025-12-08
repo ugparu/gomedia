@@ -191,6 +191,7 @@ func (s *segmenter) openNewFile(startTime time.Time) error {
 		folder:    folder,
 		name:      name,
 		duration:  0,
+		wg:        sync.WaitGroup{},
 	}
 
 	return nil
@@ -235,12 +236,11 @@ func (s *segmenter) closeActiveFile(stopChan <-chan struct{}) error {
 		case <-stopChan:
 			return
 		}
-
 		select {
 		case <-waitDone:
-		case <-time.After(af.duration * 3):
+		case <-time.After(af.duration * 2):
 			logger.Warningf(nil, "timeout waiting for packets to close for file %s (waited %v), closing anyway",
-				af.name, af.duration*3)
+				af.name, af.duration*2)
 		}
 
 		_ = af.file.Close()
@@ -279,6 +279,7 @@ func (s *segmenter) writePacketToFile(pkt gomedia.Packet) error {
 				return err
 			}
 		}
+		preLastPkt.Close()
 	}
 
 	// Only count video packet durations for segment timing
@@ -332,15 +333,13 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 
 	case inpPkt := <-s.inpPktCh:
 		if s.recordMode == gomedia.Never {
+			inpPkt.Close()
 			return errors.New("attempt to process packet with never record mode")
 		}
 
 		if inpPkt == nil {
 			return &utils.NilPacketError{}
 		}
-		defer func() {
-			inpPkt.Close()
-		}()
 
 		// Update codec parameters if changed
 		if vPkt, ok := inpPkt.(gomedia.VideoPacket); ok && vPkt.CodecParameters() != s.codecPar.VideoCodecParameters {
