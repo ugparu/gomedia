@@ -24,6 +24,7 @@ type activeFile struct {
 	name      string
 	duration  time.Duration
 	wg        sync.WaitGroup // Track pending packet closures for SwitchToFile
+	count     int
 }
 
 // ringBuffer holds a window of packets for Event mode pre-buffering
@@ -211,6 +212,23 @@ func (s *segmenter) closeActiveFile(stopChan <-chan struct{}) error {
 		return err
 	}
 
+	fi, err := af.file.Stat()
+	if err != nil {
+		_ = af.file.Close()
+		return err
+	}
+
+	select {
+	case s.outInfoCh <- gomedia.FileInfo{
+		Name:  af.folder + af.name,
+		Start: af.startTime,
+		Stop:  af.startTime.Add(af.duration),
+		Size:  int(fi.Size()),
+	}:
+	case <-stopChan:
+		return err
+	}
+
 	// Close file in separate goroutine after all referenced packets are closed
 	go func(af *activeFile) {
 		// Wait for all packets to be closed with timeout of 2x duration
@@ -220,22 +238,6 @@ func (s *segmenter) closeActiveFile(stopChan <-chan struct{}) error {
 			close(waitDone)
 		}()
 
-		fi, err := af.file.Stat()
-		if err != nil {
-			_ = af.file.Close()
-			return
-		}
-
-		select {
-		case s.outInfoCh <- gomedia.FileInfo{
-			Name:  af.folder + af.name,
-			Start: af.startTime,
-			Stop:  af.startTime.Add(af.duration),
-			Size:  int(fi.Size()),
-		}:
-		case <-stopChan:
-			return
-		}
 		select {
 		case <-waitDone:
 		case <-time.After(af.duration * 2):
@@ -270,8 +272,10 @@ func (s *segmenter) writePacketToFile(pkt gomedia.Packet) error {
 		dataOffset, dataSize := af.muxer.GetLastPacketDataInfo(pkt.StreamIndex())
 		if dataSize > 0 {
 			af.wg.Add(1)
+			af.count++
 			done := func() error {
 				af.wg.Done()
+				af.count--
 				return nil
 			}
 			if err := preLastPkt.SwitchToFile(af.file, dataOffset, dataSize, done); err != nil {
