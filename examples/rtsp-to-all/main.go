@@ -68,12 +68,12 @@ func main() {
 			URLs: []string{"stun:stun.l.google.com:19302"},
 		},
 	})
-	webrtcWr = webrtc.New(100, time.Second*10)
+	webrtcWr = webrtc.New(100, time.Second*15)
 	webrtcWr.Write()
 	logrus.Info("WebRTC writer initialized")
 
 	// Initialize Segmenter for MP4 recording
-	seg = segmenter.New("./recordings/", time.Second*10, gomedia.Always, 100)
+	seg = segmenter.New("./recordings/", time.Second*15, gomedia.Always, 100)
 	seg.Write()
 	logrus.Info("Segmenter initialized for MP4 recording")
 
@@ -127,15 +127,13 @@ func main() {
 		for {
 			select {
 			case smpl := <-audioDecoder.Samples():
-				aacEnc.Samples() <- smpl.Clone(false).(gomedia.AudioPacket)
-				smpl.Close()
+				processDecodedAudioPacket(smpl, aacEnc, alawEnc)
 			case pkt := <-aacEnc.Packets():
-				// Send transcoded audio to HLS
-				for _, url := range rtspURLs {
-					clonePkt := pkt.Clone(false)
-					clonePkt.SetURL(url)
-					hlsWr.Packets() <- clonePkt
-				}
+				processEncodedAudioPacket(pkt, hlsWr)
+				processEncodedAudioPacket(pkt, seg)
+				pkt.Close()
+			case pkt := <-alawEnc.Packets():
+				processEncodedAudioPacket(pkt, webrtcWr)
 				pkt.Close()
 			case pkt := <-rdr.Packets():
 				if audioPkt, ok := pkt.(gomedia.AudioPacket); ok {
@@ -471,7 +469,6 @@ func processEncodedAudioPacket(packet gomedia.Packet, wr gomedia.Writer) {
 		pkt.SetURL(url)
 		wr.Packets() <- pkt
 	}
-	packet.Close()
 }
 
 func processVideoPacket(packet gomedia.VideoPacket, hlsWr gomedia.HLSStreamer, webrtcWr gomedia.WebRTCStreamer, seg gomedia.Segmenter) {

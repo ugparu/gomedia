@@ -506,7 +506,7 @@
         function initHLSPlayer() {
             if (Hls.isSupported()) {
                 hlsInstance = new Hls({
-                    lowLatencyMode: false,
+                    lowLatencyMode: true,
                     backBufferLength: 10,
                     liveSyncDurationCount: 2,
                     liveMaxLatencyDurationCount: 5,

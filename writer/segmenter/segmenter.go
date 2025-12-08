@@ -40,7 +40,10 @@ func newRingBuffer(maxDur time.Duration) *ringBuffer {
 
 func (rb *ringBuffer) add(pkt gomedia.Packet) {
 	rb.packets = append(rb.packets, pkt)
-	rb.duration += pkt.Duration()
+	// Only count video packet durations for accurate timing
+	if _, ok := pkt.(gomedia.VideoPacket); ok {
+		rb.duration += pkt.Duration()
+	}
 }
 
 // trim removes old packets from the front until duration is within limit
@@ -49,7 +52,6 @@ func (rb *ringBuffer) trim() {
 	for len(rb.packets) > 1 && rb.duration > rb.maxDur {
 		// Find first keyframe after the front that we can trim to
 		trimIdx := -1
-		var trimDur time.Duration
 		for i := range rb.packets {
 			if i == 0 {
 				continue
@@ -58,14 +60,16 @@ func (rb *ringBuffer) trim() {
 				trimIdx = i
 				break
 			}
-			trimDur += rb.packets[i-1].Duration()
 		}
 		if trimIdx == -1 {
 			break // No keyframe found, can't trim
 		}
-		// Calculate duration being trimmed
+		// Calculate duration being trimmed (only video packets)
+		var trimDur time.Duration
 		for i := range trimIdx {
-			trimDur += rb.packets[i].Duration()
+			if _, ok := rb.packets[i].(gomedia.VideoPacket); ok {
+				trimDur += rb.packets[i].Duration()
+			}
 		}
 		rb.packets = rb.packets[trimIdx:]
 		rb.duration -= trimDur

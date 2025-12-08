@@ -81,7 +81,7 @@ func (b *memBuffer) Resize(size int) {
 func (b *memBuffer) Release() {
 	// Защита от утечки памяти: если буфер разросся слишком сильно,
 	// лучше позволить GC собрать его, чем держать в пуле.
-	if cap(b.buf) > maxBufSize {
+	if cap(b.buf) > maxBufSize || os.Getenv("REUSE_BUFFERS") != "1" {
 		return
 	}
 
