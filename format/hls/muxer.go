@@ -17,8 +17,8 @@ import (
 
 // Constants defining fragment and part parameters.
 const (
-	fragmentDuration = time.Millisecond * 95
-	partTarget       = 1
+	fragmentDuration = time.Millisecond * 950
+	partTarget       = 1.
 	maxTS            = time.Hour
 )
 

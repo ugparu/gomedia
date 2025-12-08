@@ -13,6 +13,7 @@ import (
 
 	"github.com/pion/webrtc/v4"
 	"github.com/ugparu/gomedia"
+	"github.com/ugparu/gomedia/utils/buffer"
 	"github.com/ugparu/gomedia/utils/lifecycle"
 	"github.com/ugparu/gomedia/utils/logger"
 )
@@ -243,8 +244,10 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 	pt.flush = make(chan struct{})
 	pt.done = make(chan struct{})
 	const bufSize = 100
-	pt.vBuf = make(chan gomedia.VideoPacket, bufSize)
-	pt.aBuf = make(chan gomedia.AudioPacket, bufSize)
+	pt.vChan = make(chan gomedia.VideoPacket, bufSize)
+	pt.vBuf = buffer.Get(0)
+	pt.aChan = make(chan gomedia.AudioPacket, bufSize)
+	pt.aBuf = buffer.Get(0)
 
 	var once sync.Once
 	peer.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
@@ -394,8 +397,8 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 
 	inpPeer.SDP = base64.StdEncoding.EncodeToString([]byte(peer.LocalDescription().SDP))
 
-	go writeVideoPacketsToPeer(pt.done, pt.flush, pt.vBuf, pt.aBuf, pt.vt)
-	go writeAudioPacketsToPeer(pt.done, pt.flush, pt.aBuf, pt.at)
+	go writeVideoPacketsToPeer(pt.done, pt.flush, pt.vChan, pt.aChan, pt.vt, pt.vBuf)
+	go writeAudioPacketsToPeer(pt.done, pt.flush, pt.aChan, pt.at, pt.aBuf)
 
 	return inpPeer
 }
@@ -403,6 +406,7 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 // removePeer removes a peer from all existing and to-be-added peers, removes associated tracks,
 // closes the DataChannel, and closes the PeerConnection.
 func (element *webRTCWriter) removePeer(peer *peerTrack) (err error) {
+
 	for _, peers := range element.streams.streams {
 		logger.Infof(element, "Removing peer track from stream")
 		delete(peers.tracks, peer)
@@ -419,6 +423,10 @@ func (element *webRTCWriter) removePeer(peer *peerTrack) (err error) {
 	}
 	logger.Infof(element, "Closing peer connection")
 	_ = peer.PeerConnection.Close()
+
+	peer.vBuf.Release()
+	peer.aBuf.Release()
+
 	logger.Infof(element, "Closing done channel")
 	close(peer.done)
 	return nil

@@ -55,6 +55,7 @@ func (fr *fragment) writePacket(packet gomedia.Packet) error {
 		}
 		fr.duration += packet.Duration()
 		// Check if the fragment duration exceeds the target duration.
+
 		if fr.duration >= fr.targetDuration {
 			return fr.close()
 		}

@@ -269,9 +269,9 @@ func (ss *sortedStreams) moveTrackToStream(str *stream, pu *peerURL, peerBuf []g
 	for _, bufPkt := range peerBuf {
 		switch packet := bufPkt.(type) {
 		case gomedia.VideoPacket:
-			pu.peerTrack.vBuf <- packet
+			pu.peerTrack.vChan <- packet
 		case gomedia.AudioPacket:
-			pu.peerTrack.aBuf <- packet
+			pu.peerTrack.aChan <- packet
 		}
 	}
 
@@ -380,9 +380,9 @@ func (ss *sortedStreams) seedTrack(str *stream, peer *peerTrack) error {
 	for _, bufPkt := range peerBuf {
 		switch packet := bufPkt.(type) {
 		case gomedia.VideoPacket:
-			peer.vBuf <- packet
+			peer.vChan <- packet
 		case gomedia.AudioPacket:
-			peer.aBuf <- packet
+			peer.aChan <- packet
 		}
 	}
 
@@ -417,9 +417,9 @@ func (ss *sortedStreams) seedTrack(str *stream, peer *peerTrack) error {
 func (ss *sortedStreams) bufferPacketForPeer(peer *peerTrack, pkt gomedia.Packet) {
 	switch packet := pkt.(type) {
 	case gomedia.VideoPacket:
-		peer.vBuf <- packet
+		peer.vChan <- packet
 	case gomedia.AudioPacket:
-		peer.aBuf <- packet
+		peer.aChan <- packet
 	}
 }
 

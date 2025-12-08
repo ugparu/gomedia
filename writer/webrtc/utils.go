@@ -66,8 +66,10 @@ type peerTrack struct {
 	*webrtc.PeerConnection // WebRTC peer connection.
 	vt                     *webrtc.TrackLocalStaticSample
 	at                     *webrtc.TrackLocalStaticSample
-	aBuf                   chan gomedia.AudioPacket
-	vBuf                   chan gomedia.VideoPacket
+	aChan                  chan gomedia.AudioPacket
+	aBuf                   buffer.PooledBuffer
+	vChan                  chan gomedia.VideoPacket
+	vBuf                   buffer.PooledBuffer
 	flush                  chan struct{}
 	delay                  time.Duration
 	done                   chan struct{}
@@ -76,8 +78,8 @@ type peerTrack struct {
 
 func writeVideoPacketsToPeer(done chan struct{},
 	flush chan struct{},
-	vBuf chan gomedia.VideoPacket, aBuf chan gomedia.AudioPacket,
-	vt *webrtc.TrackLocalStaticSample) {
+	vChan chan gomedia.VideoPacket, aChan chan gomedia.AudioPacket,
+	vt *webrtc.TrackLocalStaticSample, vBuf buffer.PooledBuffer) {
 	last := time.Now()
 	for {
 		select {
@@ -88,22 +90,20 @@ func writeVideoPacketsToPeer(done chan struct{},
 		loop:
 			for {
 				select {
-				case <-vBuf:
-				case <-aBuf:
+				case <-vChan:
+				case <-aChan:
 				default:
 					break loop
 				}
 			}
-		case pkt := <-vBuf:
-			buf := buffer.Get(pkt.Len())
-			defer buf.Release()
+		case pkt := <-vChan:
 			pkt.View(func(data buffer.PooledBuffer) {
-				buf.Resize(data.Len())
-				copy(buf.Data(), data.Data())
+				vBuf.Resize(data.Len())
+				copy(vBuf.Data(), data.Data())
 			})
 
 			sample := media.Sample{
-				Data:               buf.Data(),
+				Data:               vBuf.Data(),
 				Timestamp:          pkt.StartTime(),
 				Duration:           pkt.Duration(),
 				PacketTimestamp:    uint32(pkt.Timestamp()), //nolint:gosec
@@ -117,8 +117,8 @@ func writeVideoPacketsToPeer(done chan struct{},
 
 			var nalus [][]byte
 			pkt.View(func(data buffer.PooledBuffer) {
-				buf.Resize(data.Len())
-				copy(buf.Data(), data.Data())
+				vBuf.Resize(data.Len())
+				copy(vBuf.Data(), data.Data())
 				nalus, _ = nal.SplitNALUs(data.Data())
 			})
 			for _, nalu := range nalus {
@@ -130,9 +130,9 @@ func writeVideoPacketsToPeer(done chan struct{},
 			}
 
 			sleep := pkt.Duration() - time.Since(last) - time.Millisecond
-			if len(vBuf) > bufLen {
+			if len(vChan) > bufLen {
 				sleep -= time.Millisecond * bufCorStep
-			} else if len(vBuf) < bufLen {
+			} else if len(vChan) < bufLen {
 				sleep += time.Millisecond * bufCorStep
 			}
 
@@ -147,22 +147,21 @@ func writeVideoPacketsToPeer(done chan struct{},
 	}
 }
 
-func writeAudioPacketsToPeer(done chan struct{}, flush chan struct{}, aBuf chan gomedia.AudioPacket, at *webrtc.TrackLocalStaticSample) {
+func writeAudioPacketsToPeer(done chan struct{}, flush chan struct{}, aChan chan gomedia.AudioPacket, at *webrtc.TrackLocalStaticSample, aBuf buffer.PooledBuffer) {
 	for {
 		select {
 		case <-done:
 			logger.Infof(done, "Audio packets to peer done")
 			return
 		case <-flush:
-		case pkt := <-aBuf:
-			buf := buffer.Get(pkt.Len())
+		case pkt := <-aChan:
 			pkt.View(func(data buffer.PooledBuffer) {
-				buf.Resize(data.Len())
-				copy(buf.Data(), data.Data())
+				aBuf.Resize(data.Len())
+				copy(aBuf.Data(), data.Data())
 			})
 
 			sample := media.Sample{
-				Data:               buf.Data(),
+				Data:               aBuf.Data(),
 				Timestamp:          pkt.StartTime(),
 				Duration:           pkt.Duration(),
 				PacketTimestamp:    uint32(pkt.Timestamp()), //nolint:gosec
@@ -171,7 +170,6 @@ func writeAudioPacketsToPeer(done chan struct{}, flush chan struct{}, aBuf chan 
 			}
 
 			err := at.WriteSample(sample)
-			buf.Release()
 			if err != nil {
 				logger.Errorf(done, "Error writing audio sample: %v", err)
 			}
