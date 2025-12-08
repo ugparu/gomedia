@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/format/mp4"
 	"github.com/ugparu/gomedia/utils"
 	"github.com/ugparu/gomedia/utils/lifecycle"
+	"github.com/ugparu/gomedia/utils/logger"
 )
 
 // activeFile represents a currently open file being written to
@@ -21,6 +23,7 @@ type activeFile struct {
 	folder    string
 	name      string
 	duration  time.Duration
+	wg        sync.WaitGroup // Track pending packet closures for SwitchToFile
 }
 
 // ringBuffer holds a window of packets for Event mode pre-buffering
@@ -207,8 +210,23 @@ func (s *segmenter) closeActiveFile(stopChan <-chan struct{}) error {
 		return err
 	}
 
-	// Close file in separate goroutine after all mmap buffers are released
-	go func(af *activeFile) {
+	// Close file in separate goroutine after all referenced packets are closed
+	go func(af *activeFile, dest string) {
+		// Wait for all packets to be closed with timeout of 2x duration
+		waitDone := make(chan struct{})
+		go func() {
+			af.wg.Wait()
+			close(waitDone)
+		}()
+
+		select {
+		case <-waitDone:
+			// All packets closed normally
+		case <-time.After(af.duration * 2):
+			logger.Warningf(nil, "timeout waiting for packets to close for file %s (waited %v), closing anyway",
+				af.name, af.duration*2)
+		}
+
 		fi, err := af.file.Stat()
 		if err != nil {
 			_ = af.file.Close()
@@ -216,7 +234,7 @@ func (s *segmenter) closeActiveFile(stopChan <-chan struct{}) error {
 		}
 
 		_ = af.file.Close()
-		filename := fmt.Sprintf("%s%s%s", s.dest, af.folder, af.name[:len(af.name)-4])
+		filename := fmt.Sprintf("%s%s%s", dest, af.folder, af.name[:len(af.name)-4])
 		if err = os.Rename(filename+".tmp", filename); err != nil {
 			return
 		}
@@ -231,7 +249,7 @@ func (s *segmenter) closeActiveFile(stopChan <-chan struct{}) error {
 		case <-stopChan:
 			return
 		}
-	}(af)
+	}(af, s.dest)
 
 	return nil
 }
@@ -256,10 +274,13 @@ func (s *segmenter) writePacketToFile(pkt gomedia.Packet) error {
 		// Get the actual packet data offset and size (excluding SPS/PPS/VPS for keyframes)
 		dataOffset, dataSize := af.muxer.GetLastPacketDataInfo(pkt.StreamIndex())
 		if dataSize > 0 {
+			af.wg.Add(1)
 			done := func() error {
+				af.wg.Done()
 				return nil
 			}
 			if err := preLastPkt.SwitchToFile(af.file, dataOffset, dataSize, done); err != nil {
+				af.wg.Done() // Ensure WaitGroup is decremented on error
 				return err
 			}
 		}
