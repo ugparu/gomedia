@@ -323,7 +323,7 @@ func (m *Muxer) processTrackHeader(track *mp4io.TrackFrag, s *Stream) {
 }
 
 // processPackets processes packets within a stream to reduce complexity
-func (m *Muxer) processPackets(track *mp4io.TrackFrag, s *Stream, streamIndex int) {
+func (m *Muxer) processPackets(track *mp4io.TrackFrag, s *Stream) {
 	for j, pkt := range s.packets {
 		if pkt.Len() != int(track.Header.DefaultSize) {
 			track.Run.Flags |= mp4io.TRUNSampleSize
@@ -452,7 +452,7 @@ func (m *Muxer) GetMP4Fragment(idx int) buffer.PooledBuffer {
 		},
 	}
 
-	for i, s := range m.strs {
+	for _, s := range m.strs {
 		// Define runFlag at function level to avoid shadowing
 		outerRunFlag := mp4io.SampleNonKeyframe
 		if len(s.packets) > 0 {
@@ -519,7 +519,7 @@ func (m *Muxer) GetMP4Fragment(idx int) buffer.PooledBuffer {
 		moof.Tracks = append(moof.Tracks, track)
 
 		m.processTrackHeader(track, s)
-		m.processPackets(track, s, i)
+		m.processPackets(track, s)
 	}
 
 	styp := mp4io.NewSegmentType()

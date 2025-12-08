@@ -96,7 +96,6 @@ func (d *h265Demuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 
 				if pktData[2]>>7&1 == 1 {
 					if d.slicedPacket != nil {
-						d.slicedPacket.IsKeyFrm = d.slicedPacket.IsKeyFrm || h265.IsKey(fuNaluType)
 						d.packets = append(d.packets, d.slicedPacket)
 					}
 					d.slicedPacket = h265.NewPacket(d.bufferHasKey,
@@ -109,7 +108,7 @@ func (d *h265Demuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 						copy(data.Data()[oldLen:], binSize(len(pktData)))
 						copy(data.Data()[oldLen+4:], pktData)
 					})
-					d.slicedPacket.IsKeyFrm = d.slicedPacket.IsKeyFrm || h265.IsKey(fuNaluType)
+					d.slicedPacket.IsKeyFrm = d.slicedPacket.IsKeyFrm || d.bufferHasKey
 				}
 				d.bufferHasKey = false
 			default:

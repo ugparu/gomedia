@@ -497,15 +497,15 @@ func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
 			buf := buffer.Get(4)
 			defer buf.Release()
 
-			binary.BigEndian.PutUint32(buf.Data(), uint32(len(pps))) //nolint:gosec
+			binary.BigEndian.PutUint32(buf.Data(), uint32(len(vps))) //nolint:gosec
 			if _, err = s.muxer.writer.Write(buf.Data()); err != nil {
 				return
 			}
-			if _, err = s.muxer.writer.Write(pps); err != nil {
+			if _, err = s.muxer.writer.Write(vps); err != nil {
 				return
 			}
 
-			binary.BigEndian.PutUint32(buf.Data(), uint32(len(vps))) //nolint:gosec
+			binary.BigEndian.PutUint32(buf.Data(), uint32(len(sps))) //nolint:gosec
 			if _, err = s.muxer.writer.Write(buf.Data()); err != nil {
 				return
 			}
@@ -513,11 +513,11 @@ func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
 				return
 			}
 
-			binary.BigEndian.PutUint32(buf.Data(), uint32(len(vps))) //nolint:gosec
+			binary.BigEndian.PutUint32(buf.Data(), uint32(len(pps))) //nolint:gosec
 			if _, err = s.muxer.writer.Write(buf.Data()); err != nil {
 				return
 			}
-			if _, err = s.muxer.writer.Write(vps); err != nil {
+			if _, err = s.muxer.writer.Write(pps); err != nil {
 				return
 			}
 			pktSize += len(sps) + len(pps) + len(vps) + 12
