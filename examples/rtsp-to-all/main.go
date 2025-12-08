@@ -32,11 +32,11 @@ import (
 
 var rtspURLs = strings.Split(os.Getenv("RTSP_URLS"), ",")
 
-const segSize = 5 * time.Second
+const segSize = 6 * time.Second
 
 // Writers
 var (
-	hlsWr    = hls.New(1, 2, segSize, 100)
+	hlsWr    = hls.New(1, 3, segSize, 100)
 	webrtcWr gomedia.WebRTCStreamer
 	seg      gomedia.Segmenter
 )
@@ -68,7 +68,7 @@ func main() {
 			URLs: []string{"stun:stun.l.google.com:19302"},
 		},
 	})
-	webrtcWr = webrtc.New(100, time.Second*15)
+	webrtcWr = webrtc.New(100, time.Second*18)
 	webrtcWr.Write()
 	logrus.Info("WebRTC writer initialized")
 

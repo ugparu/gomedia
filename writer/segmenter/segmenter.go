@@ -170,7 +170,7 @@ func (s *segmenter) openNewFile(startTime time.Time) error {
 	}
 
 	folder := fmt.Sprintf("%d/%d/%d/", startTime.Year(), startTime.Month(), startTime.Day())
-	name := startTime.Format("2006-01-02T15:04:05") + ".mp4.tmp"
+	name := startTime.Format("2006-01-02T15:04:05") + ".mp4"
 	filename := fmt.Sprintf("%s%s%s", s.dest, folder, name)
 
 	f, err := createFile(filename)
@@ -211,7 +211,7 @@ func (s *segmenter) closeActiveFile(stopChan <-chan struct{}) error {
 	}
 
 	// Close file in separate goroutine after all referenced packets are closed
-	go func(af *activeFile, dest string) {
+	go func(af *activeFile) {
 		// Wait for all packets to be closed with timeout of 2x duration
 		waitDone := make(chan struct{})
 		go func() {
@@ -219,29 +219,15 @@ func (s *segmenter) closeActiveFile(stopChan <-chan struct{}) error {
 			close(waitDone)
 		}()
 
-		select {
-		case <-waitDone:
-			// All packets closed normally
-		case <-time.After(af.duration * 2):
-			logger.Warningf(nil, "timeout waiting for packets to close for file %s (waited %v), closing anyway",
-				af.name, af.duration*2)
-		}
-
 		fi, err := af.file.Stat()
 		if err != nil {
 			_ = af.file.Close()
 			return
 		}
 
-		_ = af.file.Close()
-		filename := fmt.Sprintf("%s%s%s", dest, af.folder, af.name[:len(af.name)-4])
-		if err = os.Rename(filename+".tmp", filename); err != nil {
-			return
-		}
-
 		select {
 		case s.outInfoCh <- gomedia.FileInfo{
-			Name:  af.folder + af.name[:len(af.name)-4],
+			Name:  af.folder + af.name,
 			Start: af.startTime,
 			Stop:  af.startTime.Add(af.duration),
 			Size:  int(fi.Size()),
@@ -249,7 +235,16 @@ func (s *segmenter) closeActiveFile(stopChan <-chan struct{}) error {
 		case <-stopChan:
 			return
 		}
-	}(af, s.dest)
+
+		select {
+		case <-waitDone:
+		case <-time.After(af.duration * 3):
+			logger.Warningf(nil, "timeout waiting for packets to close for file %s (waited %v), closing anyway",
+				af.name, af.duration*3)
+		}
+
+		_ = af.file.Close()
+	}(af)
 
 	return nil
 }
