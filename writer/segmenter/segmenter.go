@@ -239,7 +239,7 @@ func (s *segmenter) closeActiveFile(stopChan <-chan struct{}) error {
 		select {
 		case <-waitDone:
 		case <-time.After(af.duration * 2):
-			logger.Warningf(nil, "timeout waiting for packets to close for file %s (waited %v), closing anyway",
+			logger.Warningf(af.folder, "timeout waiting for packets to close for file %s (waited %v), closing anyway",
 				af.name, af.duration*2)
 		}
 
