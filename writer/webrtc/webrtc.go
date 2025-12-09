@@ -67,6 +67,26 @@ func (element *webRTCWriter) Step(stopCh <-chan struct{}) (err error) {
 	select {
 	case <-stopCh:
 		return &lifecycle.BreakError{}
+	case peer := <-element.peersChan:
+		element.peersChan <- element.addConnection(peer)
+		return peer.Err
+	case peerURL := <-element.changePeersChan:
+		return element.streams.Move(peerURL)
+	case peerTrack := <-element.connectPeersChan:
+		if err = element.streams.Insert(peerTrack); err != nil {
+			err = errors.Join(err, element.removePeer(peerTrack))
+			return err
+		}
+	case peer := <-element.closePeersChan:
+		if err = element.removePeer(peer); err != nil {
+			return err
+		}
+	default:
+	}
+
+	select {
+	case <-stopCh:
+		return &lifecycle.BreakError{}
 	case rmURL := <-element.rmSrcCh:
 		element.streams.Remove(rmURL)
 	case inpPkt := <-element.inpPktCh:
@@ -80,22 +100,7 @@ func (element *webRTCWriter) Step(stopCh <-chan struct{}) (err error) {
 				return
 			}
 		}
-
 		if err = element.streams.writePacket(inpPkt); err != nil {
-			return err
-		}
-	case peer := <-element.peersChan:
-		element.peersChan <- element.addConnection(peer)
-		return peer.Err
-	case peerURL := <-element.changePeersChan:
-		return element.streams.Move(peerURL)
-	case peerTrack := <-element.connectPeersChan:
-		if err = element.streams.Insert(peerTrack); err != nil {
-			err = errors.Join(err, element.removePeer(peerTrack))
-			return err
-		}
-	case peer := <-element.closePeersChan:
-		if err = element.removePeer(peer); err != nil {
 			return err
 		}
 	}
@@ -376,24 +381,7 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 		return inpPeer
 	}
 
-	select {
-	case inpPkt := <-element.inpPktCh:
-		switch pkt := inpPkt.(type) {
-		case gomedia.VideoPacket:
-			if err = element.checkCodecParameters(inpPkt.URL(), pkt.CodecParameters()); err != nil {
-				logger.Error(element, err.Error())
-			}
-		case gomedia.AudioPacket:
-			if err = element.checkCodecParameters(inpPkt.URL(), pkt.CodecParameters()); err != nil {
-				logger.Error(element, err.Error())
-			}
-		}
-
-		if err = element.streams.writePacket(inpPkt); err != nil {
-			logger.Error(element, err.Error())
-		}
-	case <-gatherCompletePromise:
-	}
+	<-gatherCompletePromise
 
 	inpPeer.SDP = base64.StdEncoding.EncodeToString([]byte(peer.LocalDescription().SDP))
 

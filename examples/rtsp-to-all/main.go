@@ -64,9 +64,7 @@ func main() {
 
 	// Initialize WebRTC
 	webrtc.Init(2000, 2100, []string{"10.0.112.141"}, []pion.ICEServer{
-		{
-			URLs: []string{"stun:stun.l.google.com:19302"},
-		},
+		{},
 	})
 	webrtcWr = webrtc.New(100, time.Second*18)
 	webrtcWr.Write()
