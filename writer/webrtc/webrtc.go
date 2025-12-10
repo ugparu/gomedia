@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -468,7 +467,7 @@ func (element *webRTCWriter) RemoveSource() chan<- string {
 
 // String returns a string representation of the innerWriter, including the number of tracks.
 func (element *webRTCWriter) String() string {
-	return fmt.Sprintf("WEBRTC_WRITER lvls=%d", len(element.streams.streams))
+	return element.name
 }
 
 func dropRTCP(rs *webrtc.RTPSender) {
