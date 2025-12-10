@@ -1,54 +1,32 @@
 # gomedia
 
-A Go library for media processing and streaming, supporting popular codecs and formats.
+gomedia is a Go toolkit for building real‑time media pipelines. It provides reusable codecs, demuxers, muxers, decoders, encoders, and streaming adapters so you can ingest sources like RTSP or MP4, process audio/video, and serve them as HLS, WebRTC, or archived files. The primary goal is to give developers a modular, end‑to‑end foundation for camera ingest, live streaming, and recording workflows without having to wire the low‑level media plumbing by hand.
 
-## Features
+## Supported formats and codecs
 
-- **Codecs**: H.264, H.265, AAC, Opus, MJPEG, PCM
-- **Formats**: MP4, FMP4, HLS, RTP, RTSP  
-- **Streaming**: RTSP to WebRTC, HLS, MP4
-- **Hardware acceleration**: CUDA support for video decoding
+- Ingest (demuxers):
+  - [x] RTSP
+  - [-] RTP:
+    - [x] H264/AVC
+    - [x] H265/HEVC
+    - [ ] MJPEG
+    - [x] AAC
+    - [x] Opus
+    - [x] PCM
+  - [x] MP4
+- Output (muxers/streamers):
+  - [x] MP4
+  - [x] Fragmented MP4 (fMP4)
+  - [x] HLS (single + multi-variant)
+  - [x] WebRTC
+  - [x] Archive segmenter/recorder
+- Codecs:
+  - [-] Video:
+    - [x] H264/AVC
+    - [x] H265/HEVC
+    - [ ] MJPEG
+  - [x] Audio:
+    - [x] AAC
+    - [x] Opus
+    - [x] PCM (A-Law/μ-Law, linear PCM)
 
-## Installation
-
-```bash
-go get github.com/ugparu/gomedia
-```
-
-## Quick Start
-
-Convert RTSP stream to MP4:
-
-```go
-package main
-
-import (
-    "os"
-    "github.com/ugparu/gomedia/format/mp4"
-    "github.com/ugparu/gomedia/format/rtsp"
-)
-
-func main() {
-    // Connect to RTSP stream
-    dmx := rtsp.New("rtsp://example.com/stream")
-    par, _ := dmx.Demux()
-    
-    // Create MP4 output
-    f, _ := os.Create("output.mp4")
-    defer f.Close()
-    
-    mx := mp4.NewMuxer(f)
-    mx.Mux(par)
-}
-```
-
-## Examples
-
-Check the `examples/` directory for more usage patterns:
-- RTSP to MP4/HLS/WebRTC
-- MP4 processing and merging
-- Audio transcoding
-
-## License
-
-See LICENSE file for details.
