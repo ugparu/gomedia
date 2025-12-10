@@ -212,6 +212,7 @@ func (dmx *innerRTSPDemuxer) ReadPacket() (packet gomedia.Packet, err error) {
 		return
 	}
 
+	var desync bool
 	var header [headerSize]byte
 	for {
 		if time.Since(dmx.lastPktRcv) >= minPacketInterval {
@@ -225,7 +226,10 @@ func (dmx *innerRTSPDemuxer) ReadPacket() (packet gomedia.Packet, err error) {
 		}
 		header[0] = dmx.readBuffer.Data()[0]
 		if header[0] != rtspPacket && header[0] != rtpPacket {
-			logger.Warningf(dmx, "packet reading desync: first symbol is %s. Trying to recover", string(header[0]))
+			if !desync {
+				logger.Warningf(dmx, "RTSP packet reading desync: first symbol is %s. Trying to recover", string(header[0]))
+				desync = true
+			}
 			continue
 		}
 
