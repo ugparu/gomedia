@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"runtime"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -18,8 +18,6 @@ import (
 	"github.com/ugparu/gomedia/utils/logger"
 )
 
-var peerTracks = 0
-
 type webRTCWriter struct {
 	lifecycle.AsyncManager[*webRTCWriter]
 	streams          *sortedStreams
@@ -29,6 +27,7 @@ type webRTCWriter struct {
 	closePeersChan   chan *peerTrack
 	inpPktCh         chan gomedia.Packet
 	rmSrcCh          chan string
+	name             string
 }
 
 // New creates a new Streamer with the given channel size.
@@ -47,6 +46,7 @@ func New(chanSize int, targetDuration time.Duration) gomedia.WebRTCStreamer {
 		closePeersChan:   make(chan *peerTrack, chanSize),
 		inpPktCh:         make(chan gomedia.Packet, chanSize),
 		rmSrcCh:          make(chan string, chanSize),
+		name:             "WEBRTC_WRITER",
 	}
 	wr.AsyncManager = lifecycle.NewFailSafeAsyncManager(wr)
 	return wr
@@ -109,16 +109,22 @@ func (element *webRTCWriter) Step(stopCh <-chan struct{}) (err error) {
 
 // checkCodecParameters updates the codec parameters based on the provided map.
 // It manages stream sizes, updates codec parameters, and sends messages to inform peers about available streams.
-func (element *webRTCWriter) checkCodecParameters(url string, codecPar gomedia.CodecParameters) (err error) {
-	if !element.streams.Exists(url) {
+func (element *webRTCWriter) checkCodecParameters(addr string, codecPar gomedia.CodecParameters) (err error) {
+	if !element.streams.Exists(addr) {
 		if _, ok := codecPar.(gomedia.VideoCodecParameters); !ok {
 			return
 		}
 
-		element.streams.Add(url, codecPar)
-	} else if !element.streams.Update(url, codecPar) {
+		element.streams.Add(addr, codecPar)
+	} else if !element.streams.Update(addr, codecPar) {
 		return
 	}
+
+	parsedURL, err := url.Parse(addr)
+	if err != nil {
+		return err
+	}
+	element.name = "WEBRTC_WRITER " + parsedURL.Hostname()
 
 	reqMsg := &codecReq{
 		Token:   "",
@@ -231,13 +237,6 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 		SDP:  string(sdpB),
 	}
 	peer, err := api.NewPeerConnection(Conf)
-	peerTracks++
-	logger.Infof(element, "peerTracks added: %d", peerTracks)
-	runtime.AddCleanup(peer, func(struct{}) {
-		peerTracks--
-		logger.Infof(element, "peerTracks removed: %d", peerTracks)
-	}, struct{}{})
-
 	if err != nil {
 		inpPeer.Err = err
 		return inpPeer
@@ -396,26 +395,26 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 func (element *webRTCWriter) removePeer(peer *peerTrack) (err error) {
 
 	for _, peers := range element.streams.streams {
-		logger.Infof(element, "Removing peer track from stream")
+		logger.Debug(element, "Removing peer track from stream")
 		delete(peers.tracks, peer)
 		delete(peers.toAdd, peer)
 	}
 	senders := peer.PeerConnection.GetSenders()
-	logger.Infof(element, "Removing peer track from senders")
+	logger.Debug(element, "Removing peer track from senders")
 	for _, stream := range senders {
 		_ = peer.RemoveTrack(stream)
 	}
 	if peer.DataChannel != nil {
-		logger.Infof(element, "Closing data channel")
+		logger.Debug(element, "Closing data channel")
 		_ = peer.DataChannel.Close()
 	}
-	logger.Infof(element, "Closing peer connection")
+	logger.Debug(element, "Closing peer connection")
 	_ = peer.PeerConnection.Close()
 
 	peer.vBuf.Release()
 	peer.aBuf.Release()
 
-	logger.Infof(element, "Closing done channel")
+	logger.Debug(element, "Closing done channel")
 	close(peer.done)
 	return nil
 }

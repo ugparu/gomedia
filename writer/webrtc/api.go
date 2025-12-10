@@ -416,8 +416,6 @@ func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer
 		s.SetNAT1To1IPs(hosts, webrtc.ICECandidateTypeHost)
 	}
 
-	logger.Infof("WEBRTC", "Applied advanced settings for jitter and packet loss reduction")
-
 	// Create a new WebRTC API with the configured settings
 	api = webrtc.NewAPI(webrtc.WithMediaEngine(m), webrtc.WithInterceptorRegistry(i), webrtc.WithSettingEngine(s))
 }

@@ -84,7 +84,6 @@ func writeVideoPacketsToPeer(done chan struct{},
 	for {
 		select {
 		case <-done:
-			logger.Infof(done, "Video packets to peer done")
 			return
 		case <-flush:
 		loop:
@@ -138,8 +137,6 @@ func writeVideoPacketsToPeer(done chan struct{},
 
 			if sleep > 0 {
 				time.Sleep(sleep)
-			} else {
-				logger.Warningf(done, "Buffer sleep time is negative: %v", sleep)
 			}
 
 			last = time.Now()
@@ -151,7 +148,6 @@ func writeAudioPacketsToPeer(done chan struct{}, flush chan struct{}, aChan chan
 	for {
 		select {
 		case <-done:
-			logger.Infof(done, "Audio packets to peer done")
 			return
 		case <-flush:
 		case pkt := <-aChan:

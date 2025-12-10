@@ -3,7 +3,7 @@
 package reader
 
 import (
-	"fmt"
+	"net/url"
 	"sync"
 	"time"
 
@@ -13,11 +13,9 @@ import (
 	"github.com/ugparu/gomedia/utils/logger"
 )
 
-const nameTemplate = "READER srcs=%d"
-
 // Constants for configuring the reader.
 const (
-	maxReconnectInternval = time.Second * 128
+	maxReconnectInternval = time.Second * 8
 )
 
 // reader is an internal structure implementing the gomedia.Reader interface.
@@ -28,6 +26,7 @@ type reader struct {
 	addURLCh                        chan string
 	removeURLCh                     chan string
 	dmxStoppers                     map[string]chan struct{}
+	name                            string
 	mu                              sync.Mutex
 }
 
@@ -40,6 +39,7 @@ func NewRTSP(chanSize int) gomedia.Reader {
 		addURLCh:     make(chan string, chanSize),
 		removeURLCh:  make(chan string, chanSize),
 		dmxStoppers:  make(map[string]chan struct{}),
+		name:         "READER",
 		mu:           sync.Mutex{},
 	}
 
@@ -206,6 +206,14 @@ func (rdr *reader) Step(stopCh <-chan struct{}) (err error) {
 		return &lifecycle.BreakError{}
 	case src := <-rdr.addURLCh:
 		logger.Infof(rdr, "Adding new URL %s", src)
+
+		parsedURL, err := url.Parse(src)
+		if err != nil {
+			logger.Errorf(rdr, "Failed to parse URL %s: %s", src, err.Error())
+			return err
+		}
+		rdr.name = "READER " + parsedURL.Hostname()
+
 		rStopCh := make(chan struct{})
 		rdr.mu.Lock()
 		rdr.dmxStoppers[src] = rStopCh
@@ -250,7 +258,7 @@ func (rdr *reader) Packets() <-chan gomedia.Packet {
 
 // String returns a string representation of the reader.
 func (rdr *reader) String() string {
-	return fmt.Sprintf(nameTemplate, len(rdr.dmxStoppers))
+	return rdr.name
 }
 
 func (rdr *reader) AddURL() chan<- string {
