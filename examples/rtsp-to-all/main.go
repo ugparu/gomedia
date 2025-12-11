@@ -63,7 +63,7 @@ func main() {
 	logrus.Info("HLS writer initialized with: segments per playlist=1, fragment count=3, segment size=", segSize)
 
 	// Initialize WebRTC
-	webrtc.Init(2000, 2100, []string{"10.0.112.141"}, []pion.ICEServer{
+	webrtc.Init(2000, 2100, []string{"192.168.1.6"}, []pion.ICEServer{
 		{},
 	})
 	webrtcWr = webrtc.New(100, time.Second*18)

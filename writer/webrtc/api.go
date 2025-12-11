@@ -366,6 +366,36 @@ func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer
 				MimeType:     webrtc.MimeTypeH265,
 				ClockRate:    90000, //nolint:mnd // 90k
 				Channels:     0,
+				SDPFmtpLine:  "level-id=186;profile-id=1;tier-flag=0;tx-mode=SRST",
+				RTCPFeedback: videoRTCPFeedback,
+			},
+			PayloadType: 49, //nolint:mnd
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{
+				MimeType:     webrtc.MimeTypeRTX,
+				ClockRate:    90000,
+				Channels:     0,
+				SDPFmtpLine:  "apt=49",
+				RTCPFeedback: nil,
+			},
+			PayloadType: 50,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{
+				MimeType:     webrtc.MimeTypeH265,
+				ClockRate:    90000, //nolint:mnd // 90k
+				Channels:     0,
+				SDPFmtpLine:  "level-id=186;profile-id=2;tier-flag=0;tx-mode=SRST",
+				RTCPFeedback: videoRTCPFeedback,
+			},
+			PayloadType: 51, //nolint:mnd
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{
+				MimeType:     webrtc.MimeTypeH265,
+				ClockRate:    90000, //nolint:mnd // 90k
+				Channels:     0,
 				SDPFmtpLine:  "level-id=180;profile-id=1;tier-flag=0;tx-mode=SRST",
 				RTCPFeedback: videoRTCPFeedback,
 			},
