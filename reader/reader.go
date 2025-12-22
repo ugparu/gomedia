@@ -164,7 +164,9 @@ func (rdr *reader) handleReadError(dmx gomedia.Demuxer, src string, recInterval 
 	par, err := dmx.Demux()
 	// Handle demux error
 	if err != nil {
-		logger.Warningf(rdr, "Failed to start demuxer: %s", err.Error())
+		if recInterval < maxReconnectInternval {
+			logger.Warningf(rdr, "Failed to start demuxer: %s", err.Error())
+		}
 		return rdr.updateReconnectInterval(recInterval), dmx
 	}
 
