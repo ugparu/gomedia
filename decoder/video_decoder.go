@@ -127,6 +127,7 @@ func (dec *videoDecoder) startDecoder() (err error) {
 	}
 
 	dec.running = true
+	dec.hasKey = false
 	return nil
 }
 
