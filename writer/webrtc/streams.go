@@ -95,9 +95,10 @@ func (ss *sortedStreams) Update(newURL string, newCodecPar gomedia.CodecParamete
 }
 
 // Add adds a new stream URL with its size to the sortedStreams.
-func (ss *sortedStreams) Add(url string, newCodecPar gomedia.CodecParameters) {
+// Returns a list of peers that were moved from pendingPeers and need setStreamUrl notification.
+func (ss *sortedStreams) Add(url string, newCodecPar gomedia.CodecParameters) []*peerTrack {
 	if _, found := ss.streams[url]; found {
-		return
+		return nil
 	}
 
 	pair := gomedia.CodecParametersPair{
@@ -132,12 +133,25 @@ func (ss *sortedStreams) Add(url string, newCodecPar gomedia.CodecParameters) {
 	}
 
 	// Move any pending peers to this new stream
+	var movedPeers []*peerTrack
 	if len(ss.pendingPeers) > 0 {
-		for peer, seeded := range ss.pendingPeers {
-			ss.streams[url].tracks[peer] = seeded
+		for peer := range ss.pendingPeers {
+			// Flush stale packets from peer channels before adding to new stream
+			const flushDuration = time.Second * 3
+			select {
+			case peer.flush <- struct{}{}:
+			case <-time.After(flushDuration):
+				logger.Errorf(ss, "Failed to flush peer %v when moving from pending", peer)
+			}
+
+			// Mark as seeded=true because these are already connected peers switching streams
+			// They should receive setStreamUrl (via notifyTrackChange) not startStream
+			ss.streams[url].tracks[peer] = true
+			movedPeers = append(movedPeers, peer)
 		}
 		ss.pendingPeers = nil // Clear pending peers after moving
 	}
+	return movedPeers
 }
 
 // Remove removes a stream URL from the sortedStreams.
@@ -169,8 +183,8 @@ func (ss *sortedStreams) Remove(removeURL string) {
 		if ss.pendingPeers == nil {
 			ss.pendingPeers = make(map[*peerTrack]bool)
 		}
-		for peer := range str.tracks {
-			ss.pendingPeers[peer] = false // false = not seeded yet
+		for peer, seeded := range str.tracks {
+			ss.pendingPeers[peer] = seeded
 		}
 	} else {
 		for track := range str.tracks {

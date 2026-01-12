@@ -110,12 +110,13 @@ func (element *webRTCWriter) Step(stopCh <-chan struct{}) (err error) {
 // checkCodecParameters updates the codec parameters based on the provided map.
 // It manages stream sizes, updates codec parameters, and sends messages to inform peers about available streams.
 func (element *webRTCWriter) checkCodecParameters(addr string, codecPar gomedia.CodecParameters) (err error) {
+	var movedPeers []*peerTrack
 	if !element.streams.Exists(addr) {
 		if _, ok := codecPar.(gomedia.VideoCodecParameters); !ok {
 			return
 		}
 
-		element.streams.Add(addr, codecPar)
+		movedPeers = element.streams.Add(addr, codecPar)
 	} else if !element.streams.Update(addr, codecPar) {
 		return
 	}
@@ -161,6 +162,17 @@ func (element *webRTCWriter) checkCodecParameters(addr string, codecPar gomedia.
 			}
 		}
 	}
+
+	// Send setStreamUrl notifications AFTER setAvailableStreams for peers that were moved
+	// This ensures correct message ordering: setAvailableStreams first, then setStreamUrl
+	for _, peer := range movedPeers {
+		element.streams.notifyTrackChange(&peerURL{
+			peerTrack: peer,
+			Token:     "",
+			URL:       addr,
+		})
+	}
+
 	return nil
 }
 

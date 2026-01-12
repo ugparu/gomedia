@@ -436,7 +436,11 @@
                 }
 
                 urlConnected = true;
-                startButton.disabled = false;
+                
+                // Only enable start button if stream is not already active
+                if (!wasStreaming) {
+                    startButton.disabled = false;
+                }
                 
                 // Update URL badge
                 urlBadge.textContent = url;
