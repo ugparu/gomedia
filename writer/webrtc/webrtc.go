@@ -20,6 +20,7 @@ import (
 type webRTCWriter struct {
 	lifecycle.AsyncManager[*webRTCWriter]
 	streams          *sortedStreams
+	sources          []string
 	peersChan        chan gomedia.WebRTCPeer
 	changePeersChan  chan *peerURL
 	connectPeersChan chan *peerTrack
@@ -41,6 +42,7 @@ func New(chanSize int, targetDuration time.Duration) gomedia.WebRTCStreamer {
 			pendingPeers:   map[*peerTrack]bool{},
 			targetDuration: targetDuration,
 		},
+		sources:          []string{},
 		peersChan:        make(chan gomedia.WebRTCPeer),
 		changePeersChan:  make(chan *peerURL, chanSize),
 		connectPeersChan: make(chan *peerTrack, chanSize),
@@ -90,7 +92,7 @@ func (element *webRTCWriter) Step(stopCh <-chan struct{}) (err error) {
 	case <-stopCh:
 		return &lifecycle.BreakError{}
 	case rmURL := <-element.rmSrcCh:
-		element.streams.Remove(rmURL)
+		element.removeSource(rmURL)
 		logger.Infof(element, "Sending setAvailableStreams after removing source %s", rmURL)
 		element.sendAvailableStreams()
 	case addURL := <-element.addSrcCh:
@@ -113,15 +115,25 @@ func (element *webRTCWriter) Step(stopCh <-chan struct{}) (err error) {
 	return nil
 }
 
-// addSource adds a new source URL to the writer without codec parameters.
-// The stream will be registered and ready to receive packets.
+// hasSource checks if a source URL is registered in the sources slice.
+func (element *webRTCWriter) hasSource(addr string) bool {
+	for _, src := range element.sources {
+		if src == addr {
+			return true
+		}
+	}
+	return false
+}
+
+// addSource adds a new source URL to the sources slice.
+// The stream will be created when codec parameters are received.
 func (element *webRTCWriter) addSource(addr string) {
-	if element.streams.Exists(addr) {
+	if element.hasSource(addr) {
 		logger.Infof(element, "Source %s already exists, skipping", addr)
 		return
 	}
 
-	element.streams.Add(addr, nil)
+	element.sources = append(element.sources, addr)
 	logger.Infof(element, "Added new source %s", addr)
 
 	parsedURL, err := url.Parse(addr)
@@ -130,12 +142,50 @@ func (element *webRTCWriter) addSource(addr string) {
 	}
 }
 
+// removeSource removes a source URL from the sources slice and streams.
+func (element *webRTCWriter) removeSource(addr string) {
+	// Remove from sources slice
+	for i, src := range element.sources {
+		if src == addr {
+			element.sources = append(element.sources[:i], element.sources[i+1:]...)
+			break
+		}
+	}
+
+	// Remove from streams if it exists
+	element.streams.Remove(addr)
+}
+
 // checkCodecParameters updates the codec parameters based on the provided map.
 // It manages stream sizes, updates codec parameters, and sends messages to inform peers about available streams.
+// If the stream doesn't exist yet but the source is registered, creates the stream with the codec parameters.
 func (element *webRTCWriter) checkCodecParameters(addr string, codecPar gomedia.CodecParameters) (err error) {
-	// Only update existing streams, don't auto-create new ones
-	if !element.streams.Exists(addr) {
+	// Only process sources that were registered via AddSource
+	if !element.hasSource(addr) {
 		return
+	}
+
+	// If stream doesn't exist yet, create it with the codec parameters
+	if !element.streams.Exists(addr) {
+		movedPeers := element.streams.Add(addr, codecPar)
+		if movedPeers != nil {
+			parsedURL, err := url.Parse(addr)
+			if err != nil {
+				return err
+			}
+			element.name = "WEBRTC_WRITER " + parsedURL.Hostname()
+
+			element.sendAvailableStreams()
+
+			for _, peer := range movedPeers {
+				element.streams.notifyTrackChange(&peerURL{
+					peerTrack: peer,
+					Token:     "",
+					URL:       addr,
+				})
+			}
+		}
+		return nil
 	}
 
 	movedPeers, changed := element.streams.Update(addr, codecPar)
@@ -176,9 +226,6 @@ func (element *webRTCWriter) buildAvailableStreamsMessage() ([]byte, error) {
 	}
 
 	for _, url := range element.streams.sortedURLs {
-		if element.streams.streams[url].codecPar.VideoCodecParameters == nil {
-			continue
-		}
 		reqMsg.Message.Resolutions = append(reqMsg.Message.Resolutions, resolution{
 			URL:    url,
 			Width:  int(element.streams.streams[url].codecPar.Width()),  //nolint:gosec
@@ -192,7 +239,7 @@ func (element *webRTCWriter) buildAvailableStreamsMessage() ([]byte, error) {
 // sendAvailableStreamsToPeer sends setAvailableStreams message to a single peer.
 // This is called when a new peer connects to send them the current available streams.
 func (element *webRTCWriter) sendAvailableStreamsToPeer(peer *peerTrack) {
-	if peer.DataChannel == nil {
+	if peer.DataChannel == nil || len(element.streams.sortedURLs) == 0 {
 		return
 	}
 
@@ -396,20 +443,8 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 		})
 	})
 
-	// Find first stream with valid video codec parameters
-	var codecType gomedia.CodecType
-	var foundCodec bool
-	for _, url := range element.streams.sortedURLs {
-		if element.streams.streams[url].codecPar.VideoCodecParameters != nil {
-			codecType = element.streams.streams[url].codecPar.VideoCodecParameters.Type()
-			foundCodec = true
-			break
-		}
-	}
-	if !foundCodec {
-		inpPeer.Err = errors.New("no streams with valid codec parameters available")
-		return inpPeer
-	}
+	// Get codec type from first stream (all streams have valid video codec parameters)
+	codecType := element.streams.streams[element.streams.sortedURLs[0]].codecPar.VideoCodecParameters.Type()
 
 	mimeType := webrtc.MimeTypeH264
 	if codecType == gomedia.H265 {
