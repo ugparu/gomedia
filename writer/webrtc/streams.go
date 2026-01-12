@@ -35,22 +35,30 @@ func (ss *sortedStreams) Exists(url string) bool {
 	return found
 }
 
-// Add adds a new stream to the sortedStreams map.
-// Returns if the stream was added or changed.
-func (ss *sortedStreams) Update(newURL string, newCodecPar gomedia.CodecParameters) bool {
+// Update updates codec parameters for an existing stream.
+// Returns a list of peers that were moved from pendingPeers and a boolean indicating if a change was made.
+func (ss *sortedStreams) Update(newURL string, newCodecPar gomedia.CodecParameters) ([]*peerTrack, bool) {
 	stream, found := ss.streams[newURL]
 	if !found {
-		return true
+		return nil, false
 	}
+
+	var movedPeers []*peerTrack
+	wasVideoNil := stream.codecPar.VideoCodecParameters == nil
 
 	switch par := newCodecPar.(type) {
 	case gomedia.VideoCodecParameters:
 		if stream.codecPar.VideoCodecParameters == par {
-			return false
+			return nil, false
 		}
-		logger.Infof(ss, "Updating stream %s with new codec parameters: %dx%d to %dx%d",
-			newURL, stream.codecPar.VideoCodecParameters.Width(), stream.codecPar.VideoCodecParameters.Height(),
-			par.Width(), par.Height())
+		if stream.codecPar.VideoCodecParameters != nil {
+			logger.Infof(ss, "Updating stream %s with new codec parameters: %dx%d to %dx%d",
+				newURL, stream.codecPar.VideoCodecParameters.Width(), stream.codecPar.VideoCodecParameters.Height(),
+				par.Width(), par.Height())
+		} else {
+			logger.Infof(ss, "Setting initial codec parameters for stream %s: %dx%d",
+				newURL, par.Width(), par.Height())
+		}
 		stream.codecPar.VideoCodecParameters = par
 		stream.buffer.Reset()
 
@@ -63,15 +71,38 @@ func (ss *sortedStreams) Update(newURL string, newCodecPar gomedia.CodecParamete
 				logger.Errorf(ss, "Failed to flush peer %v", peer)
 			}
 		}
+
+		// If video codec parameters were nil before, move pending peers to this stream
+		if wasVideoNil && len(ss.pendingPeers) > 0 {
+			for peer := range ss.pendingPeers {
+				select {
+				case peer.flush <- struct{}{}:
+				case <-time.After(flushDuration):
+					logger.Errorf(ss, "Failed to flush peer %v when moving from pending", peer)
+				}
+				stream.tracks[peer] = true
+				movedPeers = append(movedPeers, peer)
+			}
+			ss.pendingPeers = nil
+		}
 	case gomedia.AudioCodecParameters:
 		if stream.codecPar.AudioCodecParameters == par {
-			return false
+			return nil, false
 		}
 		stream.codecPar.AudioCodecParameters = par
 	default:
-		return false
+		return nil, false
 	}
 
+	// Sort the URLs by resolution (only if video codec parameters are available)
+	ss.sortURLsByResolution()
+
+	return movedPeers, true
+}
+
+// sortURLsByResolution sorts the sortedURLs slice by video resolution (smallest first).
+// Streams with nil VideoCodecParameters are placed at the end.
+func (ss *sortedStreams) sortURLsByResolution() {
 	for i := len(ss.sortedURLs) - 1; i >= 1; i-- {
 		var oldResolution uint
 		if ss.streams[ss.sortedURLs[i-1]].codecPar.VideoCodecParameters != nil {
@@ -84,17 +115,20 @@ func (ss *sortedStreams) Update(newURL string, newCodecPar gomedia.CodecParamete
 				ss.streams[ss.sortedURLs[i]].codecPar.VideoCodecParameters.Height()
 		}
 
-		if oldResolution > newResolution {
+		// Streams with nil codec params (resolution 0) should be at the end
+		if oldResolution > newResolution && newResolution > 0 {
+			ss.sortedURLs[i], ss.sortedURLs[i-1] = ss.sortedURLs[i-1], ss.sortedURLs[i]
+		} else if oldResolution == 0 && newResolution > 0 {
+			// Move stream with nil codec params to the end
 			ss.sortedURLs[i], ss.sortedURLs[i-1] = ss.sortedURLs[i-1], ss.sortedURLs[i]
 		} else {
 			break
 		}
 	}
-
-	return true
 }
 
 // Add adds a new stream URL with its size to the sortedStreams.
+// If newCodecPar is nil, the stream is added without codec parameters (will be set later via Update).
 // Returns a list of peers that were moved from pendingPeers and need setStreamUrl notification.
 func (ss *sortedStreams) Add(url string, newCodecPar gomedia.CodecParameters) []*peerTrack {
 	if _, found := ss.streams[url]; found {
@@ -107,11 +141,13 @@ func (ss *sortedStreams) Add(url string, newCodecPar gomedia.CodecParameters) []
 		AudioCodecParameters: nil,
 	}
 
-	switch par := newCodecPar.(type) {
-	case gomedia.VideoCodecParameters:
-		pair.VideoCodecParameters = par
-	case gomedia.AudioCodecParameters:
-		pair.AudioCodecParameters = par
+	if newCodecPar != nil {
+		switch par := newCodecPar.(type) {
+		case gomedia.VideoCodecParameters:
+			pair.VideoCodecParameters = par
+		case gomedia.AudioCodecParameters:
+			pair.AudioCodecParameters = par
+		}
 	}
 
 	ss.streams[url] = &stream{
@@ -125,16 +161,15 @@ func (ss *sortedStreams) Add(url string, newCodecPar gomedia.CodecParameters) []
 		codecPar: pair,
 	}
 	ss.sortedURLs = append(ss.sortedURLs, url)
-	for i := len(ss.sortedURLs) - 1; i >= 1; i-- {
-		if ss.streams[ss.sortedURLs[i]].codecPar.Width()*ss.streams[ss.sortedURLs[i]].codecPar.Height() <
-			ss.streams[ss.sortedURLs[i-1]].codecPar.Width()*ss.streams[ss.sortedURLs[i-1]].codecPar.Height() {
-			ss.sortedURLs[i], ss.sortedURLs[i-1] = ss.sortedURLs[i-1], ss.sortedURLs[i]
-		}
+
+	// Only sort if codec parameters are available; streams without codec params stay at the end
+	if pair.VideoCodecParameters != nil {
+		ss.sortURLsByResolution()
 	}
 
-	// Move any pending peers to this new stream
+	// Only move pending peers if we have video codec parameters
 	var movedPeers []*peerTrack
-	if len(ss.pendingPeers) > 0 {
+	if pair.VideoCodecParameters != nil && len(ss.pendingPeers) > 0 {
 		for peer := range ss.pendingPeers {
 			// Flush stale packets from peer channels before adding to new stream
 			const flushDuration = time.Second * 3

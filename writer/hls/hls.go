@@ -303,3 +303,7 @@ func (hlsw *hlsWriter) SegmentDuration() chan<- time.Duration {
 func (hlsw *hlsWriter) RemoveSource() chan<- string {
 	return hlsw.rmSrcCh
 }
+
+func (hlsw *hlsWriter) AddSource() chan<- string {
+	return nil
+}

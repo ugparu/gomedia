@@ -26,6 +26,7 @@ type webRTCWriter struct {
 	closePeersChan   chan *peerTrack
 	inpPktCh         chan gomedia.Packet
 	rmSrcCh          chan string
+	addSrcCh         chan string
 	name             string
 }
 
@@ -46,6 +47,7 @@ func New(chanSize int, targetDuration time.Duration) gomedia.WebRTCStreamer {
 		closePeersChan:   make(chan *peerTrack, chanSize),
 		inpPktCh:         make(chan gomedia.Packet, chanSize),
 		rmSrcCh:          make(chan string, chanSize),
+		addSrcCh:         make(chan string, chanSize),
 		name:             "WEBRTC_WRITER",
 	}
 	wr.AsyncManager = lifecycle.NewFailSafeAsyncManager(wr)
@@ -89,6 +91,10 @@ func (element *webRTCWriter) Step(stopCh <-chan struct{}) (err error) {
 		return &lifecycle.BreakError{}
 	case rmURL := <-element.rmSrcCh:
 		element.streams.Remove(rmURL)
+		logger.Infof(element, "Sending setAvailableStreams after removing source %s", rmURL)
+		element.sendAvailableStreams()
+	case addURL := <-element.addSrcCh:
+		element.addSource(addURL)
 	case inpPkt := <-element.inpPktCh:
 		switch pkt := inpPkt.(type) {
 		case gomedia.VideoPacket:
@@ -107,17 +113,33 @@ func (element *webRTCWriter) Step(stopCh <-chan struct{}) (err error) {
 	return nil
 }
 
+// addSource adds a new source URL to the writer without codec parameters.
+// The stream will be registered and ready to receive packets.
+func (element *webRTCWriter) addSource(addr string) {
+	if element.streams.Exists(addr) {
+		logger.Infof(element, "Source %s already exists, skipping", addr)
+		return
+	}
+
+	element.streams.Add(addr, nil)
+	logger.Infof(element, "Added new source %s", addr)
+
+	parsedURL, err := url.Parse(addr)
+	if err == nil {
+		element.name = "WEBRTC_WRITER " + parsedURL.Hostname()
+	}
+}
+
 // checkCodecParameters updates the codec parameters based on the provided map.
 // It manages stream sizes, updates codec parameters, and sends messages to inform peers about available streams.
 func (element *webRTCWriter) checkCodecParameters(addr string, codecPar gomedia.CodecParameters) (err error) {
-	var movedPeers []*peerTrack
+	// Only update existing streams, don't auto-create new ones
 	if !element.streams.Exists(addr) {
-		if _, ok := codecPar.(gomedia.VideoCodecParameters); !ok {
-			return
-		}
+		return
+	}
 
-		movedPeers = element.streams.Add(addr, codecPar)
-	} else if !element.streams.Update(addr, codecPar) {
+	movedPeers, changed := element.streams.Update(addr, codecPar)
+	if !changed {
 		return
 	}
 
@@ -127,6 +149,23 @@ func (element *webRTCWriter) checkCodecParameters(addr string, codecPar gomedia.
 	}
 	element.name = "WEBRTC_WRITER " + parsedURL.Hostname()
 
+	element.sendAvailableStreams()
+
+	// Send setStreamUrl notifications AFTER setAvailableStreams for peers that were moved
+	// This ensures correct message ordering: setAvailableStreams first, then setStreamUrl
+	for _, peer := range movedPeers {
+		element.streams.notifyTrackChange(&peerURL{
+			peerTrack: peer,
+			Token:     "",
+			URL:       addr,
+		})
+	}
+
+	return nil
+}
+
+// buildAvailableStreamsMessage builds the setAvailableStreams message with current resolutions.
+func (element *webRTCWriter) buildAvailableStreamsMessage() ([]byte, error) {
 	reqMsg := &codecReq{
 		Token:   "",
 		Command: "setAvailableStreams",
@@ -147,9 +186,35 @@ func (element *webRTCWriter) checkCodecParameters(addr string, codecPar gomedia.
 		})
 	}
 
-	var bytes []byte
-	if bytes, err = json.Marshal(reqMsg); err != nil {
-		return err
+	return json.Marshal(reqMsg)
+}
+
+// sendAvailableStreamsToPeer sends setAvailableStreams message to a single peer.
+// This is called when a new peer connects to send them the current available streams.
+func (element *webRTCWriter) sendAvailableStreamsToPeer(peer *peerTrack) {
+	if peer.DataChannel == nil {
+		return
+	}
+
+	bytes, err := element.buildAvailableStreamsMessage()
+	if err != nil {
+		logger.Errorf(element, "Failed to marshal setAvailableStreams: %v", err)
+		return
+	}
+
+	logger.Infof(element, "Sending message to new peer %s", bytes)
+	if err = peer.DataChannel.Send(bytes); err != nil {
+		logger.Errorf(element, "Failed to send setAvailableStreams to new peer: %v", err)
+	}
+}
+
+// sendAvailableStreams sends setAvailableStreams message to all connected peers.
+// This should be called whenever streams are added or removed to keep peers in sync.
+func (element *webRTCWriter) sendAvailableStreams() {
+	bytes, err := element.buildAvailableStreamsMessage()
+	if err != nil {
+		logger.Errorf(element, "Failed to marshal setAvailableStreams: %v", err)
+		return
 	}
 
 	for _, stream := range element.streams.streams {
@@ -157,23 +222,21 @@ func (element *webRTCWriter) checkCodecParameters(addr string, codecPar gomedia.
 			logger.Infof(element, "Sending message %s", bytes)
 			if peer.DataChannel != nil {
 				if err = peer.DataChannel.Send(bytes); err != nil {
-					return err
+					logger.Errorf(element, "Failed to send setAvailableStreams: %v", err)
 				}
 			}
 		}
 	}
 
-	// Send setStreamUrl notifications AFTER setAvailableStreams for peers that were moved
-	// This ensures correct message ordering: setAvailableStreams first, then setStreamUrl
-	for _, peer := range movedPeers {
-		element.streams.notifyTrackChange(&peerURL{
-			peerTrack: peer,
-			Token:     "",
-			URL:       addr,
-		})
+	// Also notify pending peers if any
+	for peer := range element.streams.pendingPeers {
+		logger.Infof(element, "Sending message to pending peer %s", bytes)
+		if peer.DataChannel != nil {
+			if err = peer.DataChannel.Send(bytes); err != nil {
+				logger.Errorf(element, "Failed to send setAvailableStreams to pending peer: %v", err)
+			}
+		}
 	}
-
-	return nil
 }
 
 // extractFmtpLineFromSDP parses the SDP to find the first fmtp line that matches the given codec type
@@ -281,6 +344,10 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 		d.OnOpen(func() {
 			pt.DataChannel = d
 			logger.Infof(element, "Data channel '%s'-'%d' opened", d.Label(), d.ID())
+
+			// Send available streams to the newly connected peer immediately
+			element.sendAvailableStreamsToPeer(pt)
+
 			element.connectPeersChan <- pt
 		})
 
@@ -475,6 +542,11 @@ func (element *webRTCWriter) Peers() chan gomedia.WebRTCPeer {
 // RemoveSource returns the remove source channel of the writer.
 func (element *webRTCWriter) RemoveSource() chan<- string {
 	return element.rmSrcCh
+}
+
+// AddSource returns the add source channel of the writer.
+func (element *webRTCWriter) AddSource() chan<- string {
+	return element.addSrcCh
 }
 
 // String returns a string representation of the innerWriter, including the number of tracks.

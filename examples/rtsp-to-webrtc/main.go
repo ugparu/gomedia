@@ -25,7 +25,7 @@ type SDPResponse struct {
 }
 
 type URLRequest struct {
-	URL string `json:"url" binding:"required"`
+	URLs []string `json:"urls" binding:"required,min=1"`
 }
 
 type URLResponse struct {
@@ -34,10 +34,10 @@ type URLResponse struct {
 }
 
 var (
-	rdr        gomedia.Reader
-	urlMutex   sync.Mutex
-	currentURL string
-	webrtcWrt  gomedia.WebRTCStreamer
+	rdr         gomedia.Reader
+	urlMutex    sync.Mutex
+	currentURLs []string
+	webrtcWrt   gomedia.WebRTCStreamer
 )
 
 func main() {
@@ -91,20 +91,59 @@ func main() {
 		urlMutex.Lock()
 		defer urlMutex.Unlock()
 
-		// Remove existing URL if any
-		if currentURL != "" {
-			logger.Infof(nil, "Removing existing URL: %s", currentURL)
-			rdr.RemoveURL() <- currentURL
-			webrtcWrt.RemoveSource() <- currentURL
+		// Create a map of new URLs for quick lookup
+		newURLsMap := make(map[string]bool)
+		for _, url := range req.URLs {
+			if url != "" {
+				newURLsMap[url] = true
+			}
 		}
 
-		// Add new URL
-		currentURL = req.URL
-		rdr.AddURL() <- currentURL
+		// Remove URLs that are no longer needed
+		for _, url := range currentURLs {
+			if url != "" && !newURLsMap[url] {
+				logger.Infof(nil, "Removing URL: %s", url)
+				rdr.RemoveURL() <- url
+				webrtcWrt.RemoveSource() <- url
+			}
+		}
+
+		// Create a map of current URLs for quick lookup
+		currentURLsMap := make(map[string]bool)
+		for _, url := range currentURLs {
+			if url != "" {
+				currentURLsMap[url] = true
+			}
+		}
+
+		// Add only missing URLs
+		for _, url := range req.URLs {
+			if url != "" && !currentURLsMap[url] {
+				webrtcWrt.AddSource() <- url
+				rdr.AddURL() <- url
+				logger.Infof(nil, "Added URL: %s", url)
+			}
+		}
+
+		// Update currentURLs to match req.URLs
+		currentURLs = nil
+		for _, url := range req.URLs {
+			if url != "" {
+				currentURLs = append(currentURLs, url)
+			}
+		}
+
+		if len(currentURLs) == 0 {
+			c.JSON(http.StatusBadRequest, URLResponse{
+				Success: false,
+				Message: "No valid URLs provided",
+			})
+			return
+		}
 
 		c.JSON(http.StatusOK, URLResponse{
 			Success: true,
-			Message: "RTSP stream initialized",
+			Message: "RTSP stream(s) initialized",
 		})
 	})
 
@@ -120,10 +159,10 @@ func main() {
 		}
 
 		urlMutex.Lock()
-		hasURL := currentURL != ""
+		hasURLs := len(currentURLs) > 0
 		urlMutex.Unlock()
 
-		if !hasURL {
+		if !hasURLs {
 			c.JSON(http.StatusBadRequest, SDPResponse{
 				SDP: "",
 				Err: nil,

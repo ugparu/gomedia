@@ -16,6 +16,7 @@
             --accent-green: #3fb950;
             --accent-orange: #d29922;
             --accent-red: #f85149;
+            --accent-purple: #a371f7;
             --text-primary: #e6edf3;
             --text-secondary: #8b949e;
             --border-color: #30363d;
@@ -73,10 +74,52 @@
             margin-bottom: 24px;
         }
 
-        .url-section {
+        .card-title {
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 16px;
+        }
+
+        .url-inputs {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .url-row {
             display: flex;
             gap: 12px;
-            align-items: stretch;
+            align-items: center;
+        }
+
+        .url-label {
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            min-width: 80px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .url-label .quality-badge {
+            font-size: 0.7rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+
+        .url-label .quality-badge.high {
+            background: rgba(88, 166, 255, 0.2);
+            color: var(--accent-cyan);
+        }
+
+        .url-label .quality-badge.low {
+            background: rgba(163, 113, 247, 0.2);
+            color: var(--accent-purple);
         }
 
         .input-wrapper {
@@ -84,28 +127,14 @@
             position: relative;
         }
 
-        .input-wrapper::before {
-            content: 'rtsp://';
-            position: absolute;
-            left: 16px;
-            top: 50%;
-            transform: translateY(-50%);
-            color: var(--text-secondary);
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 0.85rem;
-            pointer-events: none;
-            opacity: 0;
-            transition: opacity 0.2s;
-        }
-
         .url-input {
             width: 100%;
             background: var(--bg-tertiary);
             border: 1px solid var(--border-color);
             border-radius: 8px;
-            padding: 14px 16px;
+            padding: 12px 14px;
             font-family: 'JetBrains Mono', monospace;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
             color: var(--text-primary);
             transition: border-color 0.2s, box-shadow 0.2s;
         }
@@ -120,11 +149,15 @@
             box-shadow: 0 0 0 3px var(--glow-cyan);
         }
 
+        .url-input.filled {
+            border-color: var(--accent-green);
+        }
+
         .btn {
             font-family: 'Outfit', sans-serif;
             font-size: 0.9rem;
             font-weight: 500;
-            padding: 14px 24px;
+            padding: 12px 20px;
             border: none;
             border-radius: 8px;
             cursor: pointer;
@@ -168,6 +201,12 @@
             opacity: 0.4;
             cursor: not-allowed;
             transform: none;
+        }
+
+        .btn-connect {
+            margin-top: 16px;
+            width: 100%;
+            justify-content: center;
         }
 
         .video-wrapper {
@@ -223,6 +262,93 @@
             gap: 12px;
             justify-content: center;
             margin-top: 20px;
+        }
+
+        /* Stream Level Switcher */
+        .stream-switcher {
+            margin-top: 20px;
+            padding: 16px;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            display: none;
+        }
+
+        .stream-switcher.visible {
+            display: block;
+        }
+
+        .stream-switcher-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+
+        .stream-switcher-title {
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+
+        .current-stream {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+            color: var(--accent-green);
+            padding: 4px 8px;
+            background: rgba(63, 185, 80, 0.15);
+            border-radius: 4px;
+        }
+
+        .stream-options {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .stream-option {
+            flex: 1;
+            min-width: 120px;
+            padding: 12px 16px;
+            background: var(--bg-secondary);
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+        }
+
+        .stream-option:hover {
+            border-color: var(--accent-cyan);
+            background: rgba(88, 166, 255, 0.05);
+        }
+
+        .stream-option.active {
+            border-color: var(--accent-green);
+            background: rgba(63, 185, 80, 0.1);
+        }
+
+        .stream-option.switching {
+            border-color: var(--accent-orange);
+            animation: pulse-border 1s infinite;
+        }
+
+        @keyframes pulse-border {
+            0%, 100% { border-color: var(--accent-orange); }
+            50% { border-color: var(--border-color); }
+        }
+
+        .stream-resolution {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+
+        .stream-quality {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
         }
 
         .status-bar {
@@ -282,17 +408,28 @@
             font-weight: 500;
         }
 
+        .url-badges {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
         .url-badge {
             font-family: 'JetBrains Mono', monospace;
-            font-size: 0.75rem;
+            font-size: 0.7rem;
             color: var(--text-secondary);
             background: var(--bg-secondary);
-            padding: 6px 12px;
+            padding: 4px 10px;
             border-radius: 6px;
-            max-width: 300px;
+            max-width: 180px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+        }
+
+        .url-badge.active {
+            color: var(--accent-green);
+            border: 1px solid var(--accent-green);
         }
 
         .icon {
@@ -300,9 +437,21 @@
             height: 18px;
         }
 
+        .info-text {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-top: 12px;
+            text-align: center;
+        }
+
         @media (max-width: 640px) {
-            .url-section {
+            .url-row {
                 flex-direction: column;
+                align-items: stretch;
+            }
+
+            .url-label {
+                min-width: auto;
             }
             
             .status-bar {
@@ -310,8 +459,12 @@
                 gap: 12px;
             }
 
-            .url-badge {
-                max-width: 100%;
+            .url-badges {
+                justify-content: center;
+            }
+
+            .stream-option {
+                min-width: 100%;
             }
         }
     </style>
@@ -320,26 +473,48 @@
     <div class="app-container">
         <header>
             <h1>RTSP WebRTC Viewer</h1>
-            <p class="subtitle">Stream RTSP sources via WebRTC</p>
+            <p class="subtitle">Multi-stream RTSP via WebRTC with quality switching</p>
         </header>
 
         <div class="card">
-            <div class="url-section">
-                <div class="input-wrapper">
-                    <input 
-                        type="text" 
-                        id="urlInput" 
-                        class="url-input" 
-                        placeholder="rtsp://username:password@192.168.1.100:554/stream"
-                    >
+            <div class="card-title">Stream Sources</div>
+            <div class="url-inputs">
+                <div class="url-row">
+                    <div class="url-label">
+                        <span class="quality-badge high">HIGH</span>
+                        Stream 1
+                    </div>
+                    <div class="input-wrapper">
+                        <input 
+                            type="text" 
+                            id="urlInput1" 
+                            class="url-input" 
+                            placeholder="rtsp://user:pass@192.168.1.100:554/stream1"
+                        >
+                    </div>
                 </div>
-                <button id="connectUrlBtn" class="btn btn-primary">
-                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M13.8 12H3"/>
-                    </svg>
-                    Connect
-                </button>
+                <div class="url-row">
+                    <div class="url-label">
+                        <span class="quality-badge low">LOW</span>
+                        Stream 2
+                    </div>
+                    <div class="input-wrapper">
+                        <input 
+                            type="text" 
+                            id="urlInput2" 
+                            class="url-input" 
+                            placeholder="rtsp://user:pass@192.168.1.100:554/stream2"
+                        >
+                    </div>
+                </div>
             </div>
+            <button id="connectUrlBtn" class="btn btn-primary btn-connect">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M13.8 12H3"/>
+                </svg>
+                Connect Streams
+            </button>
+            <p class="info-text">Enter at least one RTSP URL. Both streams will be available for quality switching.</p>
         </div>
 
         <div class="card">
@@ -349,7 +524,7 @@
                         <rect x="2" y="4" width="20" height="16" rx="2"/>
                         <path d="M10 9l5 3-5 3V9z"/>
                     </svg>
-                    <span>Enter RTSP URL to begin</span>
+                    <span>Enter RTSP URL(s) to begin</span>
                 </div>
                 <video id="videoElement" autoplay playsinline controls muted></video>
             </div>
@@ -369,12 +544,23 @@
                 </button>
             </div>
 
+            <!-- Stream Level Switcher -->
+            <div id="streamSwitcher" class="stream-switcher">
+                <div class="stream-switcher-header">
+                    <span class="stream-switcher-title">Stream Quality</span>
+                    <span id="currentStreamBadge" class="current-stream"></span>
+                </div>
+                <div id="streamOptions" class="stream-options">
+                    <!-- Stream options will be populated dynamically -->
+                </div>
+            </div>
+
             <div class="status-bar">
                 <div class="status-indicator">
                     <div id="statusDot" class="status-dot"></div>
                     <span class="status-text">Status: <span id="connectionStatus">Not Connected</span></span>
                 </div>
-                <div id="urlBadge" class="url-badge" style="display: none;"></div>
+                <div id="urlBadges" class="url-badges"></div>
             </div>
         </div>
     </div>
@@ -387,9 +573,13 @@
         const stopButton = document.getElementById('stopButton');
         const connectionStatus = document.getElementById('connectionStatus');
         const statusDot = document.getElementById('statusDot');
-        const urlInput = document.getElementById('urlInput');
+        const urlInput1 = document.getElementById('urlInput1');
+        const urlInput2 = document.getElementById('urlInput2');
         const connectUrlBtn = document.getElementById('connectUrlBtn');
-        const urlBadge = document.getElementById('urlBadge');
+        const urlBadges = document.getElementById('urlBadges');
+        const streamSwitcher = document.getElementById('streamSwitcher');
+        const streamOptions = document.getElementById('streamOptions');
+        const currentStreamBadge = document.getElementById('currentStreamBadge');
         
         // WebRTC variables
         let peerConnection = null;
@@ -398,6 +588,16 @@
         let stream = null;
         let isConnecting = false;
         let urlConnected = false;
+        let availableStreams = [];
+        let currentStreamUrl = '';
+        let switchingStream = false;
+
+        // Track input changes for styling
+        [urlInput1, urlInput2].forEach(input => {
+            input.addEventListener('input', () => {
+                input.classList.toggle('filled', input.value.trim() !== '');
+            });
+        });
 
         // Update status display
         function updateStatus(status, state) {
@@ -405,11 +605,183 @@
             statusDot.className = 'status-dot ' + state;
         }
 
-        // Connect RTSP URL (supports hot-switching while streaming)
-        async function connectUrl() {
-            const url = urlInput.value.trim();
-            if (!url) {
-                alert('Please enter an RTSP URL');
+        // Update URL badges
+        function updateUrlBadges(urls) {
+            urlBadges.innerHTML = '';
+            urls.forEach(url => {
+                if (url) {
+                    const badge = document.createElement('div');
+                    badge.className = 'url-badge';
+                    if (url === currentStreamUrl) {
+                        badge.classList.add('active');
+                    }
+                    // Extract hostname from URL for display
+                    try {
+                        const urlObj = new URL(url);
+                        badge.textContent = urlObj.hostname + urlObj.pathname.substring(0, 15);
+                    } catch {
+                        badge.textContent = url.substring(0, 25);
+                    }
+                    badge.title = url;
+                    urlBadges.appendChild(badge);
+                }
+            });
+        }
+
+        // Handle available streams update from datachannel
+        function handleAvailableStreams(data) {
+            availableStreams = data.message.resolutions || [];
+            
+            if (availableStreams.length === 0) {
+                streamSwitcher.classList.remove('visible');
+                return;
+            }
+
+            // Sort by resolution (highest first)
+            availableStreams.sort((a, b) => (b.width * b.height) - (a.width * a.height));
+
+            // Only show switcher if we have more than one stream
+            if (availableStreams.length > 1) {
+                streamSwitcher.classList.add('visible');
+            }
+
+            // Update stream options UI
+            streamOptions.innerHTML = '';
+            availableStreams.forEach((stream, index) => {
+                const option = document.createElement('div');
+                option.className = 'stream-option';
+                option.dataset.url = stream.url;
+                
+                if (stream.url === currentStreamUrl) {
+                    option.classList.add('active');
+                }
+
+                const qualityLabel = index === 0 ? 'High Quality' : 
+                                    index === availableStreams.length - 1 ? 'Low Quality' : 'Medium';
+
+                option.innerHTML = `
+                    <div class="stream-resolution">${stream.width}×${stream.height}</div>
+                    <div class="stream-quality">${qualityLabel}</div>
+                `;
+
+                option.addEventListener('click', () => switchStream(stream.url));
+                streamOptions.appendChild(option);
+            });
+
+            updateCurrentStreamBadge();
+        }
+
+        // Handle stream URL change notification from datachannel
+        function handleStreamUrlChange(url) {
+            currentStreamUrl = url;
+            switchingStream = false;
+            
+            // Update UI
+            document.querySelectorAll('.stream-option').forEach(opt => {
+                opt.classList.remove('active', 'switching');
+                if (opt.dataset.url === url) {
+                    opt.classList.add('active');
+                }
+            });
+
+            updateCurrentStreamBadge();
+            updateUrlBadges([urlInput1.value.trim(), urlInput2.value.trim()]);
+        }
+
+        // Update current stream badge
+        function updateCurrentStreamBadge() {
+            const current = availableStreams.find(s => s.url === currentStreamUrl);
+            if (current) {
+                currentStreamBadge.textContent = `${current.width}×${current.height}`;
+            } else if (availableStreams.length > 0) {
+                currentStreamBadge.textContent = 'Auto';
+            }
+        }
+
+        // Switch to a different stream via datachannel
+        function switchStream(url) {
+            if (!dataChannel || dataChannel.readyState !== 'open') {
+                console.warn('Data channel not ready');
+                return;
+            }
+
+            if (url === currentStreamUrl || switchingStream) {
+                return;
+            }
+
+            switchingStream = true;
+
+            // Update UI to show switching state
+            document.querySelectorAll('.stream-option').forEach(opt => {
+                opt.classList.remove('switching');
+                if (opt.dataset.url === url) {
+                    opt.classList.add('switching');
+                }
+            });
+
+            // Generate a token for tracking the response
+            const token = 'switch-' + Date.now();
+
+            // Send stream change request via datachannel
+            const message = JSON.stringify({
+                token: token,
+                command: 'changeStream',
+                message: url
+            });
+
+            console.log('Sending stream switch request:', message);
+            dataChannel.send(message);
+        }
+
+        // Handle datachannel messages
+        function handleDataChannelMessage(event) {
+            try {
+                const data = JSON.parse(event.data);
+                console.log('DataChannel message:', data);
+
+                switch (data.command) {
+                    case 'setAvailableStreams':
+                        handleAvailableStreams(data);
+                        break;
+                    case 'setStreamUrl':
+                        handleStreamUrlChange(data.message);
+                        break;
+                    case 'startStream':
+                        console.log('Stream started');
+                        // If we have available streams but no current, set to first
+                        if (!currentStreamUrl && availableStreams.length > 0) {
+                            currentStreamUrl = availableStreams[0].url;
+                            updateCurrentStreamBadge();
+                            updateUrlBadges([urlInput1.value.trim(), urlInput2.value.trim()]);
+                        }
+                        break;
+                    default:
+                        // Handle response messages (with status)
+                        if (data.status !== undefined) {
+                            if (data.status === 200) {
+                                console.log('Stream switch successful');
+                            } else {
+                                console.error('Stream switch failed:', data.message);
+                                switchingStream = false;
+                                // Remove switching state
+                                document.querySelectorAll('.stream-option.switching').forEach(opt => {
+                                    opt.classList.remove('switching');
+                                });
+                            }
+                        }
+                }
+            } catch (e) {
+                console.error('Error parsing datachannel message:', e);
+            }
+        }
+
+        // Connect RTSP URLs
+        async function connectUrls() {
+            const url1 = urlInput1.value.trim();
+            const url2 = urlInput2.value.trim();
+            
+            if (!url1 && !url2) {
+                alert('Please enter at least one RTSP URL');
                 return;
             }
 
@@ -419,14 +791,18 @@
                  peerConnection.iceConnectionState === 'completed');
             
             if (!wasStreaming) {
-                updateStatus('Initializing stream...', 'connecting');
+                updateStatus('Initializing streams...', 'connecting');
             }
 
             try {
+                const urls = [];
+                if (url1) urls.push(url1);
+                if (url2) urls.push(url2);
+
                 const response = await fetch('/url', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url: url })
+                    body: JSON.stringify({ urls: urls })
                 });
 
                 const data = await response.json();
@@ -437,17 +813,13 @@
 
                 urlConnected = true;
                 
-                // Only enable start button if stream is not already active
                 if (!wasStreaming) {
                     startButton.disabled = false;
                 }
                 
-                // Update URL badge
-                urlBadge.textContent = url;
-                urlBadge.style.display = 'block';
+                updateUrlBadges(urls);
                 
                 if (wasStreaming) {
-                    // Keep connected status during hot-switch
                     updateStatus('Connected', 'connected');
                 } else {
                     updateStatus('Ready to stream', 'ready');
@@ -455,7 +827,7 @@
                 }
 
             } catch (error) {
-                console.error('Error connecting URL:', error);
+                console.error('Error connecting URLs:', error);
                 if (!wasStreaming) {
                     updateStatus('Connection failed', 'error');
                 }
@@ -467,7 +839,7 @@
         // Start streaming function
         async function startStreaming() {
             if (!urlConnected) {
-                alert('Please connect an RTSP URL first');
+                alert('Please connect RTSP URL(s) first');
                 return;
             }
 
@@ -488,6 +860,17 @@
                 peerConnection = new RTCPeerConnection(configuration);
                 dataChannel = peerConnection.createDataChannel('control');
                 
+                // Set up datachannel message handling
+                dataChannel.onopen = () => {
+                    console.log('Data channel opened');
+                };
+
+                dataChannel.onmessage = handleDataChannelMessage;
+
+                dataChannel.onerror = (error) => {
+                    console.error('Data channel error:', error);
+                };
+
                 peerConnection.onicecandidate = event => {
                     if (event.candidate === null && !sdpSent) {
                         sdpSent = true;
@@ -518,6 +901,7 @@
                         stopButton.disabled = true;
                         startButton.disabled = false;
                         isConnecting = false;
+                        streamSwitcher.classList.remove('visible');
                     }
                 };
                 
@@ -578,6 +962,12 @@
         
         // Cleanup function
         async function cleanupConnection() {
+            // Reset stream state
+            availableStreams = [];
+            currentStreamUrl = '';
+            switchingStream = false;
+            streamSwitcher.classList.remove('visible');
+
             if (stream) {
                 stream.getTracks().forEach(track => {
                     track.stop();
@@ -626,12 +1016,14 @@
         }
         
         // Event listeners
-        connectUrlBtn.addEventListener('click', connectUrl);
+        connectUrlBtn.addEventListener('click', connectUrls);
         
-        urlInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                connectUrl();
-            }
+        [urlInput1, urlInput2].forEach(input => {
+            input.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    connectUrls();
+                }
+            });
         });
 
         startButton.addEventListener('click', () => startStreaming());

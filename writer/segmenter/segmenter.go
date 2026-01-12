@@ -544,6 +544,10 @@ func (s *segmenter) RemoveSource() chan<- string {
 	return s.rmSrcCh
 }
 
+func (s *segmenter) AddSource() chan<- string {
+	return nil
+}
+
 func (s *segmenter) Events() chan<- struct{} {
 	return s.eventCh
 }

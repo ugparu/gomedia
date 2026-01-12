@@ -102,6 +102,7 @@ type Writer interface {
 	Write()                      // Starts the writing process.
 	Packets() chan<- Packet      // Channel for packets to be written.
 	RemoveSource() chan<- string // Channel to remove source streams.
+	AddSource() chan<- string    // Channel to add source streams.
 	Done() <-chan struct{}       // Channel signaling completion.
 	Close()                      // Stops writing and releases resources.
 }
