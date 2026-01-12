@@ -168,23 +168,22 @@ func (element *webRTCWriter) checkCodecParameters(addr string, codecPar gomedia.
 	// If stream doesn't exist yet, create it with the codec parameters
 	if !element.streams.Exists(addr) {
 		movedPeers := element.streams.Add(addr, codecPar)
-		if movedPeers != nil {
-			parsedURL, err := url.Parse(addr)
-			if err != nil {
-				return err
-			}
-			element.name = "WEBRTC_WRITER " + parsedURL.Hostname()
+		element.sendAvailableStreams()
 
-			element.sendAvailableStreams()
-
-			for _, peer := range movedPeers {
-				element.streams.notifyTrackChange(&peerURL{
-					peerTrack: peer,
-					Token:     "",
-					URL:       addr,
-				})
-			}
+		parsedURL, err := url.Parse(addr)
+		if err != nil {
+			return err
 		}
+		element.name = "WEBRTC_WRITER " + parsedURL.Hostname()
+
+		for _, peer := range movedPeers {
+			element.streams.notifyTrackChange(&peerURL{
+				peerTrack: peer,
+				Token:     "",
+				URL:       addr,
+			})
+		}
+
 		return nil
 	}
 
