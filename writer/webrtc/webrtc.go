@@ -396,7 +396,21 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 		})
 	})
 
-	codecType := element.streams.streams[element.streams.sortedURLs[0]].codecPar.VideoCodecParameters.Type()
+	// Find first stream with valid video codec parameters
+	var codecType gomedia.CodecType
+	var foundCodec bool
+	for _, url := range element.streams.sortedURLs {
+		if element.streams.streams[url].codecPar.VideoCodecParameters != nil {
+			codecType = element.streams.streams[url].codecPar.VideoCodecParameters.Type()
+			foundCodec = true
+			break
+		}
+	}
+	if !foundCodec {
+		inpPeer.Err = errors.New("no streams with valid codec parameters available")
+		return inpPeer
+	}
+
 	mimeType := webrtc.MimeTypeH264
 	if codecType == gomedia.H265 {
 		mimeType = webrtc.MimeTypeH265
@@ -471,12 +485,25 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 
 // removePeer removes a peer from all existing and to-be-added peers, removes associated tracks,
 // closes the DataChannel, and closes the PeerConnection.
+// This function is idempotent - calling it multiple times is safe.
 func (element *webRTCWriter) removePeer(peer *peerTrack) (err error) {
+	// Check if already removed by testing if done channel is closed
+	select {
+	case <-peer.done:
+		// Already closed, nothing to do
+		return nil
+	default:
+	}
+
 	for _, peers := range element.streams.streams {
 		logger.Debug(element, "Removing peer track from stream")
 		delete(peers.tracks, peer)
 		delete(peers.toAdd, peer)
 	}
+
+	// Also remove from pendingPeers if present
+	delete(element.streams.pendingPeers, peer)
+
 	senders := peer.PeerConnection.GetSenders()
 	logger.Debug(element, "Removing peer track from senders")
 	for _, stream := range senders {

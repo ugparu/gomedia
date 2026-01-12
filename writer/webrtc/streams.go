@@ -82,8 +82,8 @@ func (ss *sortedStreams) Update(newURL string, newCodecPar gomedia.CodecParamete
 				}
 				stream.tracks[peer] = true
 				movedPeers = append(movedPeers, peer)
+				delete(ss.pendingPeers, peer) // Remove moved peers individually
 			}
-			ss.pendingPeers = nil
 		}
 	case gomedia.AudioCodecParameters:
 		if stream.codecPar.AudioCodecParameters == par {
@@ -183,8 +183,8 @@ func (ss *sortedStreams) Add(url string, newCodecPar gomedia.CodecParameters) []
 			// They should receive setStreamUrl (via notifyTrackChange) not startStream
 			ss.streams[url].tracks[peer] = true
 			movedPeers = append(movedPeers, peer)
+			delete(ss.pendingPeers, peer) // Remove moved peers individually
 		}
-		ss.pendingPeers = nil // Clear pending peers after moving
 	}
 	return movedPeers
 }
@@ -232,16 +232,28 @@ func (ss *sortedStreams) Remove(removeURL string) {
 			}
 		}
 	}
+
+	// Clean up buffer before deletion to prevent memory leaks
+	str.buffer.Close()
+
 	delete(ss.streams, removeURL)
 	ss.sortedURLs = append(ss.sortedURLs[:index], ss.sortedURLs[index+1:]...)
 }
 
 func (ss *sortedStreams) Insert(pt *peerTrack) (err error) {
-	if len(ss.sortedURLs) == 0 {
-		return errors.New("no codec parameters")
+	// Find first stream with valid video codec parameters
+	for _, url := range ss.sortedURLs {
+		if ss.streams[url].codecPar.VideoCodecParameters != nil {
+			ss.streams[url].tracks[pt] = false
+			return nil
+		}
 	}
-	ss.streams[ss.sortedURLs[0]].tracks[pt] = false
 
+	// No valid streams - add to pending
+	if ss.pendingPeers == nil {
+		ss.pendingPeers = make(map[*peerTrack]bool)
+	}
+	ss.pendingPeers[pt] = false
 	return nil
 }
 
@@ -333,12 +345,28 @@ func (ss *sortedStreams) moveTrackToStream(str *stream, pu *peerURL, peerBuf []g
 		logger.Errorf(ss, "Failed to flush peer %v", pu.peerTrack)
 	}
 
+	const sendTimeout = time.Millisecond * 100
 	for _, bufPkt := range peerBuf {
+		// Check if peer is closed during move
+		select {
+		case <-pu.done:
+			return // Peer closed during move
+		default:
+		}
+
 		switch packet := bufPkt.(type) {
 		case gomedia.VideoPacket:
-			pu.peerTrack.vChan <- packet
+			select {
+			case pu.peerTrack.vChan <- packet:
+			case <-time.After(sendTimeout):
+				logger.Errorf(ss, "Timeout sending video packet to peer during stream move")
+			}
 		case gomedia.AudioPacket:
-			pu.peerTrack.aChan <- packet
+			select {
+			case pu.peerTrack.aChan <- packet:
+			case <-time.After(sendTimeout):
+				logger.Errorf(ss, "Timeout sending audio packet to peer during stream move")
+			}
 		}
 	}
 
@@ -373,8 +401,17 @@ func (ss *sortedStreams) notifyTrackChange(pu *peerURL) {
 			return
 		}
 
-		logger.Infof(ss, "Sending message %s", bytes)
-		if pu.DataChannel != nil {
+		if pu.DataChannel == nil {
+			logger.Errorf(ss, "Cannot notify track change: DataChannel is nil")
+			return
+		}
+
+		// Check if peer is already closed before sending
+		select {
+		case <-pu.done:
+			return // Peer already closed
+		default:
+			logger.Infof(ss, "Sending message %s", bytes)
 			if err = pu.DataChannel.Send(bytes); err != nil {
 				logger.Error(ss, err.Error())
 			}
@@ -399,6 +436,11 @@ func (ss *sortedStreams) processExistingTracks(str *stream, pkt gomedia.Packet) 
 
 // seedTrack initializes a new track with buffer data
 func (ss *sortedStreams) seedTrack(str *stream, peer *peerTrack) error {
+	// Check for nil DataChannel before proceeding
+	if peer.DataChannel == nil {
+		return errors.New("peer data channel is nil")
+	}
+
 	seedBuf, peerBuf := str.buffer.GetBuffer(time.Now().Add(-peer.delay))
 
 	const pktDur = time.Millisecond * 5

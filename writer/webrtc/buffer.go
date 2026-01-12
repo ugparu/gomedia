@@ -89,6 +89,21 @@ func (b *Buffer) GetBuffer(ts time.Time) ([]gomedia.VideoPacket, []gomedia.Packe
 }
 
 func (b *Buffer) Reset() {
+	for _, gop := range b.gops {
+		for _, packet := range gop.packets {
+			packet.Close()
+		}
+	}
 	b.gops = []GoP{}
+	b.duration = 0
+}
+
+func (b *Buffer) Close() {
+	for _, gop := range b.gops {
+		for _, packet := range gop.packets {
+			packet.Close()
+		}
+	}
+	b.gops = nil
 	b.duration = 0
 }
