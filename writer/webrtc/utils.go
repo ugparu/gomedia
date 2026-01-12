@@ -96,10 +96,32 @@ func writeVideoPacketsToPeer(done chan struct{},
 				}
 			}
 		case pkt := <-vChan:
+			// Get codec parameters for keyframes
+			var codecParams []byte
+			if pkt.IsKeyFrame() {
+				codecParams = appendCodecParameters(pkt.CodecParameters())
+			}
+
+			// Split NALUs and calculate total size
+			var nalus [][]byte
+			var nalusSize int
 			pkt.View(func(data buffer.PooledBuffer) {
-				vBuf.Resize(data.Len())
-				copy(vBuf.Data(), data.Data())
+				nalus, _ = nal.SplitNALUs(data.Data())
+				for _, nalu := range nalus {
+					nalusSize += 4 + len(nalu) // start code (4 bytes) + nalu data
+				}
 			})
+
+			// Resize vBuf once to fit all data
+			totalSize := len(codecParams) + nalusSize
+			vBuf.Resize(totalSize)
+
+			// Copy codec params and NALUs into vBuf
+			offset := copy(vBuf.Data(), codecParams)
+			for _, nalu := range nalus {
+				offset += copy(vBuf.Data()[offset:], []byte{0, 0, 0, 1})
+				offset += copy(vBuf.Data()[offset:], nalu)
+			}
 
 			sample := media.Sample{
 				Data:               vBuf.Data(),
@@ -108,20 +130,6 @@ func writeVideoPacketsToPeer(done chan struct{},
 				PacketTimestamp:    uint32(pkt.Timestamp()), //nolint:gosec
 				PrevDroppedPackets: 0,
 				Metadata:           nil,
-			}
-
-			if pkt.IsKeyFrame() {
-				sample.Data = appendCodecParameters(pkt.CodecParameters())
-			}
-
-			var nalus [][]byte
-			pkt.View(func(data buffer.PooledBuffer) {
-				vBuf.Resize(data.Len())
-				copy(vBuf.Data(), data.Data())
-				nalus, _ = nal.SplitNALUs(data.Data())
-			})
-			for _, nalu := range nalus {
-				sample.Data = append(sample.Data, append([]byte{0, 0, 0, 1}, nalu...)...)
 			}
 
 			if err := vt.WriteSample(sample); err != nil {

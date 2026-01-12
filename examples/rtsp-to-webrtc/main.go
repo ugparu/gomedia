@@ -3,8 +3,8 @@ package main
 import (
 	"log"
 	"net/http"
-	"os"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -24,6 +24,22 @@ type SDPResponse struct {
 	Err error  `json:"err"`
 }
 
+type URLRequest struct {
+	URL string `json:"url" binding:"required"`
+}
+
+type URLResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}
+
+var (
+	rdr        gomedia.Reader
+	urlMutex   sync.Mutex
+	currentURL string
+	webrtcWrt  gomedia.WebRTCStreamer
+)
+
 func main() {
 	go func() {
 		for {
@@ -33,24 +49,25 @@ func main() {
 		}
 	}()
 
-	rdr := reader.NewRTSP(100)
+	// Initialize reader once at startup
+	rdr = reader.NewRTSP(100)
 	rdr.Read()
 	defer rdr.Close()
-	rdr.AddURL() <- os.Getenv("RTSP_URL")
 
-	webrtc.Init(2000, 2100, []string{"192.168.0.182"}, []pion.ICEServer{
+	webrtc.Init(2000, 2100, []string{"192.168.1.156"}, []pion.ICEServer{
 		{
 			URLs: []string{"stun:stun.l.google.com:19302"},
 		},
 	})
 
-	webrtc := webrtc.New(100, time.Second*6)
-	webrtc.Write()
-	defer webrtc.Close()
+	webrtcWrt = webrtc.New(100, time.Second*6)
+	webrtcWrt.Write()
+	defer webrtcWrt.Close()
 
+	// Forward packets from reader to webrtc
 	go func() {
 		for pkt := range rdr.Packets() {
-			webrtc.Packets() <- pkt
+			webrtcWrt.Packets() <- pkt
 		}
 	}()
 
@@ -59,6 +76,37 @@ func main() {
 	// Serve the index.html file at root path
 	r.StaticFile("/", "./index.html")
 	r.StaticFile("/index.html", "./index.html")
+
+	r.POST("/url", func(c *gin.Context) {
+		var req URLRequest
+
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, URLResponse{
+				Success: false,
+				Message: err.Error(),
+			})
+			return
+		}
+
+		urlMutex.Lock()
+		defer urlMutex.Unlock()
+
+		// Remove existing URL if any
+		if currentURL != "" {
+			logger.Infof(nil, "Removing existing URL: %s", currentURL)
+			rdr.RemoveURL() <- currentURL
+			webrtcWrt.RemoveSource() <- currentURL
+		}
+
+		// Add new URL
+		currentURL = req.URL
+		rdr.AddURL() <- currentURL
+
+		c.JSON(http.StatusOK, URLResponse{
+			Success: true,
+			Message: "RTSP stream initialized",
+		})
+	})
 
 	r.POST("/sdp", func(c *gin.Context) {
 		var req SDPRequest
@@ -71,13 +119,25 @@ func main() {
 			return
 		}
 
-		webrtc.Peers() <- gomedia.WebRTCPeer{
+		urlMutex.Lock()
+		hasURL := currentURL != ""
+		urlMutex.Unlock()
+
+		if !hasURL {
+			c.JSON(http.StatusBadRequest, SDPResponse{
+				SDP: "",
+				Err: nil,
+			})
+			return
+		}
+
+		webrtcWrt.Peers() <- gomedia.WebRTCPeer{
 			SDP:   req.SDP,
 			Delay: 0,
 			Err:   nil,
 		}
 
-		resp := <-webrtc.Peers()
+		resp := <-webrtcWrt.Peers()
 		if resp.Err != nil {
 			c.JSON(http.StatusInternalServerError, SDPResponse{
 				SDP: "",

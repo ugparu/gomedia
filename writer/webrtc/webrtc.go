@@ -37,6 +37,7 @@ func New(chanSize int, targetDuration time.Duration) gomedia.WebRTCStreamer {
 		streams: &sortedStreams{
 			sortedURLs:     []string{},
 			streams:        map[string]*stream{},
+			pendingPeers:   map[*peerTrack]bool{},
 			targetDuration: targetDuration,
 		},
 		peersChan:        make(chan gomedia.WebRTCPeer),
@@ -392,7 +393,6 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 // removePeer removes a peer from all existing and to-be-added peers, removes associated tracks,
 // closes the DataChannel, and closes the PeerConnection.
 func (element *webRTCWriter) removePeer(peer *peerTrack) (err error) {
-
 	for _, peers := range element.streams.streams {
 		logger.Debug(element, "Removing peer track from stream")
 		delete(peers.tracks, peer)

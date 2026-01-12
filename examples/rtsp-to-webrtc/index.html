@@ -3,87 +3,393 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebRTC Demo</title>
+    <title>WebRTC RTSP Viewer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --accent-cyan: #58a6ff;
+            --accent-green: #3fb950;
+            --accent-orange: #d29922;
+            --accent-red: #f85149;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --border-color: #30363d;
+            --glow-cyan: rgba(88, 166, 255, 0.15);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
         body {
-            font-family: Arial, sans-serif;
-            max-width: 800px;
+            font-family: 'Outfit', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            background-image: 
+                radial-gradient(ellipse at 20% 0%, var(--glow-cyan) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 100%, rgba(63, 185, 80, 0.08) 0%, transparent 50%);
+        }
+
+        .app-container {
+            max-width: 960px;
             margin: 0 auto;
-            padding: 20px;
-            background-color: #f5f5f5;
+            padding: 40px 24px;
         }
-        h1 {
-            color: #333;
+
+        header {
             text-align: center;
+            margin-bottom: 40px;
         }
-        .container {
+
+        h1 {
+            font-size: 2rem;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-green));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            margin-top: 8px;
+        }
+
+        .card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+
+        .url-section {
             display: flex;
-            flex-direction: column;
-            gap: 20px;
+            gap: 12px;
+            align-items: stretch;
         }
-        .video-container {
-            background-color: #000;
+
+        .input-wrapper {
+            flex: 1;
+            position: relative;
+        }
+
+        .input-wrapper::before {
+            content: 'rtsp://';
+            position: absolute;
+            left: 16px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-secondary);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .url-input {
+            width: 100%;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 14px 16px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.9rem;
+            color: var(--text-primary);
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .url-input::placeholder {
+            color: var(--text-secondary);
+        }
+
+        .url-input:focus {
+            outline: none;
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 0 3px var(--glow-cyan);
+        }
+
+        .btn {
+            font-family: 'Outfit', sans-serif;
+            font-size: 0.9rem;
+            font-weight: 500;
+            padding: 14px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-cyan), #1f6feb);
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(88, 166, 255, 0.3);
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, var(--accent-green), #238636);
+            color: white;
+        }
+
+        .btn-success:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(63, 185, 80, 0.3);
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, var(--accent-red), #da3633);
+            color: white;
+        }
+
+        .btn-danger:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(248, 81, 73, 0.3);
+        }
+
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .video-wrapper {
+            position: relative;
+            background: #000;
             border-radius: 8px;
             overflow: hidden;
+            aspect-ratio: 16 / 9;
         }
+
+        .video-wrapper::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: 
+                linear-gradient(90deg, transparent 50%, rgba(255,255,255,0.02) 50%),
+                linear-gradient(0deg, transparent 50%, rgba(255,255,255,0.02) 50%);
+            background-size: 4px 4px;
+            pointer-events: none;
+            z-index: 1;
+            opacity: 0.5;
+        }
+
         video {
             width: 100%;
-            height: auto;
-            display: block;
+            height: 100%;
+            object-fit: contain;
         }
+
+        .video-placeholder {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-secondary);
+            gap: 12px;
+        }
+
+        .video-placeholder svg {
+            width: 48px;
+            height: 48px;
+            opacity: 0.5;
+        }
+
+        .video-placeholder.hidden {
+            display: none;
+        }
+
         .controls {
             display: flex;
-            gap: 10px;
+            gap: 12px;
             justify-content: center;
+            margin-top: 20px;
         }
-        button {
-            padding: 10px 15px;
-            background-color: #4CAF50;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 16px;
-        }
-        button:hover {
-            background-color: #45a049;
-        }
-        button:disabled {
-            background-color: #cccccc;
-            cursor: not-allowed;
-        }
-        .status {
-            text-align: center;
-            padding: 10px;
-            background-color: #fff;
+
+        .status-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px;
+            background: var(--bg-tertiary);
             border-radius: 8px;
+            margin-top: 20px;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--text-secondary);
+            transition: background 0.3s;
+        }
+
+        .status-dot.connecting {
+            background: var(--accent-orange);
+            animation: pulse 1.5s infinite;
+        }
+
+        .status-dot.connected {
+            background: var(--accent-green);
+            box-shadow: 0 0 8px var(--accent-green);
+        }
+
+        .status-dot.error {
+            background: var(--accent-red);
+        }
+
+        .status-dot.ready {
+            background: var(--accent-cyan);
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .status-text {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        .status-text span {
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+
+        .url-badge {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            background: var(--bg-secondary);
+            padding: 6px 12px;
+            border-radius: 6px;
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .icon {
+            width: 18px;
+            height: 18px;
+        }
+
+        @media (max-width: 640px) {
+            .url-section {
+                flex-direction: column;
+            }
+            
+            .status-bar {
+                flex-direction: column;
+                gap: 12px;
+            }
+
+            .url-badge {
+                max-width: 100%;
+            }
         }
     </style>
 </head>
 <body>
-    <h1>WebRTC Demo</h1>
-    
-    <div class="container">
-        <div class="controls">
-            <button id="startButton">Start</button>
-            <button id="stopButton" disabled>Stop</button>
+    <div class="app-container">
+        <header>
+            <h1>RTSP WebRTC Viewer</h1>
+            <p class="subtitle">Stream RTSP sources via WebRTC</p>
+        </header>
+
+        <div class="card">
+            <div class="url-section">
+                <div class="input-wrapper">
+                    <input 
+                        type="text" 
+                        id="urlInput" 
+                        class="url-input" 
+                        placeholder="rtsp://username:password@192.168.1.100:554/stream"
+                    >
+                </div>
+                <button id="connectUrlBtn" class="btn btn-primary">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M13.8 12H3"/>
+                    </svg>
+                    Connect
+                </button>
+            </div>
         </div>
-        
-        <div class="video-container">
-            <video id="videoElement" autoplay playsinline controls muted></video>
-        </div>
-        
-        <div class="status">
-            <p>Status: <span id="connectionStatus">Disconnected</span></p>
+
+        <div class="card">
+            <div class="video-wrapper">
+                <div id="videoPlaceholder" class="video-placeholder">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <rect x="2" y="4" width="20" height="16" rx="2"/>
+                        <path d="M10 9l5 3-5 3V9z"/>
+                    </svg>
+                    <span>Enter RTSP URL to begin</span>
+                </div>
+                <video id="videoElement" autoplay playsinline controls muted></video>
+            </div>
+
+            <div class="controls">
+                <button id="startButton" class="btn btn-success" disabled>
+                    <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M8 5v14l11-7z"/>
+                    </svg>
+                    Start Stream
+                </button>
+                <button id="stopButton" class="btn btn-danger" disabled>
+                    <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
+                        <rect x="6" y="6" width="12" height="12" rx="1"/>
+                    </svg>
+                    Stop
+                </button>
+            </div>
+
+            <div class="status-bar">
+                <div class="status-indicator">
+                    <div id="statusDot" class="status-dot"></div>
+                    <span class="status-text">Status: <span id="connectionStatus">Not Connected</span></span>
+                </div>
+                <div id="urlBadge" class="url-badge" style="display: none;"></div>
+            </div>
         </div>
     </div>
 
     <script>
         // DOM elements
         const videoElement = document.getElementById('videoElement');
+        const videoPlaceholder = document.getElementById('videoPlaceholder');
         const startButton = document.getElementById('startButton');
         const stopButton = document.getElementById('stopButton');
         const connectionStatus = document.getElementById('connectionStatus');
+        const statusDot = document.getElementById('statusDot');
+        const urlInput = document.getElementById('urlInput');
+        const connectUrlBtn = document.getElementById('connectUrlBtn');
+        const urlBadge = document.getElementById('urlBadge');
         
         // WebRTC variables
         let peerConnection = null;
@@ -91,22 +397,86 @@
         let sdpSent = false;
         let stream = null;
         let isConnecting = false;
-        
+        let urlConnected = false;
+
+        // Update status display
+        function updateStatus(status, state) {
+            connectionStatus.textContent = status;
+            statusDot.className = 'status-dot ' + state;
+        }
+
+        // Connect RTSP URL (supports hot-switching while streaming)
+        async function connectUrl() {
+            const url = urlInput.value.trim();
+            if (!url) {
+                alert('Please enter an RTSP URL');
+                return;
+            }
+
+            connectUrlBtn.disabled = true;
+            const wasStreaming = peerConnection && 
+                (peerConnection.iceConnectionState === 'connected' || 
+                 peerConnection.iceConnectionState === 'completed');
+            
+            if (!wasStreaming) {
+                updateStatus('Initializing stream...', 'connecting');
+            }
+
+            try {
+                const response = await fetch('/url', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: url })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok || !data.success) {
+                    throw new Error(data.message || 'Failed to connect');
+                }
+
+                urlConnected = true;
+                startButton.disabled = false;
+                
+                // Update URL badge
+                urlBadge.textContent = url;
+                urlBadge.style.display = 'block';
+                
+                if (wasStreaming) {
+                    // Keep connected status during hot-switch
+                    updateStatus('Connected', 'connected');
+                } else {
+                    updateStatus('Ready to stream', 'ready');
+                    videoPlaceholder.querySelector('span').textContent = 'Click Start Stream to begin';
+                }
+
+            } catch (error) {
+                console.error('Error connecting URL:', error);
+                if (!wasStreaming) {
+                    updateStatus('Connection failed', 'error');
+                }
+            } finally {
+                connectUrlBtn.disabled = false;
+            }
+        }
+
         // Start streaming function
         async function startStreaming() {
+            if (!urlConnected) {
+                alert('Please connect an RTSP URL first');
+                return;
+            }
+
             try {
-                // Prevent multiple simultaneous connections
                 if (isConnecting) return;
                 isConnecting = true;
                 
-                // Clean up any existing connection first
                 await cleanupConnection();
                 
-                connectionStatus.textContent = 'Connecting...';
+                updateStatus('Connecting...', 'connecting');
                 startButton.disabled = true;
                 sdpSent = false;
                 
-                // Create peer connection
                 const configuration = {
                     iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
                 };
@@ -114,7 +484,6 @@
                 peerConnection = new RTCPeerConnection(configuration);
                 dataChannel = peerConnection.createDataChannel('control');
                 
-                // Set up event handlers
                 peerConnection.onicecandidate = event => {
                     if (event.candidate === null && !sdpSent) {
                         sdpSent = true;
@@ -128,25 +497,26 @@
                     }
                     stream.addTrack(event.track);
                     videoElement.srcObject = stream;
+                    videoPlaceholder.classList.add('hidden');
                 };
                 
                 peerConnection.oniceconnectionstatechange = () => {
-                    connectionStatus.textContent = peerConnection.iceConnectionState;
+                    const state = peerConnection.iceConnectionState;
                     
-                    if (peerConnection.iceConnectionState === 'connected' || 
-                        peerConnection.iceConnectionState === 'completed') {
+                    if (state === 'connected' || state === 'completed') {
+                        updateStatus('Connected', 'connected');
                         stopButton.disabled = false;
                         isConnecting = false;
-                    } else if (peerConnection.iceConnectionState === 'failed' || 
-                               peerConnection.iceConnectionState === 'disconnected' || 
-                               peerConnection.iceConnectionState === 'closed') {
+                    } else if (state === 'checking') {
+                        updateStatus('Establishing connection...', 'connecting');
+                    } else if (state === 'failed' || state === 'disconnected' || state === 'closed') {
+                        updateStatus(state.charAt(0).toUpperCase() + state.slice(1), 'error');
                         stopButton.disabled = true;
                         startButton.disabled = false;
                         isConnecting = false;
                     }
                 };
                 
-                // Create offer
                 const offer = await peerConnection.createOffer({
                     offerToReceiveAudio: true,
                     offerToReceiveVideo: true
@@ -154,7 +524,6 @@
                 
                 await peerConnection.setLocalDescription(offer);
                 
-                // Fallback SDP send after timeout
                 setTimeout(() => {
                     if (peerConnection && !sdpSent) {
                         sdpSent = true;
@@ -164,7 +533,7 @@
                 
             } catch (error) {
                 console.error('Error starting stream:', error);
-                connectionStatus.textContent = 'Error';
+                updateStatus('Error', 'error');
                 startButton.disabled = false;
                 isConnecting = false;
             }
@@ -189,7 +558,6 @@
                 if (data.err) throw new Error(data.err);
                 if (!data.sdp) throw new Error('Empty SDP response');
                 
-                // Decode and set remote description
                 const decodedSdp = atob(data.sdp);
                 
                 await peerConnection.setRemoteDescription(
@@ -198,15 +566,14 @@
                 
             } catch (error) {
                 console.error('Error sending SDP:', error);
-                connectionStatus.textContent = 'Error';
+                updateStatus('Error', 'error');
                 startButton.disabled = false;
                 isConnecting = false;
             }
         }
         
-        // Comprehensive cleanup function
+        // Cleanup function
         async function cleanupConnection() {
-            // Stop all media tracks first
             if (stream) {
                 stream.getTracks().forEach(track => {
                     track.stop();
@@ -215,43 +582,33 @@
                 stream = null;
             }
             
-            // Clear video element
             if (videoElement.srcObject) {
                 videoElement.srcObject = null;
             }
             
-            // Close data channel
             if (dataChannel) {
                 dataChannel.close();
                 dataChannel = null;
             }
             
-            // Properly close peer connection
             if (peerConnection) {
-                // Remove all event listeners by setting them to null
                 peerConnection.onicecandidate = null;
                 peerConnection.ontrack = null;
                 peerConnection.oniceconnectionstatechange = null;
                 peerConnection.ondatachannel = null;
                 peerConnection.onconnectionstatechange = null;
                 
-                // Close all transceivers
                 peerConnection.getTransceivers().forEach(transceiver => {
                     if (transceiver.stop) {
                         transceiver.stop();
                     }
                 });
                 
-                // Close the connection
                 peerConnection.close();
-                
-                // Wait a bit for cleanup to complete
                 await new Promise(resolve => setTimeout(resolve, 100));
-                
                 peerConnection = null;
             }
             
-            // Reset flags
             sdpSent = false;
             isConnecting = false;
         }
@@ -259,10 +616,20 @@
         // Stop the stream
         async function stopStream() {
             await cleanupConnection();
-            connectionStatus.textContent = 'Disconnected';
+            updateStatus('Stopped', 'ready');
+            videoPlaceholder.classList.remove('hidden');
+            videoPlaceholder.querySelector('span').textContent = 'Click Start Stream to begin';
         }
         
         // Event listeners
+        connectUrlBtn.addEventListener('click', connectUrl);
+        
+        urlInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                connectUrl();
+            }
+        });
+
         startButton.addEventListener('click', () => startStreaming());
         
         stopButton.addEventListener('click', async () => {

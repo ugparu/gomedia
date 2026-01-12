@@ -23,8 +23,9 @@ type stream struct {
 
 // sortedStreams is a map of sorted stream URLs based on their sizes.
 type sortedStreams struct {
-	sortedURLs     []string           // Sorted list of stream URLs based on their sizes.
-	streams        map[string]*stream // Map of streams indexed by their URLs.
+	sortedURLs     []string            // Sorted list of stream URLs based on their sizes.
+	streams        map[string]*stream  // Map of streams indexed by their URLs.
+	pendingPeers   map[*peerTrack]bool // Peers waiting for a stream (when last stream was removed)
 	targetDuration time.Duration
 }
 
@@ -129,6 +130,14 @@ func (ss *sortedStreams) Add(url string, newCodecPar gomedia.CodecParameters) {
 			ss.sortedURLs[i], ss.sortedURLs[i-1] = ss.sortedURLs[i-1], ss.sortedURLs[i]
 		}
 	}
+
+	// Move any pending peers to this new stream
+	if len(ss.pendingPeers) > 0 {
+		for peer, seeded := range ss.pendingPeers {
+			ss.streams[url].tracks[peer] = seeded
+		}
+		ss.pendingPeers = nil // Clear pending peers after moving
+	}
 }
 
 // Remove removes a stream URL from the sortedStreams.
@@ -156,8 +165,12 @@ func (ss *sortedStreams) Remove(removeURL string) {
 	}
 
 	if changeURL == "" {
-		for conn := range str.tracks {
-			conn.PeerConnection.Close()
+		// Instead of closing peers, save them to pending so they can be moved to the next stream
+		if ss.pendingPeers == nil {
+			ss.pendingPeers = make(map[*peerTrack]bool)
+		}
+		for peer := range str.tracks {
+			ss.pendingPeers[peer] = false // false = not seeded yet
 		}
 	} else {
 		for track := range str.tracks {
@@ -184,6 +197,11 @@ func (ss *sortedStreams) Insert(pt *peerTrack) (err error) {
 }
 
 func (ss *sortedStreams) Move(pu *peerURL) (err error) {
+	targetStream := ss.streams[pu.URL]
+	if targetStream == nil {
+		return errors.New("target stream does not exist: " + pu.URL)
+	}
+
 	ss.streams[pu.URL].toAdd[pu.peerTrack] = pu
 	return nil
 }
