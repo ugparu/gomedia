@@ -218,10 +218,11 @@ const (
 
 // FileInfo holds information about a recorded file.
 type FileInfo struct {
-	Name  string    // File name
-	Start time.Time // First packet real time
-	Stop  time.Time // Last packet real time
-	Size  int       // Size in bytes
+	Name       string    // File name
+	Start      time.Time // First packet real time
+	Stop       time.Time // Last packet real time
+	Size       int       // Size in bytes
+	Resolution string
 }
 
 type Segmenter interface {

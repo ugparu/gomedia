@@ -54,7 +54,7 @@ func main() {
 	rdr.Read()
 	defer rdr.Close()
 
-	webrtc.Init(2000, 2100, []string{"192.168.1.156"}, []pion.ICEServer{
+	webrtc.Init(2000, 2100, []string{"10.0.112.138"}, []pion.ICEServer{
 		{
 			URLs: []string{"stun:stun.l.google.com:19302"},
 		},

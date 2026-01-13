@@ -92,6 +92,14 @@ func (rb *ringBuffer) drain() []gomedia.Packet {
 	return pkts
 }
 
+// streamState holds per-URL stream state
+type streamState struct {
+	activeFile   *activeFile                 // currently recording file for this URL
+	ringBuf      *ringBuffer                 // pre-buffer for event mode
+	seenKeyframe bool                        // track first keyframe
+	codecPar     gomedia.CodecParametersPair // codec parameters for this URL
+}
+
 type segmenter struct {
 	lifecycle.AsyncManager[*segmenter]
 	recordMode        gomedia.RecordMode
@@ -105,17 +113,66 @@ type segmenter struct {
 	lastEvent         time.Time
 	eventSaved        bool
 	dest              string
-	codecPar          gomedia.CodecParametersPair
 	rmSrcCh           chan string
+	addSrcCh          chan string
 
-	// Active file being written (for Always mode or after event triggered)
-	activeFile *activeFile
+	// Per-URL stream state management
+	sources   []string                // ordered list of registered URLs
+	streams   map[string]*streamState // map of URL to stream state
+	streamsMu sync.RWMutex            // protect concurrent access
+}
 
-	// Ring buffer for Event mode pre-buffering
-	ringBuf *ringBuffer
+// hasSource checks if a source URL is registered in the sources slice
+func (s *segmenter) hasSource(url string) bool {
+	for _, src := range s.sources {
+		if src == url {
+			return true
+		}
+	}
+	return false
+}
 
-	// Track if we've received a keyframe yet
-	seenKeyframe bool
+// getSourceIndex returns the index of a URL in the sources slice, or -1 if not found
+func (s *segmenter) getSourceIndex(url string) int {
+	for i, src := range s.sources {
+		if src == url {
+			return i
+		}
+	}
+	return -1
+}
+
+// addSource adds a new source URL to the sources slice
+// The stream will be created when first packet with codec parameters arrives
+func (s *segmenter) addSource(url string) {
+	if s.hasSource(url) {
+		logger.Infof(s, "Source %s already exists, skipping", url)
+		return
+	}
+
+	s.sources = append(s.sources, url)
+	logger.Infof(s, "Added new source %s", url)
+}
+
+// removeSource removes a source URL from the sources slice and cleans up resources
+func (s *segmenter) removeSource(url string) {
+	// Close active file for this stream if it exists
+	if stream, exists := s.streams[url]; exists {
+		if stream.activeFile != nil {
+			_ = s.closeActiveFile(stream, s.Done())
+		}
+		stream.ringBuf.clear()
+		delete(s.streams, url)
+	}
+
+	// Remove from sources slice
+	for i, src := range s.sources {
+		if src == url {
+			s.sources = append(s.sources[:i], s.sources[i+1:]...)
+			logger.Infof(s, "Removed source %s", url)
+			break
+		}
+	}
 }
 
 // New creates a new instance of the archiver with the specified parameters.
@@ -133,11 +190,11 @@ func New(dest string, segSize time.Duration, recordMode gomedia.RecordMode, chan
 		lastEvent:         time.Now(),
 		eventSaved:        true,
 		dest:              dest,
-		codecPar:          gomedia.CodecParametersPair{URL: "", AudioCodecParameters: nil, VideoCodecParameters: nil},
 		rmSrcCh:           make(chan string, chanSize),
-		activeFile:        nil,
-		ringBuf:           newRingBuffer(segSize / 2), //nolint:mnd
-		seenKeyframe:      false,
+		addSrcCh:          make(chan string, chanSize),
+		sources:           []string{},
+		streams:           make(map[string]*streamState),
+		streamsMu:         sync.RWMutex{},
 	}
 	newArch.AsyncManager = lifecycle.NewFailSafeAsyncManager[*segmenter](newArch)
 	return newArch
@@ -164,14 +221,20 @@ func createFile(path string) (*os.File, error) {
 	return os.Create(path)
 }
 
-// openNewFile opens a new MP4 file for writing
-func (s *segmenter) openNewFile(startTime time.Time) error {
-	if s.codecPar.VideoCodecParameters == nil {
+// openNewFile opens a new MP4 file for writing for the specified URL stream
+func (s *segmenter) openNewFile(url string, stream *streamState, startTime time.Time) error {
+	if stream.codecPar.VideoCodecParameters == nil {
 		return errors.New("cannot open file with nil video codec parameters")
 	}
 
+	// Get stream index for filename
+	streamIdx := s.getSourceIndex(url)
+	if streamIdx == -1 {
+		return errors.New("URL not found in sources")
+	}
+
 	folder := fmt.Sprintf("%d/%d/%d/", startTime.Year(), startTime.Month(), startTime.Day())
-	name := startTime.Format("2006-01-02T15:04:05") + ".mp4"
+	name := fmt.Sprintf("%d_%s.mp4", streamIdx, startTime.Format("2006-01-02T15:04:05"))
 	filename := fmt.Sprintf("%s%s%s", s.dest, folder, name)
 
 	f, err := createFile(filename)
@@ -180,12 +243,12 @@ func (s *segmenter) openNewFile(startTime time.Time) error {
 	}
 
 	muxer := mp4.NewMuxer(f)
-	if err = muxer.Mux(s.codecPar); err != nil {
+	if err = muxer.Mux(stream.codecPar); err != nil {
 		_ = f.Close()
 		return err
 	}
 
-	s.activeFile = &activeFile{
+	stream.activeFile = &activeFile{
 		file:      f,
 		muxer:     muxer,
 		startTime: startTime,
@@ -198,14 +261,14 @@ func (s *segmenter) openNewFile(startTime time.Time) error {
 	return nil
 }
 
-// closeActiveFile closes the current file and emits file info
-func (s *segmenter) closeActiveFile(stopChan <-chan struct{}) error {
-	if s.activeFile == nil {
+// closeActiveFile closes the active file for a specific stream and emits file info
+func (s *segmenter) closeActiveFile(stream *streamState, stopChan <-chan struct{}) error {
+	if stream.activeFile == nil {
 		return nil
 	}
 
-	af := s.activeFile
-	s.activeFile = nil
+	af := stream.activeFile
+	stream.activeFile = nil
 
 	if err := af.muxer.WriteTrailer(); err != nil {
 		_ = af.file.Close()
@@ -251,13 +314,13 @@ func (s *segmenter) closeActiveFile(stopChan <-chan struct{}) error {
 	return nil
 }
 
-// writePacketToFile writes a packet directly to the active file
-func (s *segmenter) writePacketToFile(pkt gomedia.Packet) error {
-	if s.activeFile == nil {
+// writePacketToFile writes a packet directly to the active file of a stream
+func (s *segmenter) writePacketToFile(stream *streamState, pkt gomedia.Packet) error {
+	if stream.activeFile == nil {
 		return errors.New("no active file")
 	}
 
-	af := s.activeFile
+	af := stream.activeFile
 
 	// Get the pre-last packet (the one that will be written)
 	preLastPkt := af.muxer.GetPreLastPacket(pkt.StreamIndex())
@@ -310,26 +373,36 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 
 	case recordMode := <-s.recordModeCh:
 		if recordMode != s.recordMode {
-			// Close current file and clear buffers
-			if s.activeFile != nil {
-				err = s.closeActiveFile(stopCh)
+			// Close all active files and clear all buffers
+			s.streamsMu.Lock()
+			for _, stream := range s.streams {
+				if stream.activeFile != nil {
+					if err = s.closeActiveFile(stream, stopCh); err != nil {
+						s.streamsMu.Unlock()
+						return
+					}
+				}
+				stream.ringBuf.clear()
+				stream.seenKeyframe = false
 			}
-			s.ringBuf.clear()
+			s.streamsMu.Unlock()
+
 			s.recordMode = recordMode
-			s.seenKeyframe = false
 			if s.recordCurStatus {
 				s.recordCurStatus = false
 				s.recordCurStatusCh <- false
 			}
 		}
 
-	case <-s.rmSrcCh:
-		// Handle source removal - close current file
-		if s.activeFile != nil {
-			err = s.closeActiveFile(stopCh)
-		}
-		s.ringBuf.clear()
-		s.seenKeyframe = false
+	case addURL := <-s.addSrcCh:
+		s.streamsMu.Lock()
+		s.addSource(addURL)
+		s.streamsMu.Unlock()
+
+	case rmURL := <-s.rmSrcCh:
+		s.streamsMu.Lock()
+		s.removeSource(rmURL)
+		s.streamsMu.Unlock()
 
 	case <-s.eventCh:
 		s.eventSaved = false
@@ -345,17 +418,46 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 			return &utils.NilPacketError{}
 		}
 
+		// Extract URL from packet
+		url := inpPkt.URL()
+
+		s.streamsMu.Lock()
+		defer s.streamsMu.Unlock()
+
+		// Check if URL is registered
+		if !s.hasSource(url) {
+			inpPkt.Close()
+			return nil // Skip packets from unregistered sources
+		}
+
+		// Get or create stream state for this URL
+		stream, exists := s.streams[url]
+		if !exists {
+			// Create new stream state
+			stream = &streamState{
+				activeFile:   nil,
+				ringBuf:      newRingBuffer(s.targetDuration / 2), //nolint:mnd
+				seenKeyframe: false,
+				codecPar:     gomedia.CodecParametersPair{URL: url, AudioCodecParameters: nil, VideoCodecParameters: nil},
+			}
+			s.streams[url] = stream
+		}
+
 		// Update codec parameters if changed
-		if vPkt, ok := inpPkt.(gomedia.VideoPacket); ok && vPkt.CodecParameters() != s.codecPar.VideoCodecParameters {
-			s.codecPar.VideoCodecParameters = vPkt.CodecParameters()
-			if err = s.closeActiveFile(s.Done()); err != nil {
-				return
+		if vPkt, ok := inpPkt.(gomedia.VideoPacket); ok {
+			if vPkt.CodecParameters() != stream.codecPar.VideoCodecParameters {
+				stream.codecPar.VideoCodecParameters = vPkt.CodecParameters()
+				if err = s.closeActiveFile(stream, s.Done()); err != nil {
+					return
+				}
 			}
 		}
-		if aPkt, ok := inpPkt.(gomedia.AudioPacket); ok && aPkt.CodecParameters() != s.codecPar.AudioCodecParameters {
-			s.codecPar.AudioCodecParameters = aPkt.CodecParameters()
-			if err = s.closeActiveFile(s.Done()); err != nil {
-				return
+		if aPkt, ok := inpPkt.(gomedia.AudioPacket); ok {
+			if aPkt.CodecParameters() != stream.codecPar.AudioCodecParameters {
+				stream.codecPar.AudioCodecParameters = aPkt.CodecParameters()
+				if err = s.closeActiveFile(stream, s.Done()); err != nil {
+					return
+				}
 			}
 		}
 
@@ -363,19 +465,20 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 		vPkt, isVideo := inpPkt.(gomedia.VideoPacket)
 		isKeyframe := isVideo && vPkt.IsKeyFrame()
 
-		if !s.seenKeyframe && !isKeyframe {
+		if !stream.seenKeyframe && !isKeyframe {
+			inpPkt.Close()
 			return nil
 		}
 		if isKeyframe {
-			s.seenKeyframe = true
+			stream.seenKeyframe = true
 		}
 
 		// Handle based on record mode
 		switch s.recordMode {
 		case gomedia.Always:
-			err = s.handleAlwaysMode(stopCh, inpPkt, isKeyframe)
+			err = s.handleAlwaysMode(url, stream, stopCh, inpPkt, isKeyframe)
 		case gomedia.Event:
-			err = s.handleEventMode(stopCh, inpPkt, isKeyframe)
+			err = s.handleEventMode(url, stream, stopCh, inpPkt, isKeyframe)
 		case gomedia.Never:
 			// Should not reach here due to earlier check
 		}
@@ -383,18 +486,18 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 	return
 }
 
-// handleAlwaysMode handles packet processing in Always record mode
-func (s *segmenter) handleAlwaysMode(stopCh <-chan struct{}, pkt gomedia.Packet, isKeyframe bool) error {
+// handleAlwaysMode handles packet processing in Always record mode for a specific stream
+func (s *segmenter) handleAlwaysMode(url string, stream *streamState, stopCh <-chan struct{}, pkt gomedia.Packet, isKeyframe bool) error {
 	// Check if we need to rotate file (on keyframe when duration exceeded)
-	if isKeyframe && s.activeFile != nil && s.activeFile.duration >= s.targetDuration {
-		if err := s.closeActiveFile(stopCh); err != nil {
+	if isKeyframe && stream.activeFile != nil && stream.activeFile.duration >= s.targetDuration {
+		if err := s.closeActiveFile(stream, stopCh); err != nil {
 			return err
 		}
 	}
 
 	// Open new file if needed (on keyframe)
-	if s.activeFile == nil && isKeyframe {
-		if err := s.openNewFile(pkt.StartTime()); err != nil {
+	if stream.activeFile == nil && isKeyframe {
+		if err := s.openNewFile(url, stream, pkt.StartTime()); err != nil {
 			return err
 		}
 		// Update recording status
@@ -405,67 +508,79 @@ func (s *segmenter) handleAlwaysMode(stopCh <-chan struct{}, pkt gomedia.Packet,
 	}
 
 	// Write packet if we have an active file
-	if s.activeFile != nil {
-		return s.writePacketToFile(pkt)
+	if stream.activeFile != nil {
+		return s.writePacketToFile(stream, pkt)
 	}
 
 	return nil
 }
 
-// handleEventMode handles packet processing in Event record mode
-func (s *segmenter) handleEventMode(stopCh <-chan struct{}, pkt gomedia.Packet, isKeyframe bool) error {
+// handleEventMode handles packet processing in Event record mode for a specific stream
+func (s *segmenter) handleEventMode(url string, stream *streamState, stopCh <-chan struct{}, pkt gomedia.Packet, isKeyframe bool) error {
 	// If we have an active file, handle writing or closing
-	if s.activeFile != nil {
-		return s.handleEventModeActiveFile(stopCh, pkt, isKeyframe)
+	if stream.activeFile != nil {
+		return s.handleEventModeActiveFile(url, stream, stopCh, pkt, isKeyframe)
 	}
 
 	// Buffer mode: accumulate packets in ring buffer
-	s.ringBuf.add(pkt)
+	stream.ringBuf.add(pkt)
 
 	// Trim old packets on keyframe
 	if isKeyframe {
-		s.ringBuf.trim()
+		stream.ringBuf.trim()
 	}
 
 	// Check if event was triggered and we should start recording
 	if !s.eventSaved && isKeyframe {
-		return s.startEventRecording()
+		return s.startEventRecording(url, stream)
 	}
 
 	return nil
 }
 
-// handleEventModeActiveFile handles event mode when file is already open
-func (s *segmenter) handleEventModeActiveFile(stopCh <-chan struct{}, pkt gomedia.Packet, isKeyframe bool) error {
+// handleEventModeActiveFile handles event mode when file is already open for a specific stream
+func (s *segmenter) handleEventModeActiveFile(url string, stream *streamState, stopCh <-chan struct{}, pkt gomedia.Packet, isKeyframe bool) error {
 	// Check if we should close the file (event saved and enough time passed)
 	shouldClose := isKeyframe && s.eventSaved &&
-		(time.Since(s.lastEvent) >= s.targetDuration/2 || s.activeFile.duration >= time.Minute) //nolint:mnd
+		(time.Since(s.lastEvent) >= s.targetDuration/2 || stream.activeFile.duration >= time.Minute) //nolint:mnd
 
 	if shouldClose {
-		if err := s.closeActiveFile(stopCh); err != nil {
+		if err := s.closeActiveFile(stream, stopCh); err != nil {
 			return err
 		}
-		s.recordCurStatus = false
-		s.recordCurStatusCh <- false
+
+		// Check if any other stream is still recording
+		hasActiveFile := false
+		for _, st := range s.streams {
+			if st.activeFile != nil {
+				hasActiveFile = true
+				break
+			}
+		}
+
+		if !hasActiveFile && s.recordCurStatus {
+			s.recordCurStatus = false
+			s.recordCurStatusCh <- false
+		}
 		return nil // Continue to buffer mode in next packet
 	}
 
 	// Check if we need to rotate file (duration exceeded but event still active)
-	if isKeyframe && !s.eventSaved && s.activeFile.duration >= s.targetDuration {
-		if err := s.closeActiveFile(stopCh); err != nil {
+	if isKeyframe && !s.eventSaved && stream.activeFile.duration >= s.targetDuration {
+		if err := s.closeActiveFile(stream, stopCh); err != nil {
 			return err
 		}
-		if err := s.openNewFile(pkt.StartTime()); err != nil {
+		if err := s.openNewFile(url, stream, pkt.StartTime()); err != nil {
 			return err
 		}
 	}
 
-	return s.writePacketToFile(pkt)
+	return s.writePacketToFile(stream, pkt)
 }
 
-// startEventRecording starts recording when event is triggered
-func (s *segmenter) startEventRecording() error {
-	bufferedPkts := s.ringBuf.drain()
+// startEventRecording starts recording when event is triggered for a specific stream
+func (s *segmenter) startEventRecording(url string, stream *streamState) error {
+	bufferedPkts := stream.ringBuf.drain()
 	if len(bufferedPkts) == 0 {
 		return nil
 	}
@@ -473,7 +588,7 @@ func (s *segmenter) startEventRecording() error {
 	// Find first keyframe in buffer to start file
 	startIdx := s.findFirstKeyframe(bufferedPkts)
 
-	if err := s.openNewFile(bufferedPkts[startIdx].StartTime()); err != nil {
+	if err := s.openNewFile(url, stream, bufferedPkts[startIdx].StartTime()); err != nil {
 		return err
 	}
 
@@ -484,7 +599,7 @@ func (s *segmenter) startEventRecording() error {
 
 	// Write buffered packets
 	for i := startIdx; i < len(bufferedPkts); i++ {
-		if err := s.writePacketToFile(bufferedPkts[i]); err != nil {
+		if err := s.writePacketToFile(stream, bufferedPkts[i]); err != nil {
 			return err
 		}
 	}
@@ -512,10 +627,14 @@ func (s *segmenter) Close_() { //nolint: revive
 		close(stopCh)
 	}()
 
-	// Close active file if any
-	if s.activeFile != nil {
-		_ = s.closeActiveFile(stopCh)
+	// Close all active files
+	s.streamsMu.Lock()
+	for _, stream := range s.streams {
+		if stream.activeFile != nil {
+			_ = s.closeActiveFile(stream, stopCh)
+		}
 	}
+	s.streamsMu.Unlock()
 
 	if s.recordCurStatus {
 		s.recordCurStatusCh <- false
@@ -545,7 +664,7 @@ func (s *segmenter) RemoveSource() chan<- string {
 }
 
 func (s *segmenter) AddSource() chan<- string {
-	return nil
+	return s.addSrcCh
 }
 
 func (s *segmenter) Events() chan<- struct{} {

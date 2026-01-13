@@ -91,6 +91,7 @@ func main() {
 	rdr.Read()
 	for _, rtspURL := range rtspURLs {
 		webrtcWr.AddSource() <- rtspURL
+		seg.AddSource() <- rtspURL
 		rdr.AddURL() <- rtspURL
 	}
 
