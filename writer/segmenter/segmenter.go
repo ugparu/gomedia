@@ -283,11 +283,12 @@ func (s *segmenter) closeActiveFile(stream *streamState, stopChan <-chan struct{
 
 	select {
 	case s.outInfoCh <- gomedia.FileInfo{
-		Name:  af.folder + af.name,
-		Start: af.startTime,
-		Stop:  af.startTime.Add(af.duration),
-		Size:  int(fi.Size()),
-		URL:   stream.codecPar.URL,
+		Name:       af.folder + af.name,
+		Start:      af.startTime,
+		Stop:       af.startTime.Add(af.duration),
+		Size:       int(fi.Size()),
+		URL:        stream.codecPar.URL,
+		Resolution: fmt.Sprintf("%dx%d", stream.codecPar.VideoCodecParameters.Width(), stream.codecPar.VideoCodecParameters.Height()),
 	}:
 	case <-stopChan:
 		return err
