@@ -222,7 +222,8 @@ type FileInfo struct {
 	Start      time.Time // First packet real time
 	Stop       time.Time // Last packet real time
 	Size       int       // Size in bytes
-	Resolution string
+	Resolution string    // Resolution of the source stream
+	URL        string    // URL of the source stream
 }
 
 type Segmenter interface {
