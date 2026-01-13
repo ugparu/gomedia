@@ -287,6 +287,7 @@ func (s *segmenter) closeActiveFile(stream *streamState, stopChan <-chan struct{
 		Start: af.startTime,
 		Stop:  af.startTime.Add(af.duration),
 		Size:  int(fi.Size()),
+		URL:   stream.codecPar.URL,
 	}:
 	case <-stopChan:
 		return err
