@@ -226,11 +226,15 @@ func readObjectType(r *bits.Reader) (objectType uint, err error) {
 	if objectType, err = r.ReadBits(5); err != nil {
 		return
 	}
-	if objectType == AotEscape {
+	// Escape value is 31 (0x1f), not AotEscape constant (which is object type 43)
+	const escapeValue = 31
+	if objectType == escapeValue {
 		var i uint
 		if i, err = r.ReadBits(6); err != nil {
 			return
 		}
+		// Extended object type: escape (31) + 6-bit value
+		// Object type = 32 + 6-bit value
 		objectType = 32 + i
 	}
 	return
@@ -238,13 +242,17 @@ func readObjectType(r *bits.Reader) (objectType uint, err error) {
 
 func writeObjectType(w *bits.Writer, objectType uint) (err error) {
 	if objectType >= 32 {
-		if err = w.WriteBits(AotEscape, 5); err != nil {
+		// Extended object type: write escape (31) + 6-bit value (objectType - 32)
+		// Note: escape value is 31 (0x1f), not AotEscape constant (which is object type 43)
+		const escapeValue = 31
+		if err = w.WriteBits(escapeValue, 5); err != nil {
 			return
 		}
 		if err = w.WriteBits(objectType-32, 6); err != nil {
 			return
 		}
 	} else {
+		// Standard object type: write directly as 5-bit value
 		if err = w.WriteBits(objectType, 5); err != nil {
 			return
 		}
@@ -282,22 +290,51 @@ func writeSampleRateIndex(w *bits.Writer, index uint) (err error) {
 
 func ParseMPEG4AudioConfigBytes(data []byte) (config MPEG4AudioConfig, err error) {
 	// Copied from libavcodec/mpeg4audio.c avpriv_mpeg4audio_get_config()
+	// Validate minimum data length before parsing
+	// Minimum: 5 bits (object type) + 4 bits (sample rate) + 4 bits (channel config) = 13 bits = 2 bytes
+	// But if object type is escape (31), we need 5 + 6 = 11 more bits = 3 bytes total
+	// If sample rate is extended (0xf), we need 4 + 24 = 28 more bits = 4 bytes total
+	// So worst case: 5 + 6 + 4 + 24 + 4 = 43 bits = 6 bytes minimum
+	if len(data) == 0 {
+		return config, fmt.Errorf("aacparser: empty MPEG4 audio config data")
+	}
+
 	r := bytes.NewReader(data)
 	br := &bits.Reader{R: r}
+
+	// Read object type (5 bits, or 5+6 if extended)
 	if config.ObjectType, err = readObjectType(br); err != nil {
+		if err == io.EOF {
+			return config, fmt.Errorf("aacparser: insufficient data for object type: %w", err)
+		}
 		return
 	}
+
+	// Read sample rate index (4 bits, or 4+24 if extended)
 	if config.SampleRateIndex, err = readSampleRateIndex(br); err != nil {
+		if err == io.EOF {
+			return config, fmt.Errorf("aacparser: insufficient data for sample rate index: %w", err)
+		}
 		return
 	}
+
+	// Read channel config (4 bits)
 	if config.ChannelConfig, err = br.ReadBits(4); err != nil {
+		if err == io.EOF {
+			return config, fmt.Errorf("aacparser: insufficient data for channel config: %w", err)
+		}
 		return
 	}
+
 	(&config).Complete()
 	return
 }
 
 func WriteMPEG4AudioConfig(w io.Writer, config MPEG4AudioConfig) (err error) {
+	if w == nil {
+		return errors.New("aacparser: writer is nil")
+	}
+
 	bw := &bits.Writer{W: w}
 	if err = writeObjectType(bw, config.ObjectType); err != nil {
 		return
@@ -329,7 +366,10 @@ func WriteMPEG4AudioConfig(w io.Writer, config MPEG4AudioConfig) (err error) {
 		return
 	}
 
-	w.Write([]byte{0x06, 0x80, 0x80, 0x80, 0x01, 0x02, 0x06, 0x80, 0x80, 0x80, 0x01})
+	// Write fixed suffix bytes
+	if _, err = w.Write([]byte{0x06, 0x80, 0x80, 0x80, 0x01, 0x02, 0x06, 0x80, 0x80, 0x80, 0x01}); err != nil {
+		return fmt.Errorf("aacparser: failed to write suffix bytes: %w", err)
+	}
 
 	return
 }
