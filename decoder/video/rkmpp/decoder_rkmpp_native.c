@@ -161,7 +161,7 @@ int init_rkmpp_decoder_native(NativeRkmppDecoder *dec,
     }
 
     /* Disable internal frame splitter - we will split NAL units ourselves */
-    ret = mpp_dec_cfg_set_u32(cfg, "base:split_parse", 0);
+    ret = mpp_dec_cfg_set_u32(cfg, "base:split_parse", 1);
     if (ret) {
         mpp_dec_cfg_deinit(&cfg);
         mpp_destroy(ctx);

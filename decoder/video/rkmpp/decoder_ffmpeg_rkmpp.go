@@ -65,6 +65,8 @@ func (dcd *ffmpegRKMPPDecoder) sendCodecHeaders(vpar gomedia.VideoCodecParameter
 		return nil
 	}
 
+	logger.Debugf(dcd, "Sending codec headers for video codec parameters %+v", vpar)
+
 	var nalUnits [][]byte
 
 	switch par := vpar.(type) {

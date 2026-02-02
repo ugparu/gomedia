@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"image/jpeg"
 	"log"
 	"os"
 
@@ -40,7 +41,7 @@ func main() {
 	dcd.Decode()
 	defer dcd.Close()
 
-	// main:
+main:
 	for {
 		var packet gomedia.Packet
 		select {
@@ -53,18 +54,16 @@ func main() {
 			select {
 			case dcd.Packets() <- vPkt:
 			case img := <-dcd.Images():
-				_ = img
-				// _ = img
-				// f, err := os.Create(output)
-				// if err != nil {
-				// 	log.Fatal(err)
-				// }
-				// defer f.Close()
-				// if err := jpeg.Encode(f, img, nil); err != nil {
-				// 	log.Fatal(err)
-				// }
-				// log.Printf("Successfully saved frame to %s", output)
-				// break main
+				f, err := os.Create(output)
+				if err != nil {
+					log.Fatal(err)
+				}
+				defer f.Close()
+				if err := jpeg.Encode(f, img, nil); err != nil {
+					log.Fatal(err)
+				}
+				log.Printf("Successfully saved frame to %s", output)
+				break main
 			}
 		}
 	}
