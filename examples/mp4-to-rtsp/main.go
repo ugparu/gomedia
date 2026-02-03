@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"github.com/ugparu/gomedia/format/mp4"
@@ -53,7 +54,11 @@ func main() {
 	log.Println("RTSP publish session established, starting to read MP4 packets...")
 
 	// 3. Read packets from MP4 and attempt to send them via RTSP.
-	var packetsSent int
+	var (
+		packetsSent int
+		lastTS      time.Duration
+		haveTS      bool
+	)
 	for {
 		pkt, err := dmx.ReadPacket()
 		if err != nil {
@@ -66,6 +71,18 @@ func main() {
 		if pkt == nil {
 			continue
 		}
+
+		// Emulate (approximate) realtime by sleeping based on packet timestamps.
+		// MP4 demuxer sets pkt.Timestamp() as a monotonically increasing media time.
+		ts := pkt.Timestamp()
+		if haveTS {
+			if delta := ts - lastTS; delta > 0 {
+				time.Sleep(delta)
+			}
+		} else {
+			haveTS = true
+		}
+		lastTS = ts
 
 		if err := mx.WritePacket(pkt); err != nil {
 			// Currently expected: rtsp.ErrRTPMuxerNotImplemented.

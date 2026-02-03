@@ -5,7 +5,7 @@ import (
 )
 
 func binSize(val int) []byte {
-	buf := make([]byte, headerSize)
+	buf := make([]byte, rtspHeaderSize)
 	binary.BigEndian.PutUint32(buf, uint32(val)) //nolint:gosec
 	return buf
 }

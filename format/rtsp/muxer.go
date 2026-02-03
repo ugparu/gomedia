@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/codec/aac"
@@ -12,6 +13,7 @@ import (
 	"github.com/ugparu/gomedia/codec/mjpeg"
 	"github.com/ugparu/gomedia/codec/opus"
 	"github.com/ugparu/gomedia/codec/pcm"
+	"github.com/ugparu/gomedia/format/rtp"
 	"github.com/ugparu/gomedia/utils"
 	"github.com/ugparu/gomedia/utils/logger"
 	"github.com/ugparu/gomedia/utils/sdp"
@@ -22,9 +24,15 @@ var ErrRTPMuxerNotImplemented = utils.UnimplementedError{}
 
 // Muxer represents an RTSP muxer for publishing streams.
 type Muxer struct {
-	url    string
-	client *client
-	medias []sdp.Media
+	url        string
+	client     *client
+	medias     []sdp.Media
+	videoMuxer rtpVideoMuxer
+}
+
+// rtpVideoMuxer is the subset of methods required from an RTP video muxer.
+type rtpVideoMuxer interface {
+	WritePacket(gomedia.VideoPacket) error
 }
 
 // NewMuxer creates a new RTSP muxer for the given URL.
@@ -67,9 +75,25 @@ func (m *Muxer) Mux(streams gomedia.CodecParametersPair) (err error) {
 	chTMP := 0
 	for _, media := range m.medias {
 		uri := controlTrack(m.client.control, media.Control)
-		if _, err = m.client.setup(chTMP, uri, "record"); err != nil {
+		var ch int
+		if ch, err = m.client.setup(chTMP, uri, "record"); err != nil {
 			return err
 		}
+
+		// Only video is supported for now.
+		if media.AVType == video && streams.VideoCodecParameters != nil {
+			switch v := streams.VideoCodecParameters.(type) {
+			case *h264.CodecParameters:
+				logger.Debugf(m, "Creating H264 RTP muxer on channel %d", ch)
+				m.videoMuxer = rtp.NewH264Muxer(m.client.connRW, media, uint8(ch), v, 0) //nolint:gosec
+			case *h265.CodecParameters:
+				logger.Debugf(m, "Creating H265 RTP muxer on channel %d", ch)
+				m.videoMuxer = rtp.NewH265Muxer(m.client.connRW, media, uint8(ch), v, 0) //nolint:gosec
+			default:
+				logger.Debugf(m, "RTP muxer for codec %T not implemented yet", streams.VideoCodecParameters)
+			}
+		}
+
 		chTMP += 2
 	}
 
@@ -81,9 +105,21 @@ func (m *Muxer) Mux(streams gomedia.CodecParametersPair) (err error) {
 	return nil
 }
 
-// WritePacket writes a packet. RTP muxer is not implemented yet.
+// WritePacket writes a packet using the underlying RTP muxer.
 func (m *Muxer) WritePacket(pkt gomedia.Packet) error {
-	return fmt.Errorf("%w: RTP muxer not implemented yet", ErrRTPMuxerNotImplemented)
+	if m.videoMuxer == nil {
+		return fmt.Errorf("%w: RTP muxer not initialized", ErrRTPMuxerNotImplemented)
+	}
+
+	vp, ok := pkt.(gomedia.VideoPacket)
+	if !ok {
+		return fmt.Errorf("rtsp: only video packets are supported for now, got %T", pkt)
+	}
+
+	if err := m.client.conn.SetWriteDeadline(time.Now().Add(readWriteTimeout)); err != nil {
+		return err
+	}
+	return m.videoMuxer.WritePacket(vp)
 }
 
 // Close closes the RTSP connection and sends TEARDOWN.

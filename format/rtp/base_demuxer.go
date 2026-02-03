@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	headerSize         = 4
+	rtspHeaderSize     = 4
 	paddingBit         = 5
 	extensionBit       = 4
 	control0           = 0x0f
@@ -44,7 +44,7 @@ func newBaseDemuxer(rdr io.Reader, sdp sdp.Media, index uint8) *baseDemuxer {
 	return &baseDemuxer{
 		rdr:       rdr,
 		sdp:       sdp,
-		payload:   buffer.Get(headerSize),
+		payload:   buffer.Get(rtspHeaderSize),
 		offset:    0,
 		end:       0,
 		timestamp: 0,
@@ -58,11 +58,11 @@ func (d *baseDemuxer) Demux() (codecs gomedia.CodecParametersPair, err error) {
 
 func (d *baseDemuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 	var n int
-	if n, err = d.rdr.Read(d.payload.Data()[:4]); err != nil {
+	if n, err = d.rdr.Read(d.payload.Data()[:rtspHeaderSize]); err != nil {
 		return
 	}
 
-	if n < headerSize-1 {
+	if n < rtspHeaderSize-1 {
 		err = io.EOF
 		return
 	}
@@ -71,13 +71,13 @@ func (d *baseDemuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 	if length > 65535 || length < 12 {
 		return nil, fmt.Errorf("RTP incorrect packet size %v", length)
 	}
-	length += headerSize
+	length += rtspHeaderSize
 
 	d.payload.Resize(int(length))
-	if n, err = d.rdr.Read(d.payload.Data()[headerSize:]); err != nil {
+	if n, err = d.rdr.Read(d.payload.Data()[rtspHeaderSize:]); err != nil {
 		return nil, err
 	}
-	if n < headerSize {
+	if n < rtspHeaderSize {
 		err = io.EOF
 		return
 	}
