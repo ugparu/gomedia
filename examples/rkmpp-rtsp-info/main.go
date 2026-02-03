@@ -63,7 +63,7 @@ func main() {
 		log.Fatalf("Failed to connect to RTSP stream: %v", err)
 	}
 
-	fmt.Println("✓ Connected successfully!\n")
+	fmt.Println("✓ Connected successfully!")
 
 	// Display stream information
 	printStreamInfo(params)
@@ -76,8 +76,8 @@ func main() {
 		dcd := decoder.NewVideo(100, -1, rkmpp.NewFFmpegRKMPPDecoder)
 		dcd.Decode()
 
-		fmt.Println("✓ RKMPP decoder initialized\n")
-		fmt.Println("Starting decode process...\n")
+		fmt.Println("✓ RKMPP decoder initialized")
+		fmt.Println("Starting decode process...")
 
 		frameCount := 0
 		packetCount := 0

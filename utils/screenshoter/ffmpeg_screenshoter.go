@@ -4,7 +4,6 @@ package screenshoter
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"image"
 	"image/jpeg"
 	"time"
@@ -94,7 +93,7 @@ func (screenshoter *ffmpegScreenshoter) Screenshot(url string) ([]byte, error) {
 			}
 
 			// Log successful extraction of the screenshot.
-			logger.Debugf(screenshoter, fmt.Sprintf("Screenshot extracted successfully from %s", url))
+			logger.Debugf(screenshoter, "Screenshot extracted successfully from %s", url)
 
 			// Return the PNG-encoded image bytes.
 			return buff.Bytes(), nil

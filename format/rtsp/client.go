@@ -54,7 +54,7 @@ func newClient() *client {
 		password: "",
 		name:     "",
 		url:      "",
-		headers:  map[string]string{"User-Agent": "CubicCV"},
+		headers:  map[string]string{"User-Agent": "gomedia"},
 		methods: map[rtspMethod]bool{
 			describe:     false,
 			announce:     false,
@@ -134,10 +134,11 @@ func (c *client) establishConnection(rawURL string) (err error) {
 	return nil
 }
 
-// request sends an RTSP request with the specified method, custom headers, URI, and option to skip response.
+// request sends an RTSP request with the specified method, custom headers, URI,
+// optional body, and option to skip response.
 // It returns the RTSP response headers as a map[string]string and any encountered error.
 func (c *client) request(method rtspMethod,
-	customHeaders map[string]string, uri string, nores bool) (resp map[string]string, err error) {
+	customHeaders map[string]string, uri string, body []byte, nores bool) (resp map[string]string, err error) {
 	// Prepare the RTSP request string.
 	builder := bytes.Buffer{}
 	builder.WriteString(fmt.Sprintf("%s %s RTSP/1.0\r\n", method, uri))
@@ -167,16 +168,21 @@ func (c *client) request(method rtspMethod,
 	// End the request headers.
 	builder.WriteString("\r\n")
 
-	requestString := builder.String()
-
 	// Set write deadline for the connection.
 	if err = c.conn.SetWriteDeadline(time.Now().Add(readWriteTimeout)); err != nil {
 		return
 	}
 
 	// Write the request to the connection.
-	if _, err = c.connRW.WriteString(requestString); err != nil {
+	if _, err = c.connRW.WriteString(builder.String()); err != nil {
 		return nil, err
+	}
+
+	// Write optional body if provided.
+	if len(body) > 0 {
+		if _, err = c.connRW.Write(body); err != nil {
+			return nil, err
+		}
 	}
 
 	// Flush the buffered writer to send the request.
@@ -237,7 +243,7 @@ func (c *client) request(method rtspMethod,
 
 	// Process authentication challenges in the response.
 	if _, ok := responseHeaders["WWW-Authenticate"]; ok {
-		responseHeaders, err = c.handleAuthentication(responseHeaders, method, customHeaders, uri)
+		responseHeaders, err = c.handleAuthentication(responseHeaders, method, customHeaders, uri, body)
 		if err != nil {
 			return nil, err
 		}
@@ -269,6 +275,7 @@ func (c *client) handleAuthentication(
 	method rtspMethod,
 	customHeaders map[string]string,
 	uri string,
+	body []byte,
 ) (map[string]string, error) {
 	val, ok := responseHeaders["WWW-Authenticate"]
 	if !ok {
@@ -290,7 +297,12 @@ func (c *client) handleAuthentication(
 	}
 
 	// Resend the request with updated authentication.
-	return c.request(method, customHeaders, uri, false)
+	return c.request(method, customHeaders, uri, body, false)
+}
+
+// supportsPublish returns true if the server supports ANNOUNCE and RECORD (for publishing).
+func (c *client) supportsPublish() bool {
+	return c.methods[announce] && c.methods[record]
 }
 
 // options sends an RTSP OPTIONS request to the server and updates the supported methods.
@@ -299,7 +311,7 @@ func (c *client) options() (err error) {
 	logger.Debug(c, "Processing options request")
 
 	// Send OPTIONS request and retrieve response.
-	resp, err := c.request(options, nil, c.control, false)
+	resp, err := c.request(options, nil, c.control, nil, false)
 	if err != nil {
 		return err
 	}
@@ -321,7 +333,7 @@ func (c *client) describe() (sdps []sdp.Media, err error) {
 	logger.Debug(c, "Processing describe request")
 
 	// Send DESCRIBE request with "Accept" header specifying "application/sdp".
-	resp, err := c.request(describe, map[string]string{"Accept": "application/sdp"}, c.control, false)
+	resp, err := c.request(describe, map[string]string{"Accept": "application/sdp"}, c.control, nil, false)
 	if err != nil {
 		return nil, err
 	}
@@ -356,15 +368,18 @@ func (c *client) describe() (sdps []sdp.Media, err error) {
 }
 
 // setup sends an RTSP SETUP request to the server and retrieves the interleaved channel information.
-func (c *client) setup(chTMP int, uri string) (streamIdx int, err error) {
+func (c *client) setup(chTMP int, uri string, mode string) (streamIdx int, err error) {
 	// Log debug information.
 	logger.Debug(c, "Processing setup request")
 
 	// Configure the "Transport" header with interleaved channel information.
-	headers := map[string]string{"Transport": fmt.Sprintf("RTP/AVP/TCP;unicast;interleaved=%d-%d", chTMP, chTMP+1)}
+	headers := map[string]string{"Transport": fmt.Sprintf("RTP/AVP/TCP;unicast;interleaved=%d-%d;mode=%s", chTMP, chTMP+1, mode)}
+
+	logger.Debugf(c, "Setting up stream with URI: %s", uri)
+	logger.Debugf(c, "Headers: %+v", headers)
 
 	// Send SETUP request with specified headers and URI.
-	resp, err := c.request(setup, headers, uri, false)
+	resp, err := c.request(setup, headers, uri, nil, false)
 	if err != nil {
 		return -1, err
 	}
@@ -407,7 +422,39 @@ func (c *client) play() (err error) {
 	logger.Debug(c, "Processing play request")
 
 	// Send PLAY request to the server.
-	if _, err = c.request(play, nil, c.control, false); err != nil {
+	if _, err = c.request(play, nil, c.control, nil, false); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// announce sends an RTSP ANNOUNCE request with the provided SDP session and media descriptions.
+func (c *client) announce(sess sdp.Session, medias []sdp.Media) (err error) {
+	// Log debug information.
+	logger.Debug(c, "Processing announce request")
+
+	bodyStr := sdp.Generate(sess, medias)
+	body := []byte(bodyStr)
+
+	headers := map[string]string{
+		"Content-Type":   "application/sdp",
+		"Content-Length": strconv.Itoa(len(body)),
+	}
+
+	if _, err = c.request(announce, headers, c.control, body, false); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// record sends an RTSP RECORD request to start recording on the server.
+func (c *client) record() (err error) {
+	// Log debug information.
+	logger.Debug(c, "Processing record request")
+
+	if _, err = c.request(record, nil, c.control, nil, false); err != nil {
 		return err
 	}
 
@@ -420,7 +467,7 @@ func (c *client) ping() (err error) {
 	logger.Debug(c, "Processing ping request")
 
 	// Send GET_PARAMETER request to the server (no response expected).
-	if _, err = c.request(options, nil, c.control, true); err != nil {
+	if _, err = c.request(options, nil, c.control, nil, true); err != nil {
 		return err
 	}
 
@@ -461,7 +508,7 @@ func (c *client) Close() {
 		// Set a deadline for the connection.
 		if err := c.conn.SetDeadline(time.Now().Add(readWriteTimeout)); err == nil {
 			// Send TEARDOWN request to gracefully close the connection (no response expected).
-			if _, err = c.request(teardown, nil, c.control, true); err != nil {
+			if _, err = c.request(teardown, nil, c.control, nil, true); err != nil {
 				logger.Debugf(c, "Teardown error: %v", err)
 			}
 		}

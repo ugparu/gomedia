@@ -4,6 +4,18 @@ import (
 	"strings"
 )
 
+// controlTrack returns the full RTSP URI for a track control string.
+// If track already contains "rtsp://", it is returned as-is. Otherwise it is appended to base.
+func controlTrack(base, track string) string {
+	if strings.Contains(track, "rtsp://") {
+		return track
+	}
+	if !strings.HasSuffix(base, "/") {
+		track = "/" + track
+	}
+	return base + track
+}
+
 // stringInBetween extracts a substring from the input string that is between the specified start and end substrings.
 func stringInBetween(str string, start string, end string) (result string) {
 	// Find the index of the start substring in the input string.

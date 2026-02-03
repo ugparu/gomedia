@@ -116,7 +116,7 @@ func (dmx *innerRTSPDemuxer) findStreams() (params gomedia.CodecParametersPair, 
 		}
 
 		var idx int
-		if idx, err = dmx.client.setup(dmx.chTMP, dmx.controlTrack(i2.Control)); err != nil {
+		if idx, err = dmx.client.setup(dmx.chTMP, dmx.controlTrack(i2.Control), "play"); err != nil {
 			return
 		}
 
@@ -185,13 +185,7 @@ func (dmx *innerRTSPDemuxer) findStreams() (params gomedia.CodecParametersPair, 
 }
 
 func (dmx *innerRTSPDemuxer) controlTrack(track string) string {
-	if strings.Contains(track, "rtsp://") {
-		return track
-	}
-	if !strings.HasSuffix(dmx.client.control, "/") {
-		track = "/" + track
-	}
-	return dmx.client.control + track
+	return controlTrack(dmx.client.control, track)
 }
 
 func (dmx *innerRTSPDemuxer) ReadPacket() (packet gomedia.Packet, err error) {

@@ -1,3 +1,4 @@
+//go:build linux && arm64
 /* SPDX-License-Identifier: Apache-2.0 OR MIT */
 
 #include <string.h>
