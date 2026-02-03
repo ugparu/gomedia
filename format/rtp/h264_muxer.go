@@ -92,7 +92,6 @@ func (m *h264Muxer) WritePacket(pkt gomedia.VideoPacket) error {
 		}
 
 		origHdr := nalu[0]
-		fmt.Printf("%+v\n", nalu[:12])
 		nalPayload := nalu[1:]
 
 		// FU Indicator: F and NRI copied from original header, type set to 28 (FU-A).
