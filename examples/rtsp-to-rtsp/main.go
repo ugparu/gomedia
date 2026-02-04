@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/sirupsen/logrus"
+	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/reader"
 	writerRtsp "github.com/ugparu/gomedia/writer/rtsp"
 )
@@ -59,9 +60,13 @@ func main() {
 			if pkt == nil {
 				continue
 			}
+			videoPkt, ok := pkt.(gomedia.VideoPacket)
+			if !ok {
+				continue
+			}
 			// Forward packet; the RTSP writer will internally ignore
 			// non-video packets if they are not supported.
-			writerPacketsCh <- pkt
+			writerPacketsCh <- videoPkt
 		case <-wr.Done():
 			log.Println("RTSP writer signaled completion, stopping relay")
 			log.Println("rtsp-to-rtsp example finished")

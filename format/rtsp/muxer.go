@@ -85,10 +85,10 @@ func (m *Muxer) Mux(streams gomedia.CodecParametersPair) (err error) {
 			switch v := streams.VideoCodecParameters.(type) {
 			case *h264.CodecParameters:
 				logger.Debugf(m, "Creating H264 RTP muxer on channel %d", ch)
-				m.videoMuxer = rtp.NewH264Muxer(m.client.connRW, media, uint8(ch), v, 0) //nolint:gosec
+				m.videoMuxer = rtp.NewH264Muxer(m.client.conn, media, uint8(ch), v, 0) //nolint:gosec
 			case *h265.CodecParameters:
 				logger.Debugf(m, "Creating H265 RTP muxer on channel %d", ch)
-				m.videoMuxer = rtp.NewH265Muxer(m.client.connRW, media, uint8(ch), v, 0) //nolint:gosec
+				m.videoMuxer = rtp.NewH265Muxer(m.client.conn, media, uint8(ch), v, 0) //nolint:gosec
 			default:
 				logger.Debugf(m, "RTP muxer for codec %T not implemented yet", streams.VideoCodecParameters)
 			}
@@ -119,6 +119,7 @@ func (m *Muxer) WritePacket(pkt gomedia.Packet) error {
 	if err := m.client.conn.SetWriteDeadline(time.Now().Add(readWriteTimeout)); err != nil {
 		return err
 	}
+
 	return m.videoMuxer.WritePacket(vp)
 }
 
