@@ -6,12 +6,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/pion/webrtc/v4/pkg/media"
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/utils"
-	"github.com/ugparu/gomedia/utils/buffer"
 	"github.com/ugparu/gomedia/utils/logger"
-	"github.com/ugparu/gomedia/utils/nal"
 )
 
 type stream struct {
@@ -406,55 +403,62 @@ func (ss *sortedStreams) seedTrack(str *stream, peer *peerTrack) error {
 
 	seedBuf, peerBuf := str.buffer.GetBuffer(time.Now().Add(-peer.delay))
 
-	const pktDur = time.Millisecond * 5
-	const gracePeriod = time.Millisecond * 150
+	// const pktDur = time.Millisecond * 5
+	// const gracePeriod = time.Millisecond * 150
 
-	start := time.Now()
-	targetSeedDuration := time.Duration(len(seedBuf))*pktDur + gracePeriod
+	// start := time.Now()
+	// targetSeedDuration := time.Duration(len(seedBuf))*pktDur + gracePeriod
 
-	if len(seedBuf) > 0 {
-		targetSeedDuration += gracePeriod
-		ticker := time.NewTicker(pktDur)
-		defer ticker.Stop()
+	// if len(seedBuf) > 0 {
+	// targetSeedDuration += gracePeriod
+	// ticker := time.NewTicker(pktDur)
+	// defer ticker.Stop()
 
-		for _, vPkt := range seedBuf {
-			bufSample := media.Sample{
-				Data:               []byte{},
-				Timestamp:          vPkt.StartTime(),
-				Duration:           pktDur,
-				PacketTimestamp:    uint32(vPkt.Timestamp()), //nolint:gosec
-				PrevDroppedPackets: 0,
-				Metadata:           nil,
-			}
+	// for _, vPkt := range seedBuf {
+	// 	bufSample := media.Sample{
+	// 		Data:               []byte{},
+	// 		Timestamp:          vPkt.StartTime(),
+	// 		Duration:           pktDur,
+	// 		PacketTimestamp:    uint32(vPkt.Timestamp()), //nolint:gosec
+	// 		PrevDroppedPackets: 0,
+	// 		Metadata:           nil,
+	// 	}
 
-			if vPkt.IsKeyFrame() {
-				bufSample.Data = appendCodecParameters(vPkt.CodecParameters())
-			}
+	// 	if vPkt.IsKeyFrame() {
+	// 		bufSample.Data = appendCodecParameters(vPkt.CodecParameters())
+	// 	}
 
-			var bufNalus [][]byte
-			vPkt.View(func(data buffer.PooledBuffer) {
-				bufNalus, _ = nal.SplitNALUs(data.Data())
-			})
+	// 	var bufNalus [][]byte
+	// 	vPkt.View(func(data buffer.PooledBuffer) {
+	// 		bufNalus, _ = nal.SplitNALUs(data.Data())
+	// 	})
 
-			for _, nalu := range bufNalus {
-				bufSample.Data = append(bufSample.Data, append([]byte{0, 0, 0, 1}, nalu...)...)
-			}
+	// 	for _, nalu := range bufNalus {
+	// 		bufSample.Data = append(bufSample.Data, append([]byte{0, 0, 0, 1}, nalu...)...)
+	// 	}
 
-			if err := peer.vt.WriteSample(bufSample); err != nil {
-				return err
-			}
+	// 	if err := peer.vt.WriteSample(bufSample); err != nil {
+	// 		return err
+	// 	}
 
-			<-ticker.C
-		}
+	// 	<-ticker.C
+	// }
+	// }
+
+	for _, vPkt := range seedBuf {
+		clonePkt := vPkt.Clone(false)
+		const pktDur = time.Millisecond * 5
+		clonePkt.SetDuration(pktDur)
+		peer.vChan <- clonePkt.(gomedia.VideoPacket)
 	}
 
 	// Buffer packets for the peer
 	for _, bufPkt := range peerBuf {
 		switch packet := bufPkt.(type) {
 		case gomedia.VideoPacket:
-			peer.vChan <- packet
+			peer.vChan <- packet.Clone(false).(gomedia.VideoPacket)
 		case gomedia.AudioPacket:
-			peer.aChan <- packet
+			peer.aChan <- packet.Clone(false).(gomedia.AudioPacket)
 		}
 	}
 
@@ -477,10 +481,10 @@ func (ss *sortedStreams) seedTrack(str *stream, peer *peerTrack) error {
 		return err
 	}
 
-	actualDur := time.Since(start)
-	if actualDur < targetSeedDuration {
-		time.Sleep(targetSeedDuration - actualDur)
-	}
+	// actualDur := time.Since(start)
+	// if actualDur < targetSeedDuration {
+	// 	time.Sleep(targetSeedDuration - actualDur)
+	// }
 
 	return nil
 }
@@ -489,9 +493,9 @@ func (ss *sortedStreams) seedTrack(str *stream, peer *peerTrack) error {
 func (ss *sortedStreams) bufferPacketForPeer(peer *peerTrack, pkt gomedia.Packet) {
 	switch packet := pkt.(type) {
 	case gomedia.VideoPacket:
-		peer.vChan <- packet
+		peer.vChan <- packet.Clone(false).(gomedia.VideoPacket)
 	case gomedia.AudioPacket:
-		peer.aChan <- packet
+		peer.aChan <- packet.Clone(false).(gomedia.AudioPacket)
 	}
 }
 

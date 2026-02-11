@@ -96,6 +96,8 @@ func writeVideoPacketsToPeer(done chan struct{},
 				}
 			}
 		case pkt := <-vChan:
+			defer pkt.Close()
+
 			// Get codec parameters for keyframes
 			var codecParams []byte
 			if pkt.IsKeyFrame() {
@@ -159,6 +161,8 @@ func writeAudioPacketsToPeer(done chan struct{}, flush chan struct{}, aChan chan
 			return
 		case <-flush:
 		case pkt := <-aChan:
+			defer pkt.Close()
+
 			pkt.View(func(data buffer.PooledBuffer) {
 				aBuf.Resize(data.Len())
 				copy(aBuf.Data(), data.Data())
