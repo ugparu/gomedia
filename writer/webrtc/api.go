@@ -1,6 +1,9 @@
 package webrtc
 
 import (
+	"fmt"
+	"net"
+
 	"github.com/pion/interceptor"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
@@ -11,7 +14,13 @@ var api *webrtc.API
 var Conf webrtc.Configuration
 
 // Init initializes the WebRTC configuration and API.
-func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer) {
+func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer) (err error) {
+	udpListener, err := net.ListenPacket("udp", fmt.Sprintf(":%d", minPort))
+	if err != nil {
+		return err
+	}
+	udpMux := webrtc.NewICEUDPMux(nil, udpListener)
+
 	// Configure WebRTC settings
 	Conf = webrtc.Configuration{
 		ICEServers:           iceServers,
@@ -20,7 +29,7 @@ func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer
 		RTCPMuxPolicy:        webrtc.RTCPMuxPolicyNegotiate,
 		PeerIdentity:         "",
 		Certificates:         []webrtc.Certificate{},
-		ICECandidatePoolSize: 20,
+		ICECandidatePoolSize: 0,
 		SDPSemantics:         webrtc.SDPSemanticsUnifiedPlanWithFallback,
 	}
 
@@ -433,12 +442,15 @@ func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer
 
 	// Create a new SettingEngine
 	var s webrtc.SettingEngine
-	if minPort > 0 && maxPort > 0 && maxPort > minPort {
-		logger.Infof("WEBRTC", "Setting port range from %d to %d", minPort, maxPort)
-		if err := s.SetEphemeralUDPPortRange(minPort, maxPort); err != nil {
-			logger.Fatal("WEBRTC", err.Error())
-		}
-	}
+
+	s.SetICEUDPMux(udpMux)
+
+	// if minPort > 0 && maxPort > 0 && maxPort > minPort {
+	// 	logger.Infof("WEBRTC", "Setting port range from %d to %d", minPort, maxPort)
+	// 	if err := s.SetEphemeralUDPPortRange(minPort+1, maxPort); err != nil {
+	// 		logger.Fatal("WEBRTC", err.Error())
+	// 	}
+	// }
 
 	// Set host candidates if provided
 	if len(hosts) > 0 {
@@ -448,4 +460,6 @@ func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer
 
 	// Create a new WebRTC API with the configured settings
 	api = webrtc.NewAPI(webrtc.WithMediaEngine(m), webrtc.WithInterceptorRegistry(i), webrtc.WithSettingEngine(s))
+
+	return nil
 }

@@ -209,6 +209,32 @@
             justify-content: center;
         }
 
+        .screens-control {
+            margin-top: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        .screens-control select {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 6px 10px;
+            color: var(--text-primary);
+            font-family: 'Outfit', sans-serif;
+            font-size: 0.85rem;
+        }
+
+        .video-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+        }
+
         .video-wrapper {
             position: relative;
             background: #000;
@@ -351,63 +377,6 @@
             letter-spacing: 0.05em;
         }
 
-        .status-bar {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 16px 20px;
-            background: var(--bg-tertiary);
-            border-radius: 8px;
-            margin-top: 20px;
-        }
-
-        .status-indicator {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .status-dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            background: var(--text-secondary);
-            transition: background 0.3s;
-        }
-
-        .status-dot.connecting {
-            background: var(--accent-orange);
-            animation: pulse 1.5s infinite;
-        }
-
-        .status-dot.connected {
-            background: var(--accent-green);
-            box-shadow: 0 0 8px var(--accent-green);
-        }
-
-        .status-dot.error {
-            background: var(--accent-red);
-        }
-
-        .status-dot.ready {
-            background: var(--accent-cyan);
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.4; }
-        }
-
-        .status-text {
-            font-size: 0.85rem;
-            color: var(--text-secondary);
-        }
-
-        .status-text span {
-            color: var(--text-primary);
-            font-weight: 500;
-        }
-
         .url-badges {
             display: flex;
             gap: 8px;
@@ -452,11 +421,6 @@
 
             .url-label {
                 min-width: auto;
-            }
-            
-            .status-bar {
-                flex-direction: column;
-                gap: 12px;
             }
 
             .url-badges {
@@ -508,6 +472,27 @@
                     </div>
                 </div>
             </div>
+            <div class="screens-control">
+                <span>Screens:</span>
+                <select id="screensCount">
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                    <option value="5">5</option>
+                    <option value="6">6</option>
+                    <option value="7">7</option>
+                    <option value="8">8</option>
+                    <option value="9">9</option>
+                    <option value="10">10</option>
+                    <option value="11">11</option>
+                    <option value="12">12</option>
+                    <option value="13">13</option>
+                    <option value="14">14</option>
+                    <option value="15">15</option>
+                    <option value="16" selected>16</option>
+                </select>
+            </div>
             <button id="connectUrlBtn" class="btn btn-primary btn-connect">
                 <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M13.8 12H3"/>
@@ -518,15 +503,62 @@
         </div>
 
         <div class="card">
-            <div class="video-wrapper">
-                <div id="videoPlaceholder" class="video-placeholder">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <rect x="2" y="4" width="20" height="16" rx="2"/>
-                        <path d="M10 9l5 3-5 3V9z"/>
-                    </svg>
-                    <span>Enter RTSP URL(s) to begin</span>
+            <div class="video-grid">
+                <div class="video-wrapper">
+                    <div id="videoPlaceholder" class="video-placeholder">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <rect x="2" y="4" width="20" height="16" rx="2"/>
+                            <path d="M10 9l5 3-5 3V9z"/>
+                        </svg>
+                        <span>Enter RTSP URL(s) to begin</span>
+                    </div>
+                    <video id="videoElement" autoplay playsinline controls muted></video>
                 </div>
-                <video id="videoElement" autoplay playsinline controls muted></video>
+                <div class="video-wrapper">
+                    <video class="clone-video" autoplay playsinline controls muted></video>
+                </div>
+                <div class="video-wrapper">
+                    <video class="clone-video" autoplay playsinline controls muted></video>
+                </div>
+                <div class="video-wrapper">
+                    <video class="clone-video" autoplay playsinline controls muted></video>
+                </div>
+                <div class="video-wrapper">
+                    <video class="clone-video" autoplay playsinline controls muted></video>
+                </div>
+                <div class="video-wrapper">
+                    <video class="clone-video" autoplay playsinline controls muted></video>
+                </div>
+                <div class="video-wrapper">
+                    <video class="clone-video" autoplay playsinline controls muted></video>
+                </div>
+                <div class="video-wrapper">
+                    <video class="clone-video" autoplay playsinline controls muted></video>
+                </div>
+                <div class="video-wrapper">
+                    <video class="clone-video" autoplay playsinline controls muted></video>
+                </div>
+                <div class="video-wrapper">
+                    <video class="clone-video" autoplay playsinline controls muted></video>
+                </div>
+                <div class="video-wrapper">
+                    <video class="clone-video" autoplay playsinline controls muted></video>
+                </div>
+                <div class="video-wrapper">
+                    <video class="clone-video" autoplay playsinline controls muted></video>
+                </div>
+                <div class="video-wrapper">
+                    <video class="clone-video" autoplay playsinline controls muted></video>
+                </div>
+                <div class="video-wrapper">
+                    <video class="clone-video" autoplay playsinline controls muted></video>
+                </div>
+                <div class="video-wrapper">
+                    <video class="clone-video" autoplay playsinline controls muted></video>
+                </div>
+                <div class="video-wrapper">
+                    <video class="clone-video" autoplay playsinline controls muted></video>
+                </div>
             </div>
 
             <div class="controls">
@@ -555,42 +587,43 @@
                 </div>
             </div>
 
-            <div class="status-bar">
-                <div class="status-indicator">
-                    <div id="statusDot" class="status-dot"></div>
-                    <span class="status-text">Status: <span id="connectionStatus">Not Connected</span></span>
-                </div>
-                <div id="urlBadges" class="url-badges"></div>
-            </div>
+            <div id="urlBadges" class="url-badges"></div>
         </div>
     </div>
 
     <script>
         // DOM elements
         const videoElement = document.getElementById('videoElement');
+        const cloneVideos = Array.from(document.querySelectorAll('.clone-video'));
+        const playerVideos = [videoElement, ...cloneVideos];
         const videoPlaceholder = document.getElementById('videoPlaceholder');
         const startButton = document.getElementById('startButton');
         const stopButton = document.getElementById('stopButton');
-        const connectionStatus = document.getElementById('connectionStatus');
-        const statusDot = document.getElementById('statusDot');
         const urlInput1 = document.getElementById('urlInput1');
         const urlInput2 = document.getElementById('urlInput2');
         const connectUrlBtn = document.getElementById('connectUrlBtn');
+        const screensCountSelect = document.getElementById('screensCount');
         const urlBadges = document.getElementById('urlBadges');
         const streamSwitcher = document.getElementById('streamSwitcher');
         const streamOptions = document.getElementById('streamOptions');
         const currentStreamBadge = document.getElementById('currentStreamBadge');
         
         // WebRTC variables
-        let peerConnection = null;
-        let dataChannel = null;
-        let sdpSent = false;
-        let stream = null;
-        let isConnecting = false;
+        const peerConnections = [];
+        const dataChannels = [];
+        const sdpSentFlags = [];
+        const streams = [];
         let urlConnected = false;
         let availableStreams = [];
         let currentStreamUrl = '';
         let switchingStream = false;
+
+        // Per-player reconnect state (one player failing must not affect others)
+        const reconnectTimers = [];
+        const clientRunIds = [];
+        const RECONNECT_DELAY_MS = 2500;
+        let activePlayerCount = 0;
+        let isStartingAll = false;
 
         // Track input changes for styling
         [urlInput1, urlInput2].forEach(input => {
@@ -598,12 +631,6 @@
                 input.classList.toggle('filled', input.value.trim() !== '');
             });
         });
-
-        // Update status display
-        function updateStatus(status, state) {
-            connectionStatus.textContent = status;
-            statusDot.className = 'status-dot ' + state;
-        }
 
         // Update URL badges
         function updateUrlBadges(urls) {
@@ -700,6 +727,7 @@
 
         // Switch to a different stream via datachannel
         function switchStream(url) {
+            const dataChannel = dataChannels[0] || null;
             if (!dataChannel || dataChannel.readyState !== 'open') {
                 console.warn('Data channel not ready');
                 return;
@@ -735,6 +763,11 @@
 
         // Handle datachannel messages
         function handleDataChannelMessage(event) {
+            // Some messages may come as binary (ArrayBuffer/Blob) – ignore them here
+            if (typeof event.data !== 'string') {
+                return;
+            }
+
             try {
                 const data = JSON.parse(event.data);
                 console.log('DataChannel message:', data);
@@ -786,13 +819,6 @@
             }
 
             connectUrlBtn.disabled = true;
-            const wasStreaming = peerConnection && 
-                (peerConnection.iceConnectionState === 'connected' || 
-                 peerConnection.iceConnectionState === 'completed');
-            
-            if (!wasStreaming) {
-                updateStatus('Initializing streams...', 'connecting');
-            }
 
             try {
                 const urls = [];
@@ -813,24 +839,14 @@
 
                 urlConnected = true;
                 
-                if (!wasStreaming) {
-                    startButton.disabled = false;
-                }
+                startButton.disabled = false;
                 
                 updateUrlBadges(urls);
                 
-                if (wasStreaming) {
-                    updateStatus('Connected', 'connected');
-                } else {
-                    updateStatus('Ready to stream', 'ready');
-                    videoPlaceholder.querySelector('span').textContent = 'Click Start Stream to begin';
-                }
+                videoPlaceholder.querySelector('span').textContent = 'Click Start Stream to begin';
 
             } catch (error) {
                 console.error('Error connecting URLs:', error);
-                if (!wasStreaming) {
-                    updateStatus('Connection failed', 'error');
-                }
             } finally {
                 connectUrlBtn.disabled = false;
             }
@@ -844,119 +860,254 @@
             }
 
             try {
-                if (isConnecting) return;
-                isConnecting = true;
+                if (isStartingAll) return;
+                isStartingAll = true;
                 
                 await cleanupConnection();
                 
-                updateStatus('Connecting...', 'connecting');
                 startButton.disabled = true;
-                sdpSent = false;
+                stopButton.disabled = false;
                 
                 const configuration = {
-                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-                };
-                
-                peerConnection = new RTCPeerConnection(configuration);
-                dataChannel = peerConnection.createDataChannel('control');
-                
-                // Set up datachannel message handling
-                dataChannel.onopen = () => {
-                    console.log('Data channel opened');
+                    iceServers: []
                 };
 
-                dataChannel.onmessage = handleDataChannelMessage;
+                const desiredCount = parseInt(screensCountSelect.value, 10) || 1;
+                const playerCount = Math.min(playerVideos.length, Math.max(1, desiredCount));
+                activePlayerCount = playerCount;
 
-                dataChannel.onerror = (error) => {
-                    console.error('Data channel error:', error);
-                };
-
-                peerConnection.onicecandidate = event => {
-                    if (event.candidate === null && !sdpSent) {
-                        sdpSent = true;
-                        sendSdpToServer(peerConnection.localDescription);
-                    }
-                };
-
-                peerConnection.ontrack = event => {
-                    if (!stream) {
-                        stream = new MediaStream();
-                    }
-                    stream.addTrack(event.track);
-                    videoElement.srcObject = stream;
-                    videoPlaceholder.classList.add('hidden');
-                };
-                
-                peerConnection.oniceconnectionstatechange = () => {
-                    const state = peerConnection.iceConnectionState;
-                    
-                    if (state === 'connected' || state === 'completed') {
-                        updateStatus('Connected', 'connected');
-                        stopButton.disabled = false;
-                        isConnecting = false;
-                    } else if (state === 'checking') {
-                        updateStatus('Establishing connection...', 'connecting');
-                    } else if (state === 'failed' || state === 'disconnected' || state === 'closed') {
-                        updateStatus(state.charAt(0).toUpperCase() + state.slice(1), 'error');
-                        stopButton.disabled = true;
-                        startButton.disabled = false;
-                        isConnecting = false;
-                        streamSwitcher.classList.remove('visible');
-                    }
-                };
-                
-                const offer = await peerConnection.createOffer({
-                    offerToReceiveAudio: true,
-                    offerToReceiveVideo: true
-                });
-                
-                await peerConnection.setLocalDescription(offer);
-                
-                setTimeout(() => {
-                    if (peerConnection && !sdpSent) {
-                        sdpSent = true;
-                        sendSdpToServer(peerConnection.localDescription);
-                    }
-                }, 3000);
+                for (let i = 0; i < playerCount; i++) {
+                    clientRunIds[i] = (clientRunIds[i] || 0) + 1;
+                    const runId = clientRunIds[i];
+                    // fire-and-forget: each player manages its own retries
+                    startClientWithReconnect(i, configuration, runId);
+                }
                 
             } catch (error) {
                 console.error('Error starting stream:', error);
-                updateStatus('Error', 'error');
                 startButton.disabled = false;
-                isConnecting = false;
+            }
+            finally {
+                isStartingAll = false;
             }
         }
         
-        // Send SDP to server
-        async function sendSdpToServer(sessionDescription) {
-            if (!sessionDescription) return;
-            
-            try {
-                const base64Sdp = btoa(sessionDescription.sdp);
-                
-                const response = await fetch('/sdp', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ sdp: base64Sdp })
+        function createPeerConnection(configuration, index) {
+            const pc = new RTCPeerConnection(configuration);
+            peerConnections[index] = pc;
+            sdpSentFlags[index] = false;
+            streams[index] = null;
+            return pc;
+        }
+
+        function createControlDataChannel(pc, index) {
+            const dc = pc.createDataChannel('control');
+            dataChannels[index] = dc;
+
+            if (index === 0) {
+                // Only first connection drives control UI
+                dc.onopen = () => {
+                    console.log('Data channel opened (player 0)');
+                };
+                dc.onmessage = handleDataChannelMessage;
+                dc.onerror = (error) => {
+                    console.error('Data channel error:', error);
+                };
+            }
+
+            return dc;
+        }
+
+        function attachTrackHandler(pc, index) {
+            pc.ontrack = event => {
+                if (!streams[index]) {
+                    streams[index] = new MediaStream();
+                }
+                streams[index].addTrack(event.track);
+                playerVideos[index].srcObject = streams[index];
+                if (index === 0) {
+                    videoPlaceholder.classList.add('hidden');
+                }
+            };
+        }
+
+        function attachConnectionStatusHandlers(pc, index) {
+            pc.oniceconnectionstatechange = () => {
+                const state = pc.iceConnectionState;
+                // Each player reconnects independently
+                if (state === 'failed' || state === 'disconnected') {
+                    scheduleReconnect(index, pc.__configuration, pc.__runId, `ice=${state}`);
+                } else if (state === 'closed') {
+                    // If closed unexpectedly (remote side), also retry
+                    scheduleReconnect(index, pc.__configuration, pc.__runId, 'ice=closed');
+                }
+            };
+        }
+
+        function waitForIceGatheringComplete(pc, timeoutMs = 8000) {
+            if (pc.iceGatheringState === 'complete') {
+                return Promise.resolve();
+            }
+
+            return new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                    pc.removeEventListener('icegatheringstatechange', onStateChange);
+                    reject(new Error('ICE gathering timed out'));
+                }, timeoutMs);
+
+                function onStateChange() {
+                    if (pc.iceGatheringState === 'complete') {
+                        clearTimeout(timeout);
+                        pc.removeEventListener('icegatheringstatechange', onStateChange);
+                        resolve();
+                    }
+                }
+
+                pc.addEventListener('icegatheringstatechange', onStateChange);
+            });
+        }
+
+        async function createOfferAndSetLocalDescription(pc) {
+            const offer = await pc.createOffer({
+                offerToReceiveAudio: true,
+                offerToReceiveVideo: true
+            });
+            await pc.setLocalDescription(offer);
+            await waitForIceGatheringComplete(pc);
+            return pc.localDescription;
+        }
+
+        async function sendOfferAndReceiveAnswer(sessionDescription) {
+            if (!sessionDescription?.sdp) {
+                throw new Error('Missing local SDP');
+            }
+
+            const base64Sdp = btoa(sessionDescription.sdp);
+
+            const response = await fetch('/sdp', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sdp: base64Sdp })
+            });
+
+            if (!response.ok) throw new Error('Failed to send SDP');
+
+            const data = await response.json();
+            if (data.err) throw new Error(data.err);
+            if (!data.sdp) throw new Error('Empty SDP response');
+
+            return atob(data.sdp);
+        }
+
+        async function applyAnswer(pc, answerSdp) {
+            await pc.setRemoteDescription(
+                new RTCSessionDescription({ type: 'answer', sdp: answerSdp })
+            );
+        }
+
+        async function connectClient(index, configuration, runId) {
+            const pc = createPeerConnection(configuration, index);
+            pc.__runId = runId;
+            pc.__configuration = configuration;
+
+            // We keep onicecandidate only for diagnostics; SDP exchange is done once
+            pc.onicecandidate = () => {};
+
+            createControlDataChannel(pc, index);
+            attachTrackHandler(pc, index);
+            attachConnectionStatusHandlers(pc, index);
+
+            const localDescription = await createOfferAndSetLocalDescription(pc);
+            const answerSdp = await sendOfferAndReceiveAnswer(localDescription);
+            await applyAnswer(pc, answerSdp);
+        }
+
+        async function cleanupClient(index) {
+            // Stop stream tracks
+            const s = streams[index];
+            if (s) {
+                s.getTracks().forEach(track => {
+                    track.stop();
+                    track.dispatchEvent(new Event('ended'));
                 });
-                
-                if (!response.ok) throw new Error('Failed to send SDP');
-                
-                const data = await response.json();
-                if (data.err) throw new Error(data.err);
-                if (!data.sdp) throw new Error('Empty SDP response');
-                
-                const decodedSdp = atob(data.sdp);
-                
-                await peerConnection.setRemoteDescription(
-                    new RTCSessionDescription({ type: 'answer', sdp: decodedSdp })
-                );
-                
-            } catch (error) {
-                console.error('Error sending SDP:', error);
-                updateStatus('Error', 'error');
-                startButton.disabled = false;
-                isConnecting = false;
+                streams[index] = null;
+            }
+
+            // Clear video element
+            const v = playerVideos[index];
+            if (v && v.srcObject) {
+                v.srcObject = null;
+            }
+            if (index === 0) {
+                // Show placeholder again until tracks arrive
+                videoPlaceholder.classList.remove('hidden');
+                // Control UI is driven by player 0; hide it if player 0 is down
+                streamSwitcher.classList.remove('visible');
+            }
+
+            // Close data channel
+            const dc = dataChannels[index];
+            if (dc) {
+                dc.close();
+                dataChannels[index] = null;
+            }
+
+            // Close peer connection
+            const pc = peerConnections[index];
+            if (pc) {
+                pc.onicecandidate = null;
+                pc.ontrack = null;
+                pc.oniceconnectionstatechange = null;
+                pc.ondatachannel = null;
+                pc.onconnectionstatechange = null;
+
+                pc.getTransceivers().forEach(transceiver => {
+                    if (transceiver.stop) {
+                        transceiver.stop();
+                    }
+                });
+
+                pc.close();
+                peerConnections[index] = null;
+            }
+
+            sdpSentFlags[index] = false;
+        }
+
+        function scheduleReconnect(index, configuration, runId, reason) {
+            if (!configuration) return;
+            if (index >= activePlayerCount) return;
+            if (clientRunIds[index] !== runId) return; // stopped/restarted
+
+            if (reconnectTimers[index]) {
+                clearTimeout(reconnectTimers[index]);
+                reconnectTimers[index] = null;
+            }
+
+            console.warn(`Player ${index} reconnect scheduled (${reason})`);
+            reconnectTimers[index] = setTimeout(() => {
+                startClientWithReconnect(index, configuration, runId);
+            }, RECONNECT_DELAY_MS);
+        }
+
+        async function startClientWithReconnect(index, configuration, runId) {
+            if (index >= activePlayerCount) return;
+            if (clientRunIds[index] !== runId) return;
+
+            try {
+                if (reconnectTimers[index]) {
+                    clearTimeout(reconnectTimers[index]);
+                    reconnectTimers[index] = null;
+                }
+
+                await cleanupClient(index);
+
+                // Tag current PC with run/config for handler closures
+                // (set after createPeerConnection, but we keep them on the instance)
+                await connectClient(index, configuration, runId);
+            } catch (err) {
+                console.error(`Player ${index} connection failed:`, err);
+                scheduleReconnect(index, configuration, runId, 'connect-failed');
             }
         }
         
@@ -968,49 +1119,28 @@
             switchingStream = false;
             streamSwitcher.classList.remove('visible');
 
-            if (stream) {
-                stream.getTracks().forEach(track => {
-                    track.stop();
-                    track.dispatchEvent(new Event('ended'));
-                });
-                stream = null;
+            // Stop reconnect timers and invalidate current runs
+            for (let i = 0; i < playerVideos.length; i++) {
+                clientRunIds[i] = (clientRunIds[i] || 0) + 1;
+                if (reconnectTimers[i]) {
+                    clearTimeout(reconnectTimers[i]);
+                    reconnectTimers[i] = null;
+                }
             }
-            
-            if (videoElement.srcObject) {
-                videoElement.srcObject = null;
+
+            activePlayerCount = 0;
+
+            // Cleanup all players (independently)
+            const tasks = [];
+            for (let i = 0; i < playerVideos.length; i++) {
+                tasks.push(cleanupClient(i));
             }
-            
-            if (dataChannel) {
-                dataChannel.close();
-                dataChannel = null;
-            }
-            
-            if (peerConnection) {
-                peerConnection.onicecandidate = null;
-                peerConnection.ontrack = null;
-                peerConnection.oniceconnectionstatechange = null;
-                peerConnection.ondatachannel = null;
-                peerConnection.onconnectionstatechange = null;
-                
-                peerConnection.getTransceivers().forEach(transceiver => {
-                    if (transceiver.stop) {
-                        transceiver.stop();
-                    }
-                });
-                
-                peerConnection.close();
-                await new Promise(resolve => setTimeout(resolve, 100));
-                peerConnection = null;
-            }
-            
-            sdpSent = false;
-            isConnecting = false;
+            await Promise.allSettled(tasks);
         }
         
         // Stop the stream
         async function stopStream() {
             await cleanupConnection();
-            updateStatus('Stopped', 'ready');
             videoPlaceholder.classList.remove('hidden');
             videoPlaceholder.querySelector('span').textContent = 'Click Start Stream to begin';
         }

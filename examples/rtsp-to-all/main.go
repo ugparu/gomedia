@@ -51,7 +51,7 @@ type SDPRequest struct {
 
 type SDPResponse struct {
 	SDP string `json:"sdp"`
-	Err error  `json:"err"`
+	Err string `json:"err"`
 }
 
 func main() {
@@ -382,30 +382,41 @@ func HandleSDP(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, SDPResponse{
 			SDP: "",
-			Err: err,
+			Err: err.Error(),
 		})
 		return
 	}
 
-	webrtcWr.Peers() <- gomedia.WebRTCPeer{
+	peer := &gomedia.WebRTCPeer{
 		SDP:   req.SDP,
 		Delay: 0,
 		Err:   nil,
+		Done:  make(chan struct{}),
 	}
 
-	resp := <-webrtcWr.Peers()
-	if resp.Err != nil {
+	webrtcWr.Peers() <- peer
+
+	select {
+	case <-peer.Done:
+		if peer.Err != nil {
+			c.JSON(http.StatusInternalServerError, SDPResponse{
+				SDP: "",
+				Err: peer.Err.Error(),
+			})
+			return
+		}
+		c.JSON(http.StatusOK, SDPResponse{
+			SDP: peer.SDP,
+			Err: "",
+		})
+	case <-time.After(time.Second * 10):
+		logger.Errorf(nil, "Timeout adding peer")
 		c.JSON(http.StatusInternalServerError, SDPResponse{
 			SDP: "",
-			Err: resp.Err,
+			Err: "Timeout adding peer",
 		})
 		return
 	}
-
-	c.JSON(http.StatusOK, SDPResponse{
-		SDP: resp.SDP,
-		Err: resp.Err,
-	})
 }
 
 func GetCodecInfo(c *gin.Context) {

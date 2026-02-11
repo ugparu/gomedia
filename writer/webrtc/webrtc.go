@@ -21,7 +21,7 @@ type webRTCWriter struct {
 	lifecycle.AsyncManager[*webRTCWriter]
 	streams          *sortedStreams
 	sources          []string
-	peersChan        chan gomedia.WebRTCPeer
+	peersChan        chan *gomedia.WebRTCPeer
 	changePeersChan  chan *peerURL
 	connectPeersChan chan *peerTrack
 	closePeersChan   chan *peerTrack
@@ -43,7 +43,7 @@ func New(chanSize int, targetDuration time.Duration) gomedia.WebRTCStreamer {
 			targetDuration: targetDuration,
 		},
 		sources:          []string{},
-		peersChan:        make(chan gomedia.WebRTCPeer),
+		peersChan:        make(chan *gomedia.WebRTCPeer, chanSize),
 		changePeersChan:  make(chan *peerURL, chanSize),
 		connectPeersChan: make(chan *peerTrack, chanSize),
 		closePeersChan:   make(chan *peerTrack, chanSize),
@@ -72,8 +72,13 @@ func (element *webRTCWriter) Step(stopCh <-chan struct{}) (err error) {
 	case <-stopCh:
 		return &lifecycle.BreakError{}
 	case peer := <-element.peersChan:
-		element.peersChan <- element.addConnection(peer)
-		return peer.Err
+		if len(element.streams.sortedURLs) == 0 {
+			peer.Err = errors.New("no streams available")
+			close(peer.Done)
+			return peer.Err
+		}
+		codecType := element.streams.streams[element.streams.sortedURLs[0]].codecPar.VideoCodecParameters.Type()
+		go element.addConnection(peer, codecType)
 	case peerURL := <-element.changePeersChan:
 		return element.streams.Move(peerURL)
 	case peerTrack := <-element.connectPeersChan:
@@ -339,18 +344,15 @@ func extractFmtpLineFromSDP(sdp string, codecType gomedia.CodecType) string {
 	return ""
 }
 
-func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.WebRTCPeer {
-	sdp64 := inpPeer.SDP
+func (element *webRTCWriter) addConnection(inpPeer *gomedia.WebRTCPeer, codecType gomedia.CodecType) (err error) {
+	defer close(inpPeer.Done)
 
-	if len(element.streams.sortedURLs) == 0 {
-		inpPeer.Err = errors.New("no streams available")
-		return inpPeer
-	}
+	sdp64 := inpPeer.SDP
 
 	sdpB, err := base64.StdEncoding.DecodeString(sdp64)
 	if err != nil {
 		inpPeer.Err = err
-		return inpPeer
+		return inpPeer.Err
 	}
 
 	offer := webrtc.SessionDescription{
@@ -360,7 +362,7 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 	peer, err := api.NewPeerConnection(Conf)
 	if err != nil {
 		inpPeer.Err = err
-		return inpPeer
+		return inpPeer.Err
 	}
 
 	pt := new(peerTrack)
@@ -442,9 +444,6 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 		})
 	})
 
-	// Get codec type from first stream (all streams have valid video codec parameters)
-	codecType := element.streams.streams[element.streams.sortedURLs[0]].codecPar.VideoCodecParameters.Type()
-
 	mimeType := webrtc.MimeTypeH264
 	if codecType == gomedia.H265 {
 		mimeType = webrtc.MimeTypeH265
@@ -459,14 +458,14 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 	}, "video", "pion-video")
 	if err != nil {
 		inpPeer.Err = err
-		return inpPeer
+		return inpPeer.Err
 	}
 	pt.vt = vtrack
 
 	vRTPSender, err := peer.AddTrack(vtrack)
 	if err != nil {
 		inpPeer.Err = err
-		return inpPeer
+		return inpPeer.Err
 	}
 	go dropRTCP(vRTPSender)
 
@@ -479,32 +478,32 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 	}, "audio", "pion-audio")
 	if err != nil {
 		inpPeer.Err = err
-		return inpPeer
+		return inpPeer.Err
 	}
 	pt.at = atrack
 
 	aRTPSender, err := peer.AddTrack(atrack)
 	if err != nil {
 		inpPeer.Err = err
-		return inpPeer
+		return inpPeer.Err
 	}
 	go dropRTCP(aRTPSender)
 
 	if err = peer.SetRemoteDescription(offer); err != nil {
 		inpPeer.Err = err
-		return inpPeer
+		return inpPeer.Err
 	}
 
 	answer, err := peer.CreateAnswer(nil)
 	if err != nil {
 		inpPeer.Err = err
-		return inpPeer
+		return inpPeer.Err
 	}
 	gatherCompletePromise := webrtc.GatheringCompletePromise(peer)
 
 	if err = peer.SetLocalDescription(answer); err != nil {
 		inpPeer.Err = err
-		return inpPeer
+		return inpPeer.Err
 	}
 
 	<-gatherCompletePromise
@@ -514,7 +513,7 @@ func (element *webRTCWriter) addConnection(inpPeer gomedia.WebRTCPeer) gomedia.W
 	go writeVideoPacketsToPeer(pt.done, pt.flush, pt.vChan, pt.aChan, pt.vt, pt.vBuf)
 	go writeAudioPacketsToPeer(pt.done, pt.flush, pt.aChan, pt.at, pt.aBuf)
 
-	return inpPeer
+	return nil
 }
 
 // removePeer removes a peer from all existing and to-be-added peers, removes associated tracks,
@@ -596,7 +595,7 @@ func (element *webRTCWriter) Packets() chan<- gomedia.Packet {
 }
 
 // Peers returns the peers channel of the innerWriter.
-func (element *webRTCWriter) Peers() chan gomedia.WebRTCPeer {
+func (element *webRTCWriter) Peers() chan<- *gomedia.WebRTCPeer {
 	return element.peersChan
 }
 

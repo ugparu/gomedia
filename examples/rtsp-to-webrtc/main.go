@@ -21,7 +21,7 @@ type SDPRequest struct {
 
 type SDPResponse struct {
 	SDP string `json:"sdp"`
-	Err error  `json:"err"`
+	Err string `json:"err"`
 }
 
 type URLRequest struct {
@@ -54,11 +54,11 @@ func main() {
 	rdr.Read()
 	defer rdr.Close()
 
-	webrtc.Init(2000, 2100, []string{"10.0.112.138"}, []pion.ICEServer{
-		{
-			URLs: []string{"stun:stun.l.google.com:19302"},
-		},
-	})
+	if err := webrtc.Init(2000, 2100, []string{"10.10.0.7"}, []pion.ICEServer{
+		{},
+	}); err != nil {
+		log.Fatalf("Failed to initialize WebRTC: %v", err)
+	}
 
 	webrtcWrt = webrtc.New(100, time.Second*6)
 	webrtcWrt.Write()
@@ -153,7 +153,7 @@ func main() {
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, SDPResponse{
 				SDP: "",
-				Err: err,
+				Err: err.Error(),
 			})
 			return
 		}
@@ -165,30 +165,35 @@ func main() {
 		if !hasURLs {
 			c.JSON(http.StatusBadRequest, SDPResponse{
 				SDP: "",
-				Err: nil,
+				Err: "No URLs available",
 			})
 			return
 		}
 
-		webrtcWrt.Peers() <- gomedia.WebRTCPeer{
+		peer := &gomedia.WebRTCPeer{
 			SDP:   req.SDP,
 			Delay: 0,
 			Err:   nil,
+			Done:  make(chan struct{}),
 		}
 
-		resp := <-webrtcWrt.Peers()
-		if resp.Err != nil {
-			c.JSON(http.StatusInternalServerError, SDPResponse{
-				SDP: "",
-				Err: resp.Err,
+		webrtcWrt.Peers() <- peer
+
+		select {
+		case <-peer.Done:
+			if peer.Err != nil {
+				logger.Errorf(nil, "Error adding peer: %v", peer.Err)
+				c.JSON(http.StatusInternalServerError, SDPResponse{
+					SDP: "",
+					Err: peer.Err.Error(),
+				})
+				return
+			}
+			c.JSON(http.StatusOK, SDPResponse{
+				SDP: peer.SDP,
+				Err: "",
 			})
-			return
 		}
-
-		c.JSON(http.StatusOK, SDPResponse{
-			SDP: resp.SDP,
-			Err: resp.Err,
-		})
 	})
 
 	log.Println("Starting HTTP server on :8080")

@@ -27,6 +27,7 @@ type sortedStreams struct {
 	streams        map[string]*stream  // Map of streams indexed by their URLs.
 	pendingPeers   map[*peerTrack]bool // Peers waiting for a stream (when last stream was removed)
 	targetDuration time.Duration
+	videoCodecType gomedia.CodecType
 }
 
 // Exists checks if a stream URL exists in the sortedStreams.
@@ -52,6 +53,8 @@ func (ss *sortedStreams) Update(newURL string, newCodecPar gomedia.CodecParamete
 			newURL, stream.codecPar.VideoCodecParameters.Width(), stream.codecPar.VideoCodecParameters.Height(),
 			par.Width(), par.Height())
 		stream.codecPar.VideoCodecParameters = par
+		ss.videoCodecType = stream.codecPar.VideoCodecParameters.Type()
+
 		stream.buffer.Reset()
 
 		const flushDuration = time.Second * 3
