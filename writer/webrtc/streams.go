@@ -449,16 +449,28 @@ func (ss *sortedStreams) seedTrack(str *stream, peer *peerTrack) error {
 		clonePkt := vPkt.Clone(false)
 		const pktDur = time.Millisecond * 5
 		clonePkt.SetDuration(pktDur)
-		peer.vChan <- clonePkt.(gomedia.VideoPacket)
+		select {
+		case peer.vChan <- clonePkt.(gomedia.VideoPacket):
+		case <-peer.done:
+			return errors.New("peer disconnected during seeding")
+		}
 	}
 
 	// Buffer packets for the peer
 	for _, bufPkt := range peerBuf {
 		switch packet := bufPkt.(type) {
 		case gomedia.VideoPacket:
-			peer.vChan <- packet.Clone(false).(gomedia.VideoPacket)
+			select {
+			case peer.vChan <- packet.Clone(false).(gomedia.VideoPacket):
+			case <-peer.done:
+				return errors.New("peer disconnected during seeding")
+			}
 		case gomedia.AudioPacket:
-			peer.aChan <- packet.Clone(false).(gomedia.AudioPacket)
+			select {
+			case peer.aChan <- packet.Clone(false).(gomedia.AudioPacket):
+			case <-peer.done:
+				return errors.New("peer disconnected during seeding")
+			}
 		}
 	}
 
@@ -491,11 +503,25 @@ func (ss *sortedStreams) seedTrack(str *stream, peer *peerTrack) error {
 
 // bufferPacketForPeer adds a packet to peer's buffer
 func (ss *sortedStreams) bufferPacketForPeer(peer *peerTrack, pkt gomedia.Packet) {
+	select {
+	case <-peer.done:
+		return // peer already closed
+	default:
+	}
+
 	switch packet := pkt.(type) {
 	case gomedia.VideoPacket:
-		peer.vChan <- packet.Clone(false).(gomedia.VideoPacket)
+		select {
+		case peer.vChan <- packet.Clone(false).(gomedia.VideoPacket):
+		case <-peer.done:
+		default: // drop if full — real-time streaming, stale frames useless
+		}
 	case gomedia.AudioPacket:
-		peer.aChan <- packet.Clone(false).(gomedia.AudioPacket)
+		select {
+		case peer.aChan <- packet.Clone(false).(gomedia.AudioPacket):
+		case <-peer.done:
+		default:
+		}
 	}
 }
 

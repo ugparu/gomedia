@@ -91,32 +91,32 @@ func (element *webRTCWriter) Step(stopCh <-chan struct{}) (err error) {
 			return err
 		}
 	default:
+		select {
+		case <-stopCh:
+			return &lifecycle.BreakError{}
+		case rmURL := <-element.rmSrcCh:
+			element.removeSource(rmURL)
+			logger.Infof(element, "Sending setAvailableStreams after removing source %s", rmURL)
+			element.sendAvailableStreams()
+		case addURL := <-element.addSrcCh:
+			element.addSource(addURL)
+		case inpPkt := <-element.inpPktCh:
+			switch pkt := inpPkt.(type) {
+			case gomedia.VideoPacket:
+				if err = element.checkCodecParameters(inpPkt.URL(), pkt.CodecParameters()); err != nil {
+					return
+				}
+			case gomedia.AudioPacket:
+				if err = element.checkCodecParameters(inpPkt.URL(), pkt.CodecParameters()); err != nil {
+					return
+				}
+			}
+			if err = element.streams.writePacket(inpPkt); err != nil {
+				return err
+			}
+		}
 	}
 
-	select {
-	case <-stopCh:
-		return &lifecycle.BreakError{}
-	case rmURL := <-element.rmSrcCh:
-		element.removeSource(rmURL)
-		logger.Infof(element, "Sending setAvailableStreams after removing source %s", rmURL)
-		element.sendAvailableStreams()
-	case addURL := <-element.addSrcCh:
-		element.addSource(addURL)
-	case inpPkt := <-element.inpPktCh:
-		switch pkt := inpPkt.(type) {
-		case gomedia.VideoPacket:
-			if err = element.checkCodecParameters(inpPkt.URL(), pkt.CodecParameters()); err != nil {
-				return
-			}
-		case gomedia.AudioPacket:
-			if err = element.checkCodecParameters(inpPkt.URL(), pkt.CodecParameters()); err != nil {
-				return
-			}
-		}
-		if err = element.streams.writePacket(inpPkt); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
