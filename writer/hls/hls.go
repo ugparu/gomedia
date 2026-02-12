@@ -111,6 +111,9 @@ func (hlsw *hlsWriter) checkCodPar(url string, codecPar gomedia.CodecParameters)
 func (hlsw *hlsWriter) removeSrc(url string) error {
 	logger.Infof(hlsw, "Removing source %s", url)
 
+	if mux, ok := hlsw.muxerURLs[url]; ok {
+		mux.Close()
+	}
 	delete(hlsw.codPars, url)
 	delete(hlsw.muxerURLs, url)
 
@@ -283,7 +286,21 @@ func (hlsw *hlsWriter) Close_() { //nolint: revive
 	for _, mux := range hlsw.muxerURLs {
 		mux.Close()
 	}
-	close(hlsw.inpPktCh)
+	// Drain remaining packets from the channel to prevent leaks.
+	for {
+		select {
+		case pkt, ok := <-hlsw.inpPktCh:
+			if !ok {
+				return
+			}
+			if pkt != nil {
+				pkt.Close()
+			}
+		default:
+			close(hlsw.inpPktCh)
+			return
+		}
+	}
 }
 
 func (hlsw *hlsWriter) String() string {

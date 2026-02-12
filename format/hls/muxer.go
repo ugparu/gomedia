@@ -346,6 +346,18 @@ func (mxr *muxer) GetFragment(ctx context.Context, segindex uint64, index uint8)
 
 // Close_ closes the HLS muxer.
 func (mxr *muxer) Close_() { //nolint:revive // Method name required by interface
+	mxr.segments.Lock()
+	defer mxr.segments.Unlock()
+
+	for _, seg := range mxr.segments.segments {
+		for _, fragment := range seg.fragments {
+			for _, packet := range fragment.packets {
+				packet.Close()
+			}
+		}
+	}
+	mxr.segments.segments = make(map[uint64]*segment)
+	mxr.segments.segIDs = nil
 }
 
 // GetMasterEntry returns the master entry for the HLS playlist.

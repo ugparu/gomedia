@@ -25,6 +25,7 @@ func (b *Buffer) AddPacket(packet gomedia.Packet) {
 	}
 
 	if len(b.gops) == 0 {
+		packet.Close()
 		return
 	}
 

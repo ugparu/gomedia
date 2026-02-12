@@ -314,17 +314,21 @@ func (ss *sortedStreams) moveTrackToStream(str *stream, pu *peerURL, peerBuf []g
 		default:
 		}
 
-		switch packet := bufPkt.(type) {
+		clone := bufPkt.Clone(false)
+
+		switch clonePkt := clone.(type) {
 		case gomedia.VideoPacket:
 			select {
-			case pu.peerTrack.vChan <- packet:
+			case pu.peerTrack.vChan <- clonePkt:
 			case <-time.After(sendTimeout):
+				clonePkt.Close()
 				logger.Errorf(ss, "Timeout sending video packet to peer during stream move")
 			}
 		case gomedia.AudioPacket:
 			select {
-			case pu.peerTrack.aChan <- packet:
+			case pu.peerTrack.aChan <- clonePkt:
 			case <-time.After(sendTimeout):
+				clonePkt.Close()
 				logger.Errorf(ss, "Timeout sending audio packet to peer during stream move")
 			}
 		}
@@ -543,6 +547,7 @@ func (ss *sortedStreams) writePacket(pkt gomedia.Packet) (err error) {
 	if err != nil {
 		// Ignore specific errors that shouldn't propagate
 		if errors.Is(err, ErrPacketTooSmall) || errors.Is(err, ErrStreamNotFound) {
+			pkt.Close()
 			return nil
 		}
 		return err

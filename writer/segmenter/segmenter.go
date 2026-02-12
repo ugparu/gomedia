@@ -274,9 +274,27 @@ func (s *segmenter) closeActiveFile(stream *streamState, stopChan <-chan struct{
 	af := stream.activeFile
 	stream.activeFile = nil
 
+	// Capture last packets from muxer because WriteTrailer will flush them from muxer logic
+	// but does not close them. We must close them after WriteTrailer.
+	// We check indices 0 and 1 as we typically have at most 2 streams (Audio/Video).
+	var lastPackets []gomedia.Packet
+	for i := uint8(0); i < 2; i++ {
+		if pkt := af.muxer.GetPreLastPacket(i); pkt != nil {
+			lastPackets = append(lastPackets, pkt)
+		}
+	}
+
 	if err := af.muxer.WriteTrailer(); err != nil {
+		// Even on error, we must close captured packets as Muxer likely dropped them
+		for _, pkt := range lastPackets {
+			pkt.Close()
+		}
 		_ = af.file.Close()
 		return err
+	}
+
+	for _, pkt := range lastPackets {
+		pkt.Close()
 	}
 
 	fi, err := af.file.Stat()
@@ -323,6 +341,7 @@ func (s *segmenter) closeActiveFile(stream *streamState, stopChan <-chan struct{
 // writePacketToFile writes a packet directly to the active file of a stream
 func (s *segmenter) writePacketToFile(stream *streamState, pkt gomedia.Packet) error {
 	if stream.activeFile == nil {
+		pkt.Close()
 		return errors.New("no active file")
 	}
 
@@ -332,6 +351,9 @@ func (s *segmenter) writePacketToFile(stream *streamState, pkt gomedia.Packet) e
 	preLastPkt := af.muxer.GetPreLastPacket(pkt.StreamIndex())
 
 	if err := af.muxer.WritePacket(pkt); err != nil {
+		if preLastPkt != nil {
+			preLastPkt.Close()
+		}
 		return err
 	}
 
@@ -349,6 +371,7 @@ func (s *segmenter) writePacketToFile(stream *streamState, pkt gomedia.Packet) e
 			}
 			if err := preLastPkt.SwitchToFile(af.file, dataOffset, dataSize, done); err != nil {
 				af.wg.Done() // Ensure WaitGroup is decremented on error
+				preLastPkt.Close()
 				return err
 			}
 		}
@@ -454,6 +477,7 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 			if vPkt.CodecParameters() != stream.codecPar.VideoCodecParameters {
 				stream.codecPar.VideoCodecParameters = vPkt.CodecParameters()
 				if err = s.closeActiveFile(stream, s.Done()); err != nil {
+					inpPkt.Close()
 					return
 				}
 			}
@@ -462,6 +486,7 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 			if aPkt.CodecParameters() != stream.codecPar.AudioCodecParameters {
 				stream.codecPar.AudioCodecParameters = aPkt.CodecParameters()
 				if err = s.closeActiveFile(stream, s.Done()); err != nil {
+					inpPkt.Close()
 					return
 				}
 			}
@@ -497,6 +522,7 @@ func (s *segmenter) handleAlwaysMode(url string, stream *streamState, stopCh <-c
 	// Check if we need to rotate file (on keyframe when duration exceeded)
 	if isKeyframe && stream.activeFile != nil && stream.activeFile.duration >= s.targetDuration {
 		if err := s.closeActiveFile(stream, stopCh); err != nil {
+			pkt.Close()
 			return err
 		}
 	}
@@ -504,6 +530,7 @@ func (s *segmenter) handleAlwaysMode(url string, stream *streamState, stopCh <-c
 	// Open new file if needed (on keyframe)
 	if stream.activeFile == nil && isKeyframe {
 		if err := s.openNewFile(url, stream, pkt.StartTime()); err != nil {
+			pkt.Close()
 			return err
 		}
 		// Update recording status
@@ -553,6 +580,7 @@ func (s *segmenter) handleEventModeActiveFile(url string, stream *streamState, s
 
 	if shouldClose {
 		if err := s.closeActiveFile(stream, stopCh); err != nil {
+			pkt.Close()
 			return err
 		}
 
@@ -576,9 +604,11 @@ func (s *segmenter) handleEventModeActiveFile(url string, stream *streamState, s
 	// Check if we need to rotate file (duration exceeded but event still active)
 	if isKeyframe && !s.eventSaved && stream.activeFile.duration >= s.targetDuration {
 		if err := s.closeActiveFile(stream, stopCh); err != nil {
+			pkt.Close()
 			return err
 		}
 		if err := s.openNewFile(url, stream, pkt.StartTime()); err != nil {
+			pkt.Close()
 			return err
 		}
 	}
@@ -613,6 +643,10 @@ func (s *segmenter) startEventRecording(url string, stream *streamState) error {
 	// Write buffered packets
 	for i := startIdx; i < len(bufferedPkts); i++ {
 		if err := s.writePacketToFile(stream, bufferedPkts[i]); err != nil {
+			// Close remaining packets that won't be written
+			for j := i + 1; j < len(bufferedPkts); j++ {
+				bufferedPkts[j].Close()
+			}
 			return err
 		}
 	}

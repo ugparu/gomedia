@@ -104,10 +104,12 @@ func (element *webRTCWriter) Step(stopCh <-chan struct{}) (err error) {
 			switch pkt := inpPkt.(type) {
 			case gomedia.VideoPacket:
 				if err = element.checkCodecParameters(inpPkt.URL(), pkt.CodecParameters()); err != nil {
+					inpPkt.Close()
 					return
 				}
 			case gomedia.AudioPacket:
 				if err = element.checkCodecParameters(inpPkt.URL(), pkt.CodecParameters()); err != nil {
+					inpPkt.Close()
 					return
 				}
 			}
@@ -578,6 +580,15 @@ func (element *webRTCWriter) Close_() { //nolint: revive
 				logger.Errorf(element, "%v", err)
 			}
 		}
+	}
+	for peer := range element.streams.pendingPeers {
+		if err := element.removePeer(peer); err != nil {
+			logger.Errorf(element, "%v", err)
+		}
+	}
+	// Close stream buffers to release remaining packets
+	for _, str := range element.streams.streams {
+		str.buffer.Close()
 	}
 }
 
