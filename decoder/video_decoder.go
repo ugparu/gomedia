@@ -230,7 +230,7 @@ func (dec *videoDecoder) Close_() { //nolint:revive // required by lifecycle.Asy
 
 // String returns a string representation of the inner video decoder.
 func (dec *videoDecoder) String() string {
-	return fmt.Sprintf("VIDEO_DECODER %s", dec.name)
+	return fmt.Sprintf("VDECODER %s", dec.name)
 }
 
 func (dec *videoDecoder) FPS() chan<- int {

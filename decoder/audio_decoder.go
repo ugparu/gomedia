@@ -122,5 +122,5 @@ func (d *audioDecoder) Close_() { //nolint:revive // required by lifecycle.Async
 }
 
 func (d *audioDecoder) String() string {
-	return "LAW_DECODER"
+	return "ADECODER"
 }
