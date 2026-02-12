@@ -35,9 +35,18 @@ type videoDecoder struct {
 	lastFrameTime time.Time                    // Time of the last decoded frame.
 	running       bool                         // Flag indicating whether the decoder is running.
 	hasKey        bool
+	name          string
 }
 
-func NewVideo(chanSize int, fps int, newDecoderFn func() InnerVideoDecoder) gomedia.VideoDecoder {
+type VideoDecoderParam func(*videoDecoder)
+
+func WithName(name string) VideoDecoderParam {
+	return func(dec *videoDecoder) {
+		dec.name = name
+	}
+}
+
+func NewVideo(chanSize int, fps int, newDecoderFn func() InnerVideoDecoder, params ...VideoDecoderParam) gomedia.VideoDecoder {
 	dec := &videoDecoder{
 		AsyncManager:      nil,
 		InnerVideoDecoder: nil,
@@ -54,6 +63,9 @@ func NewVideo(chanSize int, fps int, newDecoderFn func() InnerVideoDecoder) gome
 	dec.AsyncManager = lifecycle.NewFailSafeAsyncManager(dec)
 	runtime.SetFinalizer(dec, func(dcd *videoDecoder) { dcd.Close() })
 
+	for _, param := range params {
+		param(dec)
+	}
 	return dec
 }
 
@@ -218,7 +230,7 @@ func (dec *videoDecoder) Close_() { //nolint:revive // required by lifecycle.Asy
 
 // String returns a string representation of the inner video decoder.
 func (dec *videoDecoder) String() string {
-	return fmt.Sprintf("VIDEO_DECODER par=%v", dec.codecPar)
+	return fmt.Sprintf("VIDEO_DECODER %s", dec.name)
 }
 
 func (dec *videoDecoder) FPS() chan<- int {
