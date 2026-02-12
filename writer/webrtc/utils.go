@@ -89,15 +89,15 @@ func writeVideoPacketsToPeer(done chan struct{},
 		loop:
 			for {
 				select {
-				case <-vChan:
-				case <-aChan:
+				case pkt := <-vChan:
+					pkt.Close()
+				case pkt := <-aChan:
+					pkt.Close()
 				default:
 					break loop
 				}
 			}
 		case pkt := <-vChan:
-			defer pkt.Close()
-
 			// Get codec parameters for keyframes
 			var codecParams []byte
 			if pkt.IsKeyFrame() {
@@ -145,6 +145,8 @@ func writeVideoPacketsToPeer(done chan struct{},
 				sleep += time.Millisecond * bufCorStep
 			}
 
+			pkt.Close()
+
 			if sleep > 0 {
 				time.Sleep(sleep)
 			}
@@ -161,8 +163,6 @@ func writeAudioPacketsToPeer(done chan struct{}, flush chan struct{}, aChan chan
 			return
 		case <-flush:
 		case pkt := <-aChan:
-			defer pkt.Close()
-
 			pkt.View(func(data buffer.PooledBuffer) {
 				aBuf.Resize(data.Len())
 				copy(aBuf.Data(), data.Data())
@@ -181,6 +181,8 @@ func writeAudioPacketsToPeer(done chan struct{}, flush chan struct{}, aChan chan
 			if err != nil {
 				logger.Errorf(done, "Error writing audio sample: %v", err)
 			}
+
+			pkt.Close()
 		}
 	}
 }

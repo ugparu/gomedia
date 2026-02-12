@@ -74,6 +74,7 @@ func (rb *ringBuffer) trim() {
 			if _, ok := rb.packets[i].(gomedia.VideoPacket); ok {
 				trimDur += rb.packets[i].Duration()
 			}
+			rb.packets[i].Close()
 		}
 		rb.packets = rb.packets[trimIdx:]
 		rb.duration -= trimDur
@@ -81,6 +82,9 @@ func (rb *ringBuffer) trim() {
 }
 
 func (rb *ringBuffer) clear() {
+	for _, pkt := range rb.packets {
+		pkt.Close()
+	}
 	rb.packets = rb.packets[:0]
 	rb.duration = 0
 }
@@ -514,6 +518,7 @@ func (s *segmenter) handleAlwaysMode(url string, stream *streamState, stopCh <-c
 		return s.writePacketToFile(stream, pkt)
 	}
 
+	pkt.Close()
 	return nil
 }
 
@@ -564,6 +569,7 @@ func (s *segmenter) handleEventModeActiveFile(url string, stream *streamState, s
 			s.recordCurStatus = false
 			s.recordCurStatusCh <- false
 		}
+		pkt.Close()
 		return nil // Continue to buffer mode in next packet
 	}
 
@@ -589,6 +595,11 @@ func (s *segmenter) startEventRecording(url string, stream *streamState) error {
 
 	// Find first keyframe in buffer to start file
 	startIdx := s.findFirstKeyframe(bufferedPkts)
+
+	// Close packets before the first keyframe — they can't be used
+	for i := 0; i < startIdx; i++ {
+		bufferedPkts[i].Close()
+	}
 
 	if err := s.openNewFile(url, stream, bufferedPkts[startIdx].StartTime()); err != nil {
 		return err

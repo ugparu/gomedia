@@ -554,7 +554,18 @@ func (element *webRTCWriter) removePeer(peer *peerTrack) (err error) {
 
 	logger.Debug(element, "Closing done channel")
 	close(peer.done)
-	return nil
+
+	// Drain remaining packets from channels to avoid leaking cloned packets
+	for {
+		select {
+		case pkt := <-peer.vChan:
+			pkt.Close()
+		case pkt := <-peer.aChan:
+			pkt.Close()
+		default:
+			return nil
+		}
+	}
 }
 
 // Close closes the innerWriter by closing the input packet channel and removing all existing peers.
