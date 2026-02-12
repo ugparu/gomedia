@@ -25,15 +25,16 @@ type InnerVideoDecoder interface {
 type videoDecoder struct {
 	lifecycle.AsyncManager[*videoDecoder]
 	InnerVideoDecoder
-	newDecoderFn func() InnerVideoDecoder
-	inpPktCh     chan gomedia.VideoPacket     // Channel for receiving multimedia packets.
-	outFrmCh     chan image.Image             // Channel for sending decoded video frames.
-	codecPar     gomedia.VideoCodecParameters // Video codec parameters.
-	fpsChan      chan int                     // Channel for sending frames per second.
-	targetFPS    int                          // Target frames per second.
-	decTicker    *time.Ticker                 // Ticker for timing.
-	running      bool                         // Flag indicating whether the decoder is running.
-	hasKey       bool
+	newDecoderFn  func() InnerVideoDecoder
+	inpPktCh      chan gomedia.VideoPacket     // Channel for receiving multimedia packets.
+	outFrmCh      chan image.Image             // Channel for sending decoded video frames.
+	codecPar      gomedia.VideoCodecParameters // Video codec parameters.
+	fpsChan       chan int                     // Channel for sending frames per second.
+	targetFPS     int                          // Target frames per second.
+	frameDuration time.Duration                // Duration between frames, computed from FPS.
+	lastFrameTime time.Time                    // Time of the last decoded frame.
+	running       bool                         // Flag indicating whether the decoder is running.
+	hasKey        bool
 }
 
 func NewVideo(chanSize int, fps int, newDecoderFn func() InnerVideoDecoder) gomedia.VideoDecoder {
@@ -46,7 +47,7 @@ func NewVideo(chanSize int, fps int, newDecoderFn func() InnerVideoDecoder) gome
 		codecPar:          nil,
 		fpsChan:           make(chan int, chanSize),
 		targetFPS:         fps,
-		decTicker:         nil,
+		frameDuration:     DurationFromFPS(fps),
 		running:           false,
 		hasKey:            false,
 	}
@@ -87,27 +88,28 @@ func (dec *videoDecoder) processPacket(inpPkt gomedia.VideoPacket, stopCh <-chan
 	}
 	dec.hasKey = true
 
-	select {
-	case <-dec.decTicker.C:
-		var img image.Image
-		if img, err = dec.InnerVideoDecoder.Decode(inpPkt); err != nil {
-			if err.Error() == ErrNeedMoreData.Error() {
-				return nil
-			}
-			return err
-		}
-
-		select {
-		case <-stopCh:
-			return &lifecycle.BreakError{}
-		case dec.outFrmCh <- img:
-			logger.Tracef(dec, "Sent frame %v", inpPkt)
-			return
-		}
-
-	default:
+	const delta = time.Millisecond * 10
+	if dec.frameDuration > 0 && time.Since(dec.lastFrameTime) < dec.frameDuration-delta {
 		logger.Tracef(dec, "Skipping frame due to fps limit %v", inpPkt)
 		return dec.InnerVideoDecoder.Feed(inpPkt)
+	}
+
+	var img image.Image
+	if img, err = dec.InnerVideoDecoder.Decode(inpPkt); err != nil {
+		if err.Error() == ErrNeedMoreData.Error() {
+			return nil
+		}
+		return err
+	}
+
+	dec.lastFrameTime = time.Now()
+
+	select {
+	case <-stopCh:
+		return &lifecycle.BreakError{}
+	case dec.outFrmCh <- img:
+		logger.Tracef(dec, "Sent frame %v", inpPkt)
+		return
 	}
 }
 
@@ -145,20 +147,7 @@ func (dec *videoDecoder) stopDecoder() {
 // Decode initializes the inner decoder.
 func (dec *videoDecoder) Decode() {
 	startFunc := func(dec *videoDecoder) error {
-		switch {
-		case dec.targetFPS < 0:
-			dec.decTicker = time.NewTicker(10 * time.Millisecond) //nolint:mnd // 10ms is a reasonable default interval
-		case dec.targetFPS == 0:
-			dec.decTicker = time.NewTicker(10 * time.Millisecond) //nolint:mnd // 10ms is a reasonable default interval
-			dec.decTicker.Stop()
-			select {
-			case <-dec.decTicker.C:
-			default:
-			}
-		default:
-			dec.decTicker = TickerFromFPS(dec.targetFPS)
-		}
-
+		dec.frameDuration = DurationFromFPS(dec.targetFPS)
 		return nil
 	}
 	_ = dec.Start(startFunc)
@@ -176,23 +165,20 @@ func (dec *videoDecoder) Step(stopCh <-chan struct{}) (err error) {
 		}
 		defer func() { dec.targetFPS = fps }()
 
-		switch {
-		case fps < 0:
-			dec.decTicker.Reset(10 * time.Millisecond) //nolint:mnd // 10ms is a reasonable default interval
-		case fps == 0:
-			dec.decTicker.Reset(10 * time.Millisecond) //nolint:mnd // 10ms is a reasonable default interval
-			dec.decTicker.Stop()
-			select {
-			case <-dec.decTicker.C:
-			default:
-			}
-		default:
-			dec.decTicker.Reset(time.Duration(1000/fps) * time.Millisecond) //nolint:mnd // 1000ms in a second
-		}
+		dec.frameDuration = DurationFromFPS(fps)
 
 		if fps == 0 && dec.targetFPS != 0 {
 			dec.stopDecoder()
-			return
+			for {
+				select {
+				case <-stopCh:
+					return &lifecycle.BreakError{}
+				case inpPkt := <-dec.inpPktCh:
+					inpPkt.Close()
+				default:
+					return
+				}
+			}
 		}
 		if fps != 0 && dec.targetFPS == 0 {
 			if err = dec.startDecoder(); err != nil {
@@ -247,9 +233,9 @@ func (dec *videoDecoder) Images() <-chan image.Image {
 	return dec.outFrmCh
 }
 
-func TickerFromFPS(fps int) (ticker *time.Ticker) {
+func DurationFromFPS(fps int) time.Duration {
 	if fps > 0 {
-		ticker = time.NewTicker(time.Duration(1000/fps) * time.Millisecond)
+		return time.Duration(1000/fps) * time.Millisecond //nolint:mnd // 1000ms in a second
 	}
-	return
+	return 0
 }
