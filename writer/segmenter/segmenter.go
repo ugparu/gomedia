@@ -327,9 +327,9 @@ func (s *segmenter) closeActiveFile(stream *streamState, stopChan <-chan struct{
 
 		select {
 		case <-waitDone:
-		case <-time.After(af.duration * 3):
+		case <-time.After(s.targetDuration * 3):
 			logger.Warningf(af.folder, "timeout waiting for packets to close for file %s (waited %v), closing anyway",
-				af.name, af.duration*3)
+				af.name, s.targetDuration*3)
 		}
 
 		_ = af.file.Close()
