@@ -64,6 +64,7 @@ type peerTrack struct {
 	*webrtc.PeerConnection // WebRTC peer connection.
 	vt                     *webrtc.TrackLocalStaticSample
 	at                     *webrtc.TrackLocalStaticSample
+	targetURL              string
 	aChan                  chan gomedia.AudioPacket
 	aBuf                   buffer.PooledBuffer
 	vChan                  chan gomedia.VideoPacket

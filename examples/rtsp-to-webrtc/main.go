@@ -164,10 +164,11 @@ func main() {
 		}
 
 		peer := &gomedia.WebRTCPeer{
-			SDP:   req.SDP,
-			Delay: 0,
-			Err:   nil,
-			Done:  make(chan struct{}),
+			SDP:       req.SDP,
+			TargetURL: currentURLs[0], // use first configured URL as target stream
+			Delay:     0,
+			Err:       nil,
+			Done:      make(chan struct{}),
 		}
 
 		webrtcWrt.Peers() <- peer

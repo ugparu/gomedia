@@ -3,6 +3,7 @@ package webrtc
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -202,11 +203,12 @@ func (ss *sortedStreams) Remove(removeURL string) {
 }
 
 func (ss *sortedStreams) Insert(pt *peerTrack) (err error) {
-	// All streams have valid video codec parameters, use the first one
-	if len(ss.sortedURLs) > 0 {
-		url := ss.sortedURLs[0]
-		ss.streams[url].tracks[pt] = false
+	// If peer has a targetURL and such stream exists, attach peer to that stream
+	if str, ok := ss.streams[pt.targetURL]; ok && str != nil {
+		str.tracks[pt] = false
 		return nil
+	} else if !ok {
+		return fmt.Errorf("unknown URL %w", err)
 	}
 
 	// No streams available - add to pending

@@ -72,13 +72,23 @@ func (element *webRTCWriter) Step(stopCh <-chan struct{}) (err error) {
 	case <-stopCh:
 		return &lifecycle.BreakError{}
 	case peer := <-element.peersChan:
-		if len(element.streams.sortedURLs) == 0 {
-			peer.Err = errors.New("no streams available")
+		// Validate that target URL is provided
+		if peer.TargetURL == "" {
+			peer.Err = errors.New("target URL is empty")
 			close(peer.Done)
 			return peer.Err
 		}
-		codecType := element.streams.streams[element.streams.sortedURLs[0]].codecPar.VideoCodecParameters.Type()
-		go element.addConnection(peer, codecType)
+
+		// Validate that target stream exists
+		targetStream, ok := element.streams.streams[peer.TargetURL]
+		if !ok || targetStream == nil || targetStream.codecPar.VideoCodecParameters == nil {
+			peer.Err = errors.New("target stream not found: " + peer.TargetURL)
+			close(peer.Done)
+			return peer.Err
+		}
+
+		codecType := targetStream.codecPar.VideoCodecParameters.Type()
+		go element.addConnection(peer, peer.TargetURL, codecType)
 	case peerURL := <-element.changePeersChan:
 		return element.streams.Move(peerURL)
 	case peerTrack := <-element.connectPeersChan:
@@ -341,7 +351,7 @@ func extractFmtpLineFromSDP(sdp string, codecType gomedia.CodecType) string {
 	return ""
 }
 
-func (element *webRTCWriter) addConnection(inpPeer *gomedia.WebRTCPeer, codecType gomedia.CodecType) (err error) {
+func (element *webRTCWriter) addConnection(inpPeer *gomedia.WebRTCPeer, targetURL string, codecType gomedia.CodecType) (err error) {
 	defer close(inpPeer.Done)
 
 	sdp64 := inpPeer.SDP
@@ -364,7 +374,8 @@ func (element *webRTCWriter) addConnection(inpPeer *gomedia.WebRTCPeer, codecTyp
 
 	pt := new(peerTrack)
 	pt.PeerConnection = peer
-	pt.delay = max(time.Second/5, time.Second*time.Duration(inpPeer.Delay))
+	pt.targetURL = targetURL
+	pt.delay = max(time.Second*11, time.Second*time.Duration(inpPeer.Delay))
 	pt.flush = make(chan struct{})
 	pt.done = make(chan struct{})
 	const bufSize = 500

@@ -387,11 +387,18 @@ func HandleSDP(c *gin.Context) {
 		return
 	}
 
+	// By default, bind peer to the first RTSP URL
+	targetURL := ""
+	if len(rtspURLs) > 0 && rtspURLs[0] != "" {
+		targetURL = rtspURLs[0]
+	}
+
 	peer := &gomedia.WebRTCPeer{
-		SDP:   req.SDP,
-		Delay: 0,
-		Err:   nil,
-		Done:  make(chan struct{}),
+		SDP:       req.SDP,
+		TargetURL: targetURL,
+		Delay:     0,
+		Err:       nil,
+		Done:      make(chan struct{}),
 	}
 
 	webrtcWr.Peers() <- peer

@@ -190,10 +190,11 @@ type Resolution struct {
 
 // WebRTCPeer represents a WebRTC peer connection status.
 type WebRTCPeer struct {
-	SDP   string        // Session Description Protocol data
-	Delay int           // Connection delay in milliseconds
-	Err   error         // Any error associated with this peer
-	Done  chan struct{} // Channel signaling completion
+	SDP       string        // Session Description Protocol data
+	TargetURL string        // Target source URL (must match stream URL)
+	Delay     int           // Connection delay in milliseconds
+	Err       error         // Any error associated with this peer
+	Done      chan struct{} // Channel signaling completion
 }
 
 // WebRTC defines the interface for WebRTC streaming functionality.
