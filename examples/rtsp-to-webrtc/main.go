@@ -3,7 +3,6 @@ package main
 import (
 	"log"
 	"net/http"
-	"runtime"
 	"sync"
 	"time"
 
@@ -41,14 +40,6 @@ var (
 )
 
 func main() {
-	go func() {
-		for {
-			runtime.GC()
-			logger.Infof(nil, "GC called")
-			time.Sleep(time.Second * 10)
-		}
-	}()
-
 	// Initialize reader once at startup
 	rdr = reader.NewRTSP(100)
 	rdr.Read()

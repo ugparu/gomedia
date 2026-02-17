@@ -88,7 +88,6 @@ func (rdr *reader) repackPackets(src string, stopCh <-chan struct{}) {
 		if pkt == nil {
 			continue
 		}
-
 		logger.Tracef(rdr, "Read new packet %v", pkt)
 
 		// Increment the packet count.

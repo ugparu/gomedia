@@ -90,32 +90,27 @@ func (element *webRTCWriter) Step(stopCh <-chan struct{}) (err error) {
 		if err = element.removePeer(peer); err != nil {
 			return err
 		}
-	default:
-		select {
-		case <-stopCh:
-			return &lifecycle.BreakError{}
-		case rmURL := <-element.rmSrcCh:
-			element.removeSource(rmURL)
-			logger.Infof(element, "Sending setAvailableStreams after removing source %s", rmURL)
-			element.sendAvailableStreams()
-		case addURL := <-element.addSrcCh:
-			element.addSource(addURL)
-		case inpPkt := <-element.inpPktCh:
-			switch pkt := inpPkt.(type) {
-			case gomedia.VideoPacket:
-				if err = element.checkCodecParameters(inpPkt.URL(), pkt.CodecParameters()); err != nil {
-					inpPkt.Close()
-					return
-				}
-			case gomedia.AudioPacket:
-				if err = element.checkCodecParameters(inpPkt.URL(), pkt.CodecParameters()); err != nil {
-					inpPkt.Close()
-					return
-				}
+	case rmURL := <-element.rmSrcCh:
+		element.removeSource(rmURL)
+		logger.Infof(element, "Sending setAvailableStreams after removing source %s", rmURL)
+		element.sendAvailableStreams()
+	case addURL := <-element.addSrcCh:
+		element.addSource(addURL)
+	case inpPkt := <-element.inpPktCh:
+		switch pkt := inpPkt.(type) {
+		case gomedia.VideoPacket:
+			if err = element.checkCodecParameters(inpPkt.URL(), pkt.CodecParameters()); err != nil {
+				inpPkt.Close()
+				return
 			}
-			if err = element.streams.writePacket(inpPkt); err != nil {
-				return err
+		case gomedia.AudioPacket:
+			if err = element.checkCodecParameters(inpPkt.URL(), pkt.CodecParameters()); err != nil {
+				inpPkt.Close()
+				return
 			}
+		}
+		if err = element.streams.writePacket(inpPkt); err != nil {
+			return err
 		}
 	}
 
@@ -370,6 +365,9 @@ func (element *webRTCWriter) addConnection(inpPeer *gomedia.WebRTCPeer, codecTyp
 	pt := new(peerTrack)
 	pt.PeerConnection = peer
 	pt.delay = time.Second * time.Duration(inpPeer.Delay)
+	if inpPeer.Delay == 0 {
+		pt.delay = time.Second
+	}
 	pt.flush = make(chan struct{})
 	pt.done = make(chan struct{})
 	const bufSize = 100
@@ -512,8 +510,8 @@ func (element *webRTCWriter) addConnection(inpPeer *gomedia.WebRTCPeer, codecTyp
 
 	inpPeer.SDP = base64.StdEncoding.EncodeToString([]byte(peer.LocalDescription().SDP))
 
-	go writeVideoPacketsToPeer(pt.done, pt.flush, pt.vChan, pt.aChan, pt.vt, pt.vBuf)
-	go writeAudioPacketsToPeer(pt.done, pt.flush, pt.aChan, pt.at, pt.aBuf)
+	go writeVideoPacketsToPeer(pt.done, pt.flush, pt.vChan, pt.aChan, pt.vt, pt.vBuf, pt.delay)
+	go writeAudioPacketsToPeer(pt.done, pt.flush, pt.aChan, pt.at, pt.aBuf, pt.delay)
 
 	return nil
 }

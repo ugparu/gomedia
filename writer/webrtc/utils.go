@@ -16,9 +16,7 @@ import (
 
 // minPktSz is the minimum packet size constant.
 const minPktSz = 5
-
-const bufLen = 10
-const bufCorStep = 5
+const correctionStep = time.Millisecond * 5
 
 // peerURL represents the information associated with a peer track, including token and URL.
 type peerURL struct {
@@ -79,7 +77,7 @@ type peerTrack struct {
 func writeVideoPacketsToPeer(done chan struct{},
 	flush chan struct{},
 	vChan chan gomedia.VideoPacket, aChan chan gomedia.AudioPacket,
-	vt *webrtc.TrackLocalStaticSample, vBuf buffer.PooledBuffer) {
+	vt *webrtc.TrackLocalStaticSample, vBuf buffer.PooledBuffer, delay time.Duration) {
 	last := time.Now()
 	for {
 		select {
@@ -98,7 +96,6 @@ func writeVideoPacketsToPeer(done chan struct{},
 				}
 			}
 		case pkt := <-vChan:
-			// Get codec parameters for keyframes
 			var codecParams []byte
 			if pkt.IsKeyFrame() {
 				codecParams = appendCodecParameters(pkt.CodecParameters())
@@ -129,7 +126,7 @@ func writeVideoPacketsToPeer(done chan struct{},
 				Data:               vBuf.Data(),
 				Timestamp:          pkt.StartTime(),
 				Duration:           pkt.Duration(),
-				PacketTimestamp:    uint32(pkt.Timestamp()), //nolint:gosec
+				PacketTimestamp:    0,
 				PrevDroppedPackets: 0,
 				Metadata:           nil,
 			}
@@ -137,15 +134,14 @@ func writeVideoPacketsToPeer(done chan struct{},
 			if err := vt.WriteSample(sample); err != nil {
 				logger.Errorf(done, "Error writing video sample: %v", err)
 			}
-
-			sleep := pkt.Duration() - time.Since(last) - time.Millisecond
-			if len(vChan) > bufLen {
-				sleep -= time.Millisecond * bufCorStep
-			} else if len(vChan) < bufLen {
-				sleep += time.Millisecond * bufCorStep
-			}
-
 			pkt.Close()
+
+			sleep := pkt.Duration() - time.Since(last)
+
+			miss := time.Since(pkt.StartTime()) - delay
+			if miss > 0 {
+				sleep -= correctionStep
+			}
 
 			if sleep > 0 {
 				time.Sleep(sleep)
@@ -156,7 +152,8 @@ func writeVideoPacketsToPeer(done chan struct{},
 	}
 }
 
-func writeAudioPacketsToPeer(done chan struct{}, flush chan struct{}, aChan chan gomedia.AudioPacket, at *webrtc.TrackLocalStaticSample, aBuf buffer.PooledBuffer) {
+func writeAudioPacketsToPeer(done chan struct{}, flush chan struct{}, aChan chan gomedia.AudioPacket, at *webrtc.TrackLocalStaticSample, aBuf buffer.PooledBuffer, delay time.Duration) {
+	last := time.Now()
 	for {
 		select {
 		case <-done:
@@ -172,7 +169,7 @@ func writeAudioPacketsToPeer(done chan struct{}, flush chan struct{}, aChan chan
 				Data:               aBuf.Data(),
 				Timestamp:          pkt.StartTime(),
 				Duration:           pkt.Duration(),
-				PacketTimestamp:    uint32(pkt.Timestamp()), //nolint:gosec
+				PacketTimestamp:    0,
 				PrevDroppedPackets: 0,
 				Metadata:           nil,
 			}
@@ -183,6 +180,14 @@ func writeAudioPacketsToPeer(done chan struct{}, flush chan struct{}, aChan chan
 			}
 
 			pkt.Close()
+
+			sleep := pkt.Duration() - time.Since(last)
+
+			if sleep > 0 {
+				time.Sleep(sleep)
+			}
+
+			last = time.Now()
 		}
 	}
 }
