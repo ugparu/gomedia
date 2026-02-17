@@ -364,13 +364,10 @@ func (element *webRTCWriter) addConnection(inpPeer *gomedia.WebRTCPeer, codecTyp
 
 	pt := new(peerTrack)
 	pt.PeerConnection = peer
-	pt.delay = time.Second * time.Duration(inpPeer.Delay)
-	if inpPeer.Delay == 0 {
-		pt.delay = time.Second / 2
-	}
+	pt.delay = max(time.Second/5, time.Second*time.Duration(inpPeer.Delay))
 	pt.flush = make(chan struct{})
 	pt.done = make(chan struct{})
-	const bufSize = 100
+	const bufSize = 500
 	pt.vChan = make(chan gomedia.VideoPacket, bufSize)
 	pt.vBuf = buffer.Get(0)
 	pt.aChan = make(chan gomedia.AudioPacket, bufSize)

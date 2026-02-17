@@ -16,7 +16,7 @@ import (
 
 // minPktSz is the minimum packet size constant.
 const minPktSz = 5
-const correctionStep = time.Millisecond * 5
+const correctionStep = time.Millisecond * 3
 
 // peerURL represents the information associated with a peer track, including token and URL.
 type peerURL struct {
@@ -122,6 +122,14 @@ func writeVideoPacketsToPeer(done chan struct{},
 				offset += copy(vBuf.Data()[offset:], nalu)
 			}
 
+			miss := time.Since(pkt.StartTime()) - delay
+
+			if miss > 0 {
+				pkt.SetDuration(pkt.Duration() - correctionStep)
+			} else if miss < 0 {
+				pkt.SetDuration(pkt.Duration() + correctionStep)
+			}
+
 			sample := media.Sample{
 				Data:               vBuf.Data(),
 				Timestamp:          pkt.StartTime(),
@@ -134,14 +142,9 @@ func writeVideoPacketsToPeer(done chan struct{},
 			if err := vt.WriteSample(sample); err != nil {
 				logger.Errorf(done, "Error writing video sample: %v", err)
 			}
-			pkt.Close()
 
 			sleep := pkt.Duration() - time.Since(last)
-
-			miss := time.Since(pkt.StartTime()) - delay
-			if miss > 0 {
-				sleep -= correctionStep
-			}
+			pkt.Close()
 
 			if sleep > 0 {
 				time.Sleep(sleep)
