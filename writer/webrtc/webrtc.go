@@ -366,7 +366,7 @@ func (element *webRTCWriter) addConnection(inpPeer *gomedia.WebRTCPeer, codecTyp
 	pt.PeerConnection = peer
 	pt.delay = time.Second * time.Duration(inpPeer.Delay)
 	if inpPeer.Delay == 0 {
-		pt.delay = time.Second
+		pt.delay = time.Second / 2
 	}
 	pt.flush = make(chan struct{})
 	pt.done = make(chan struct{})
