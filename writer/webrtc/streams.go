@@ -391,6 +391,33 @@ func (ss *sortedStreams) moveTrackToStream(str *stream, pu *peerURL, peerBuf []g
 
 	// Add to current stream
 	str.tracks[pu.peerTrack] = true
+
+	// Send setStreamUrl notification with token (if any) after moving the track
+	if pu.peerTrack != nil && pu.peerTrack.DataChannel != nil {
+		reqMsg := &dataChanReq{
+			Token:   pu.Token,
+			Command: "setStreamUrl",
+			Message: pu.URL,
+		}
+
+		bytes, err := json.Marshal(reqMsg)
+		if err != nil {
+			logger.Errorf(ss, "Failed to marshal setStreamUrl notification: %v", err)
+			return
+		}
+
+		// Check if peer is already closed before sending
+		select {
+		case <-pu.done:
+			// Peer already closed
+			return
+		default:
+			logger.Infof(ss, "Sending setStreamUrl message %s", bytes)
+			if err = pu.peerTrack.DataChannel.Send(bytes); err != nil {
+				logger.Errorf(ss, "Failed to send setStreamUrl notification: %v", err)
+			}
+		}
+	}
 }
 
 // processExistingTracks processes tracks that are already part of the stream

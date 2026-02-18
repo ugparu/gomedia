@@ -2,7 +2,6 @@ package webrtc
 
 import (
 	"bytes"
-	"encoding/json"
 	"time"
 
 	"github.com/pion/webrtc/v4"
@@ -75,38 +74,6 @@ type peerTrack struct {
 	delay                  time.Duration
 	done                   chan struct{}
 	*webrtc.DataChannel    // Data channel associated with the peer.
-}
-
-// notifyTrackChange sends a notification about track changes when a packet with a new URL is sent to WebRTC
-func notifyTrackChange(pt *peerTrack, url string) {
-	go func(pt *peerTrack, url string) {
-		reqMsg := &dataChanReq{
-			Token:   "",
-			Command: "setStreamUrl",
-			Message: url,
-		}
-		bytes, err := json.Marshal(reqMsg)
-		if err != nil {
-			logger.Error(pt, err.Error())
-			return
-		}
-
-		if pt.DataChannel == nil {
-			logger.Errorf(pt, "Cannot notify track change: DataChannel is nil")
-			return
-		}
-
-		// Check if peer is already closed before sending
-		select {
-		case <-pt.done:
-			return // Peer already closed
-		default:
-			logger.Infof(pt, "Sending message %s", bytes)
-			if err = pt.DataChannel.Send(bytes); err != nil {
-				logger.Error(pt, err.Error())
-			}
-		}
-	}(pt, url)
 }
 
 func writeVideoPacketsToPeer(pt *peerTrack,
@@ -187,9 +154,8 @@ func writeVideoPacketsToPeer(pt *peerTrack,
 						url = pktURL
 					}
 					if pktURL != url {
-						// Packet with new URL is being sent to WebRTC - notify track change
+						// Packet with new URL is being sent to WebRTC
 						processPkt(pkt)
-						notifyTrackChange(pt, pktURL)
 						url = pktURL
 						break loop
 					}
@@ -203,8 +169,7 @@ func writeVideoPacketsToPeer(pt *peerTrack,
 			if url == "" {
 				url = pktURL
 			} else if pktURL != url {
-				// Packet with new URL is being sent to WebRTC - notify track change
-				notifyTrackChange(pt, pktURL)
+				// Packet with new URL is being sent to WebRTC
 				url = pktURL
 			}
 			processPkt(pkt)
@@ -261,9 +226,8 @@ func writeAudioPacketsToPeer(pt *peerTrack, aflush chan struct{}, aChan chan gom
 						url = pktURL
 					}
 					if pktURL != url {
-						// Packet with new URL is being sent to WebRTC - notify track change
+						// Packet with new URL is being sent to WebRTC
 						processPkt(pkt)
-						notifyTrackChange(pt, pktURL)
 						url = pktURL
 						break loop
 					}
