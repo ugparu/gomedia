@@ -20,7 +20,7 @@ func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer
 		RTCPMuxPolicy:        webrtc.RTCPMuxPolicyNegotiate,
 		PeerIdentity:         "",
 		Certificates:         []webrtc.Certificate{},
-		ICECandidatePoolSize: 20,
+		ICECandidatePoolSize: 1,
 		SDPSemantics:         webrtc.SDPSemanticsUnifiedPlanWithFallback,
 	}
 
