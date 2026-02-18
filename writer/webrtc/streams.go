@@ -271,19 +271,58 @@ func (ss *sortedStreams) processPendingTracks(str *stream, pkt gomedia.Packet) [
 
 // canAddTrackToPeer determines if a track can be added to a peer
 func (ss *sortedStreams) canAddTrackToPeer(str *stream, pkt gomedia.Packet, pu *peerURL) (bool, []gomedia.Packet) {
-	_, peerBuf := str.buffer.GetBuffer(time.Now().Add(-pu.delay))
+	seedBuf, peerBuf := str.buffer.GetBuffer(time.Now().Add(-pu.delay))
 
 	// Case 1: Empty buffer requires a key frame in the current packet
 	if len(peerBuf) == 0 {
 		return ss.hasKeyFrame(pkt), peerBuf
 	}
 
-	for _, bufPkt := range peerBuf {
-		if _, ok := bufPkt.(gomedia.VideoPacket); ok {
-			return ss.hasKeyFrame(bufPkt), peerBuf
+	// Analyze last 3 from seed buffer and first 3 video frames from peer buffer
+	seedStart := 0
+	if len(seedBuf) > 3 {
+		seedStart = len(seedBuf) - 3
+	}
+	seedFrames := seedBuf[seedStart:]
+
+	peerVideoCount := 0
+	var keyframeInSeedIdx int = -1
+	var keyframeInPeerIdx int = -1
+
+	for i, vp := range seedFrames {
+		if vp.IsKeyFrame() {
+			keyframeInSeedIdx = seedStart + i
+			break
 		}
 	}
 
+	if keyframeInSeedIdx < 0 {
+		for i, bufPkt := range peerBuf {
+			if vp, ok := bufPkt.(gomedia.VideoPacket); ok {
+				if vp.IsKeyFrame() {
+					keyframeInPeerIdx = i
+					break
+				}
+				peerVideoCount++
+				if peerVideoCount >= 3 {
+					break
+				}
+			}
+		}
+	}
+
+	if keyframeInSeedIdx >= 0 {
+		// Prepend seedBuf from keyframe to peerBuf
+		newPeerBuf := make([]gomedia.Packet, 0, len(seedBuf)-keyframeInSeedIdx+len(peerBuf))
+		for _, vp := range seedBuf[keyframeInSeedIdx:] {
+			newPeerBuf = append(newPeerBuf, vp)
+		}
+		newPeerBuf = append(newPeerBuf, peerBuf...)
+		return true, newPeerBuf
+	}
+	if keyframeInPeerIdx >= 0 {
+		return true, peerBuf[keyframeInPeerIdx:]
+	}
 	return false, nil
 }
 
@@ -409,48 +448,6 @@ func (ss *sortedStreams) seedTrack(str *stream, peer *peerTrack) error {
 
 	seedBuf, peerBuf := str.buffer.GetBuffer(time.Now().Add(-peer.delay))
 
-	// const pktDur = time.Millisecond * 5
-	// const gracePeriod = time.Millisecond * 150
-
-	// start := time.Now()
-	// targetSeedDuration := time.Duration(len(seedBuf))*pktDur + gracePeriod
-
-	// if len(seedBuf) > 0 {
-	// targetSeedDuration += gracePeriod
-	// ticker := time.NewTicker(pktDur)
-	// defer ticker.Stop()
-
-	// for _, vPkt := range seedBuf {
-	// 	bufSample := media.Sample{
-	// 		Data:               []byte{},
-	// 		Timestamp:          vPkt.StartTime(),
-	// 		Duration:           pktDur,
-	// 		PacketTimestamp:    uint32(vPkt.Timestamp()), //nolint:gosec
-	// 		PrevDroppedPackets: 0,
-	// 		Metadata:           nil,
-	// 	}
-
-	// 	if vPkt.IsKeyFrame() {
-	// 		bufSample.Data = appendCodecParameters(vPkt.CodecParameters())
-	// 	}
-
-	// 	var bufNalus [][]byte
-	// 	vPkt.View(func(data buffer.PooledBuffer) {
-	// 		bufNalus, _ = nal.SplitNALUs(data.Data())
-	// 	})
-
-	// 	for _, nalu := range bufNalus {
-	// 		bufSample.Data = append(bufSample.Data, append([]byte{0, 0, 0, 1}, nalu...)...)
-	// 	}
-
-	// 	if err := peer.vt.WriteSample(bufSample); err != nil {
-	// 		return err
-	// 	}
-
-	// 	<-ticker.C
-	// }
-	// }
-
 	for _, vPkt := range seedBuf {
 		clonePkt := vPkt.Clone(false)
 		const pktDur = time.Millisecond * 5
@@ -503,11 +500,6 @@ func (ss *sortedStreams) seedTrack(str *stream, peer *peerTrack) error {
 	if err = peer.DataChannel.Send(bytes); err != nil {
 		return err
 	}
-
-	// actualDur := time.Since(start)
-	// if actualDur < targetSeedDuration {
-	// 	time.Sleep(targetSeedDuration - actualDur)
-	// }
 
 	return nil
 }
