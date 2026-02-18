@@ -357,7 +357,7 @@ func (element *webRTCWriter) addConnection(inpPeer *gomedia.WebRTCPeer, targetUR
 	pt := new(peerTrack)
 	pt.PeerConnection = peer
 	pt.targetURL = targetURL
-	pt.delay = max(time.Second*11, time.Second*time.Duration(inpPeer.Delay))
+	pt.delay = max(time.Second/2, time.Second*time.Duration(inpPeer.Delay))
 	pt.vflush = make(chan struct{})
 	pt.aflush = make(chan struct{})
 	pt.done = make(chan struct{})

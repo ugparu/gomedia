@@ -40,7 +40,7 @@
         }
 
         .app-container {
-            max-width: 960px;
+            max-width: 1280px;
             margin: 0 auto;
             padding: 40px 24px;
         }
@@ -231,7 +231,7 @@
 
         .video-grid {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
+            grid-template-columns: 1fr;
             gap: 12px;
         }
 
@@ -471,27 +471,22 @@
                         >
                     </div>
                 </div>
-            </div>
-            <div class="screens-control">
-                <span>Screens:</span>
-                <select id="screensCount">
-                    <option value="1">1</option>
-                    <option value="2">2</option>
-                    <option value="3">3</option>
-                    <option value="4">4</option>
-                    <option value="5">5</option>
-                    <option value="6">6</option>
-                    <option value="7">7</option>
-                    <option value="8">8</option>
-                    <option value="9">9</option>
-                    <option value="10">10</option>
-                    <option value="11">11</option>
-                    <option value="12">12</option>
-                    <option value="13">13</option>
-                    <option value="14">14</option>
-                    <option value="15">15</option>
-                    <option value="16" selected>16</option>
-                </select>
+                <div class="url-row">
+                    <div class="url-label">
+                        Delay (sec)
+                    </div>
+                    <div class="input-wrapper">
+                        <input
+                            type="number"
+                            id="delayInput"
+                            class="url-input"
+                            placeholder="0"
+                            value="0"
+                            min="0"
+                            step="1"
+                        >
+                    </div>
+                </div>
             </div>
             <button id="connectUrlBtn" class="btn btn-primary btn-connect">
                 <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -514,51 +509,6 @@
                     </div>
                     <video id="videoElement" autoplay playsinline controls muted></video>
                 </div>
-                <div class="video-wrapper">
-                    <video class="clone-video" autoplay playsinline controls muted></video>
-                </div>
-                <div class="video-wrapper">
-                    <video class="clone-video" autoplay playsinline controls muted></video>
-                </div>
-                <div class="video-wrapper">
-                    <video class="clone-video" autoplay playsinline controls muted></video>
-                </div>
-                <div class="video-wrapper">
-                    <video class="clone-video" autoplay playsinline controls muted></video>
-                </div>
-                <div class="video-wrapper">
-                    <video class="clone-video" autoplay playsinline controls muted></video>
-                </div>
-                <div class="video-wrapper">
-                    <video class="clone-video" autoplay playsinline controls muted></video>
-                </div>
-                <div class="video-wrapper">
-                    <video class="clone-video" autoplay playsinline controls muted></video>
-                </div>
-                <div class="video-wrapper">
-                    <video class="clone-video" autoplay playsinline controls muted></video>
-                </div>
-                <div class="video-wrapper">
-                    <video class="clone-video" autoplay playsinline controls muted></video>
-                </div>
-                <div class="video-wrapper">
-                    <video class="clone-video" autoplay playsinline controls muted></video>
-                </div>
-                <div class="video-wrapper">
-                    <video class="clone-video" autoplay playsinline controls muted></video>
-                </div>
-                <div class="video-wrapper">
-                    <video class="clone-video" autoplay playsinline controls muted></video>
-                </div>
-                <div class="video-wrapper">
-                    <video class="clone-video" autoplay playsinline controls muted></video>
-                </div>
-                <div class="video-wrapper">
-                    <video class="clone-video" autoplay playsinline controls muted></video>
-                </div>
-                <div class="video-wrapper">
-                    <video class="clone-video" autoplay playsinline controls muted></video>
-                </div>
             </div>
 
             <div class="controls">
@@ -573,6 +523,14 @@
                         <rect x="6" y="6" width="12" height="12" rx="1"/>
                     </svg>
                     Stop
+                </button>
+                <button id="switchAllButton" class="btn btn-primary" disabled>
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M4 4h7v4M4 4l4 4"/>
+                        <path d="M20 20h-7v-4M20 20l-4-4"/>
+                        <path d="M5 12h14"/>
+                    </svg>
+                    Switch All to Other URL
                 </button>
             </div>
 
@@ -601,12 +559,13 @@
         const stopButton = document.getElementById('stopButton');
         const urlInput1 = document.getElementById('urlInput1');
         const urlInput2 = document.getElementById('urlInput2');
+        const delayInput = document.getElementById('delayInput');
         const connectUrlBtn = document.getElementById('connectUrlBtn');
-        const screensCountSelect = document.getElementById('screensCount');
         const urlBadges = document.getElementById('urlBadges');
         const streamSwitcher = document.getElementById('streamSwitcher');
         const streamOptions = document.getElementById('streamOptions');
         const currentStreamBadge = document.getElementById('currentStreamBadge');
+        const switchAllButton = document.getElementById('switchAllButton');
         
         // WebRTC variables
         const peerConnections = [];
@@ -617,6 +576,8 @@
         let availableStreams = [];
         let currentStreamUrl = '';
         let switchingStream = false;
+        // Track which input URL is currently active (stable toggle even if server normalizes URL)
+        let currentInputKey = null; // 'url1' | 'url2' | null
 
         // Per-player reconnect state (one player failing must not affect others)
         const reconnectTimers = [];
@@ -624,6 +585,7 @@
         const RECONNECT_DELAY_MS = 2500;
         let activePlayerCount = 0;
         let isStartingAll = false;
+        const MAX_PLAYERS = 8;
 
         // Track input changes for styling
         [urlInput1, urlInput2].forEach(input => {
@@ -639,7 +601,7 @@
                 if (url) {
                     const badge = document.createElement('div');
                     badge.className = 'url-badge';
-                    if (url === currentStreamUrl) {
+                    if (normalizeStreamUrl(url) && normalizeStreamUrl(url) === normalizeStreamUrl(currentStreamUrl)) {
                         badge.classList.add('active');
                     }
                     // Extract hostname from URL for display
@@ -679,7 +641,7 @@
                 option.className = 'stream-option';
                 option.dataset.url = stream.url;
                 
-                if (stream.url === currentStreamUrl) {
+                if (normalizeStreamUrl(stream.url) && normalizeStreamUrl(stream.url) === normalizeStreamUrl(currentStreamUrl)) {
                     option.classList.add('active');
                 }
 
@@ -702,11 +664,14 @@
         function handleStreamUrlChange(url) {
             currentStreamUrl = url;
             switchingStream = false;
+
+            // Best-effort: map currentStreamUrl to one of the input URLs
+            updateCurrentInputKeyFromCurrentUrl();
             
             // Update UI
             document.querySelectorAll('.stream-option').forEach(opt => {
                 opt.classList.remove('active', 'switching');
-                if (opt.dataset.url === url) {
+                if (normalizeStreamUrl(opt.dataset.url) && normalizeStreamUrl(opt.dataset.url) === normalizeStreamUrl(url)) {
                     opt.classList.add('active');
                 }
             });
@@ -715,14 +680,86 @@
             updateUrlBadges([urlInput1.value.trim(), urlInput2.value.trim()]);
         }
 
+        // Determine the \"other\" URL based on current selection and inputs
+        function getOtherUrl() {
+            const url1 = urlInput1.value.trim();
+            const url2 = urlInput2.value.trim();
+
+            if (!url1 || !url2) {
+                return null;
+            }
+
+            // Prefer explicit mapping if we have it (more robust than raw URL equality)
+            if (currentInputKey === 'url1') return url2;
+            if (currentInputKey === 'url2') return url1;
+
+            // Fallback: compare normalized URLs (server may strip credentials / normalize host/port)
+            const nCurrent = normalizeStreamUrl(currentStreamUrl);
+            const n1 = normalizeStreamUrl(url1);
+            const n2 = normalizeStreamUrl(url2);
+
+            if (!nCurrent) {
+                // If no current stream is known yet, prefer the second input as the alternate
+                return url2;
+            }
+
+            if (nCurrent === n1) return url2;
+            if (nCurrent === n2) return url1;
+            return url2; // last resort: still allow toggling
+        }
+
+        function normalizeStreamUrl(url) {
+            const raw = (url || '').trim();
+            if (!raw) return '';
+
+            // URL() may fail for rtsp in some environments; keep a safe fallback.
+            try {
+                const u = new URL(raw);
+                // Drop credentials and normalize hostname.
+                const protocol = (u.protocol || '').toLowerCase();
+                const hostname = (u.hostname || '').toLowerCase();
+                const port = u.port ? `:${u.port}` : '';
+                const pathname = u.pathname || '';
+                const search = u.search || '';
+                // Don't include hash; RTSP URLs typically don't use it for stream identity.
+                return `${protocol}//${hostname}${port}${pathname}${search}`;
+            } catch {
+                // Fallback: strip credentials if present (rtsp://user:pass@host/..)
+                return raw.replace(/^(rtsp|rtsps):\/\/[^@]+@/i, '$1://').toLowerCase();
+            }
+        }
+
+        function updateCurrentInputKeyFromCurrentUrl() {
+            const url1 = urlInput1.value.trim();
+            const url2 = urlInput2.value.trim();
+            const nCurrent = normalizeStreamUrl(currentStreamUrl);
+            if (!nCurrent) return;
+
+            if (url1 && nCurrent === normalizeStreamUrl(url1)) currentInputKey = 'url1';
+            else if (url2 && nCurrent === normalizeStreamUrl(url2)) currentInputKey = 'url2';
+        }
+
         // Update current stream badge
         function updateCurrentStreamBadge() {
-            const current = availableStreams.find(s => s.url === currentStreamUrl);
+            const nCurrent = normalizeStreamUrl(currentStreamUrl);
+            const current = availableStreams.find(s => normalizeStreamUrl(s.url) === nCurrent);
             if (current) {
                 currentStreamBadge.textContent = `${current.width}×${current.height}`;
             } else if (availableStreams.length > 0) {
                 currentStreamBadge.textContent = 'Auto';
             }
+        }
+
+        // Helper to send control messages over datachannel with logging
+        function sendControlMessage(dataChannel, payload, context) {
+            if (!dataChannel || dataChannel.readyState !== 'open') {
+                console.warn('[DataChannel SEND] skipped, channel not open', { context, payload });
+                return;
+            }
+
+            const message = JSON.stringify(payload);
+            console.log('[DataChannel SEND]', context, message, payload);
+            dataChannel.send(message);
         }
 
         // Switch to a different stream via datachannel
@@ -733,16 +770,30 @@
                 return;
             }
 
-            if (url === currentStreamUrl || switchingStream) {
+            // Compare via normalization to avoid "can't switch back" when server normalizes URL
+            const nTarget = normalizeStreamUrl(url);
+            const nCurrent = normalizeStreamUrl(currentStreamUrl);
+            if (nTarget && nCurrent && nTarget === nCurrent) {
                 return;
             }
 
+            if (switchingStream) {
+                // We didn't receive setStreamUrl / status response; allow user to override.
+                switchingStream = false;
+                document.querySelectorAll('.stream-option.switching').forEach(opt => opt.classList.remove('switching'));
+            }
+
             switchingStream = true;
+            // Optimistically set which input is now intended (toggle button depends on it)
+            const url1 = urlInput1.value.trim();
+            const url2 = urlInput2.value.trim();
+            if (url1 && nTarget === normalizeStreamUrl(url1)) currentInputKey = 'url1';
+            else if (url2 && nTarget === normalizeStreamUrl(url2)) currentInputKey = 'url2';
 
             // Update UI to show switching state
             document.querySelectorAll('.stream-option').forEach(opt => {
                 opt.classList.remove('switching');
-                if (opt.dataset.url === url) {
+                if (normalizeStreamUrl(opt.dataset.url) && normalizeStreamUrl(opt.dataset.url) === nTarget) {
                     opt.classList.add('switching');
                 }
             });
@@ -751,26 +802,39 @@
             const token = 'switch-' + Date.now();
 
             // Send stream change request via datachannel
-            const message = JSON.stringify({
-                token: token,
-                command: 'changeStream',
-                message: url
-            });
-
-            console.log('Sending stream switch request:', message);
-            dataChannel.send(message);
+            sendControlMessage(
+                dataChannel,
+                {
+                    token: token,
+                    command: 'changeStream',
+                    message: url
+                },
+                'switchStream'
+            );
         }
 
         // Handle datachannel messages
-        function handleDataChannelMessage(event) {
-            // Some messages may come as binary (ArrayBuffer/Blob) – ignore them here
-            if (typeof event.data !== 'string') {
-                return;
+        async function handleDataChannelMessage(event) {
+            async function dataChannelDataToText(data) {
+                if (typeof data === 'string') return data;
+                if (data instanceof ArrayBuffer) {
+                    return new TextDecoder('utf-8').decode(new Uint8Array(data));
+                }
+                if (data instanceof Uint8Array) {
+                    return new TextDecoder('utf-8').decode(data);
+                }
+                if (data instanceof Blob) {
+                    const buf = await data.arrayBuffer();
+                    return new TextDecoder('utf-8').decode(new Uint8Array(buf));
+                }
+                throw new Error(`Unsupported DataChannel payload type: ${Object.prototype.toString.call(data)}`);
             }
 
             try {
-                const data = JSON.parse(event.data);
-                console.log('DataChannel message:', data);
+                const raw = await dataChannelDataToText(event.data);
+                console.log('[DataChannel RECV raw]', raw);
+                const data = JSON.parse(raw);
+                console.log('[DataChannel RECV parsed]', data);
 
                 switch (data.command) {
                     case 'setAvailableStreams':
@@ -804,6 +868,7 @@
                         }
                 }
             } catch (e) {
+                console.log('[DataChannel RECV binary]', event.data);
                 console.error('Error parsing datachannel message:', e);
             }
         }
@@ -840,6 +905,7 @@
                 urlConnected = true;
                 
                 startButton.disabled = false;
+                switchAllButton.disabled = !(url1 && url2);
                 
                 updateUrlBadges(urls);
                 
@@ -872,8 +938,8 @@
                     iceServers: []
                 };
 
-                const desiredCount = parseInt(screensCountSelect.value, 10) || 1;
-                const playerCount = Math.min(playerVideos.length, Math.max(1, desiredCount));
+                const desiredCount = 1;
+                const playerCount = Math.min(playerVideos.length, MAX_PLAYERS, Math.max(1, desiredCount));
                 activePlayerCount = playerCount;
 
                 for (let i = 0; i < playerCount; i++) {
@@ -907,11 +973,14 @@
             if (index === 0) {
                 // Only first connection drives control UI
                 dc.onopen = () => {
-                    console.log('Data channel opened (player 0)');
+                    console.log('[DataChannel STATE] open (player 0)');
                 };
                 dc.onmessage = handleDataChannelMessage;
                 dc.onerror = (error) => {
-                    console.error('Data channel error:', error);
+                    console.error('[DataChannel ERROR] (player 0)', error);
+                };
+                dc.onclose = () => {
+                    console.log('[DataChannel STATE] closed (player 0)');
                 };
             }
 
@@ -983,11 +1052,13 @@
             }
 
             const base64Sdp = btoa(sessionDescription.sdp);
+            const delaySecondsRaw = Number(delayInput?.value ?? 0);
+            const delaySeconds = Number.isFinite(delaySecondsRaw) ? Math.max(0, Math.floor(delaySecondsRaw)) : 0;
 
             const response = await fetch('/sdp', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ sdp: base64Sdp })
+                body: JSON.stringify({ sdp: base64Sdp, delay: delaySeconds })
             });
 
             if (!response.ok) throw new Error('Failed to send SDP');
@@ -1117,6 +1188,7 @@
             availableStreams = [];
             currentStreamUrl = '';
             switchingStream = false;
+            currentInputKey = null;
             streamSwitcher.classList.remove('visible');
 
             // Stop reconnect timers and invalidate current runs
@@ -1162,6 +1234,16 @@
             await stopStream();
             startButton.disabled = false;
             stopButton.disabled = true;
+            switchAllButton.disabled = true;
+        });
+
+        switchAllButton.addEventListener('click', () => {
+            const otherUrl = getOtherUrl();
+            if (!otherUrl) {
+                console.warn('No alternate URL available to switch to');
+                return;
+            }
+            switchStream(otherUrl);
         });
     </script>
 </body>

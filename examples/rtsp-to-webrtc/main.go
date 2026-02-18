@@ -16,7 +16,8 @@ import (
 )
 
 type SDPRequest struct {
-	SDP string `json:"sdp" binding:"required"`
+	SDP   string `json:"sdp" binding:"required"`
+	Delay int    `json:"delay" binding:"min=0"`
 }
 
 type SDPResponse struct {
@@ -166,7 +167,7 @@ func main() {
 		peer := &gomedia.WebRTCPeer{
 			SDP:       req.SDP,
 			TargetURL: currentURLs[0], // use first configured URL as target stream
-			Delay:     0,
+			Delay:     req.Delay,
 			Err:       nil,
 			Done:      make(chan struct{}),
 		}

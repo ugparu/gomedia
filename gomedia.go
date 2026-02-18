@@ -192,7 +192,7 @@ type Resolution struct {
 type WebRTCPeer struct {
 	SDP       string        // Session Description Protocol data
 	TargetURL string        // Target source URL (must match stream URL)
-	Delay     int           // Connection delay in milliseconds
+	Delay     int           // Connection delay in seconds
 	Err       error         // Any error associated with this peer
 	Done      chan struct{} // Channel signaling completion
 }
