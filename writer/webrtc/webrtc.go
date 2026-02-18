@@ -179,7 +179,7 @@ func (element *webRTCWriter) checkCodecParameters(addr string, codecPar gomedia.
 
 	// If stream doesn't exist yet, create it with the codec parameters
 	if !element.streams.Exists(addr) {
-		movedPeers := element.streams.Add(addr, codecPar)
+		_ = element.streams.Add(addr, codecPar)
 		element.sendAvailableStreams()
 
 		parsedURL, err := url.Parse(addr)
@@ -188,18 +188,10 @@ func (element *webRTCWriter) checkCodecParameters(addr string, codecPar gomedia.
 		}
 		element.name = "WEBRTC_WRITER " + parsedURL.Hostname()
 
-		for _, peer := range movedPeers {
-			element.streams.notifyTrackChange(&peerURL{
-				peerTrack: peer,
-				Token:     "",
-				URL:       addr,
-			})
-		}
-
 		return nil
 	}
 
-	movedPeers, changed := element.streams.Update(addr, codecPar)
+	_, changed := element.streams.Update(addr, codecPar)
 	if !changed {
 		return
 	}
@@ -211,16 +203,6 @@ func (element *webRTCWriter) checkCodecParameters(addr string, codecPar gomedia.
 	element.name = "WEBRTC_WRITER " + parsedURL.Hostname()
 
 	element.sendAvailableStreams()
-
-	// Send setStreamUrl notifications AFTER setAvailableStreams for peers that were moved
-	// This ensures correct message ordering: setAvailableStreams first, then setStreamUrl
-	for _, peer := range movedPeers {
-		element.streams.notifyTrackChange(&peerURL{
-			peerTrack: peer,
-			Token:     "",
-			URL:       addr,
-		})
-	}
 
 	return nil
 }
@@ -376,7 +358,8 @@ func (element *webRTCWriter) addConnection(inpPeer *gomedia.WebRTCPeer, targetUR
 	pt.PeerConnection = peer
 	pt.targetURL = targetURL
 	pt.delay = max(time.Second*11, time.Second*time.Duration(inpPeer.Delay))
-	pt.flush = make(chan struct{})
+	pt.vflush = make(chan struct{})
+	pt.aflush = make(chan struct{})
 	pt.done = make(chan struct{})
 	const bufSize = 500
 	pt.vChan = make(chan gomedia.VideoPacket, bufSize)
@@ -518,8 +501,8 @@ func (element *webRTCWriter) addConnection(inpPeer *gomedia.WebRTCPeer, targetUR
 
 	inpPeer.SDP = base64.StdEncoding.EncodeToString([]byte(peer.LocalDescription().SDP))
 
-	go writeVideoPacketsToPeer(pt.done, pt.flush, pt.vChan, pt.aChan, pt.vt, pt.vBuf, pt.delay)
-	go writeAudioPacketsToPeer(pt.done, pt.flush, pt.aChan, pt.at, pt.aBuf, pt.delay)
+	go writeVideoPacketsToPeer(pt, pt.vflush, pt.vChan, pt.vt, pt.vBuf, pt.delay)
+	go writeAudioPacketsToPeer(pt, pt.aflush, pt.aChan, pt.at, pt.aBuf, pt.delay)
 
 	return nil
 }

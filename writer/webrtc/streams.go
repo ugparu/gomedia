@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/ugparu/gomedia"
@@ -59,7 +58,7 @@ func (ss *sortedStreams) Update(newURL string, newCodecPar gomedia.CodecParamete
 
 		for peer := range stream.tracks {
 			select {
-			case peer.flush <- struct{}{}:
+			case peer.vflush <- struct{}{}:
 			case <-time.After(flushDuration):
 				logger.Errorf(ss, "Failed to flush peer %v", peer)
 			}
@@ -135,14 +134,24 @@ func (ss *sortedStreams) Add(url string, newCodecPar gomedia.CodecParameters) []
 		for peer := range ss.pendingPeers {
 			// Flush stale packets from peer channels before adding to new stream
 			const flushDuration = time.Second * 3
-			select {
-			case peer.flush <- struct{}{}:
-			case <-time.After(flushDuration):
-				logger.Errorf(ss, "Failed to flush peer %v when moving from pending", peer)
+			timer := time.After(flushDuration)
+			vFlushed := false
+			aFlushed := false
+			for !(vFlushed && aFlushed) {
+				select {
+				case peer.vflush <- struct{}{}:
+					vFlushed = true
+				case peer.aflush <- struct{}{}:
+					aFlushed = true
+				case <-timer:
+					logger.Errorf(ss, "Failed to flush peer %v when moving from pending", peer)
+					vFlushed = true
+					aFlushed = true
+				}
 			}
 
 			// Mark as seeded=true because these are already connected peers switching streams
-			// They should receive setStreamUrl (via notifyTrackChange) not startStream
+			// They will receive setStreamUrl notification when packets with new URL are sent to WebRTC
 			ss.streams[url].tracks[peer] = true
 			movedPeers = append(movedPeers, peer)
 			delete(ss.pendingPeers, peer) // Remove moved peers individually
@@ -262,7 +271,6 @@ func (ss *sortedStreams) processPendingTracks(str *stream, pkt gomedia.Packet) [
 		if canAdd, peerBuf := ss.canAddTrackToPeer(str, pkt, pu); canAdd {
 			removeFromToAdd = append(removeFromToAdd, pu.peerTrack)
 			ss.moveTrackToStream(str, pu, peerBuf)
-			ss.notifyTrackChange(pu)
 		}
 	}
 
@@ -341,7 +349,13 @@ func (ss *sortedStreams) moveTrackToStream(str *stream, pu *peerURL, peerBuf []g
 
 	const flushDuration = time.Second * 3
 	select {
-	case pu.flush <- struct{}{}:
+	case pu.vflush <- struct{}{}:
+	case <-time.After(flushDuration):
+		logger.Errorf(ss, "Failed to flush peer %v", pu.peerTrack)
+	}
+
+	select {
+	case pu.aflush <- struct{}{}:
 	case <-time.After(flushDuration):
 		logger.Errorf(ss, "Failed to flush peer %v", pu.peerTrack)
 	}
@@ -377,51 +391,6 @@ func (ss *sortedStreams) moveTrackToStream(str *stream, pu *peerURL, peerBuf []g
 
 	// Add to current stream
 	str.tracks[pu.peerTrack] = true
-}
-
-// notifyTrackChange sends a notification about track changes
-func (ss *sortedStreams) notifyTrackChange(pu *peerURL) {
-	go func(pu *peerURL) {
-		var bytes []byte
-		var err error
-
-		if pu.Token == "" {
-			reqMsg := &dataChanReq{
-				Token:   pu.Token,
-				Command: "setStreamUrl",
-				Message: pu.URL,
-			}
-			bytes, err = json.Marshal(reqMsg)
-		} else {
-			respMsg := &resp{
-				Token:   pu.Token,
-				Status:  http.StatusOK,
-				Message: "Ok",
-			}
-			bytes, err = json.Marshal(respMsg)
-		}
-
-		if err != nil {
-			logger.Error(ss, err.Error())
-			return
-		}
-
-		if pu.DataChannel == nil {
-			logger.Errorf(ss, "Cannot notify track change: DataChannel is nil")
-			return
-		}
-
-		// Check if peer is already closed before sending
-		select {
-		case <-pu.done:
-			return // Peer already closed
-		default:
-			logger.Infof(ss, "Sending message %s", bytes)
-			if err = pu.DataChannel.Send(bytes); err != nil {
-				logger.Error(ss, err.Error())
-			}
-		}
-	}(pu)
 }
 
 // processExistingTracks processes tracks that are already part of the stream

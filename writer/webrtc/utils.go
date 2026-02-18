@@ -2,6 +2,7 @@ package webrtc
 
 import (
 	"bytes"
+	"encoding/json"
 	"time"
 
 	"github.com/pion/webrtc/v4"
@@ -69,129 +70,214 @@ type peerTrack struct {
 	aBuf                   buffer.PooledBuffer
 	vChan                  chan gomedia.VideoPacket
 	vBuf                   buffer.PooledBuffer
-	flush                  chan struct{}
+	vflush                 chan struct{}
+	aflush                 chan struct{}
 	delay                  time.Duration
 	done                   chan struct{}
 	*webrtc.DataChannel    // Data channel associated with the peer.
 }
 
-func writeVideoPacketsToPeer(done chan struct{},
-	flush chan struct{},
-	vChan chan gomedia.VideoPacket, aChan chan gomedia.AudioPacket,
+// notifyTrackChange sends a notification about track changes when a packet with a new URL is sent to WebRTC
+func notifyTrackChange(pt *peerTrack, url string) {
+	go func(pt *peerTrack, url string) {
+		reqMsg := &dataChanReq{
+			Token:   "",
+			Command: "setStreamUrl",
+			Message: url,
+		}
+		bytes, err := json.Marshal(reqMsg)
+		if err != nil {
+			logger.Error(pt, err.Error())
+			return
+		}
+
+		if pt.DataChannel == nil {
+			logger.Errorf(pt, "Cannot notify track change: DataChannel is nil")
+			return
+		}
+
+		// Check if peer is already closed before sending
+		select {
+		case <-pt.done:
+			return // Peer already closed
+		default:
+			logger.Infof(pt, "Sending message %s", bytes)
+			if err = pt.DataChannel.Send(bytes); err != nil {
+				logger.Error(pt, err.Error())
+			}
+		}
+	}(pt, url)
+}
+
+func writeVideoPacketsToPeer(pt *peerTrack,
+	vflush chan struct{},
+	vChan chan gomedia.VideoPacket,
 	vt *webrtc.TrackLocalStaticSample, vBuf buffer.PooledBuffer, delay time.Duration) {
 	last := time.Now()
+	processPkt := func(pkt gomedia.VideoPacket) {
+		var codecParams []byte
+		if pkt.IsKeyFrame() {
+			codecParams = appendCodecParameters(pkt.CodecParameters())
+		}
+
+		// Split NALUs and calculate total size
+		var nalus [][]byte
+		var nalusSize int
+		pkt.View(func(data buffer.PooledBuffer) {
+			nalus, _ = nal.SplitNALUs(data.Data())
+			for _, nalu := range nalus {
+				nalusSize += 4 + len(nalu) // start code (4 bytes) + nalu data
+			}
+		})
+
+		// Resize vBuf once to fit all data
+		totalSize := len(codecParams) + nalusSize
+		vBuf.Resize(totalSize)
+
+		// Copy codec params and NALUs into vBuf
+		offset := copy(vBuf.Data(), codecParams)
+		for _, nalu := range nalus {
+			offset += copy(vBuf.Data()[offset:], []byte{0, 0, 0, 1})
+			offset += copy(vBuf.Data()[offset:], nalu)
+		}
+
+		miss := time.Since(pkt.StartTime()) - delay
+
+		if miss > 0 {
+			pkt.SetDuration(pkt.Duration() - correctionStep)
+		} else if miss < 0 {
+			pkt.SetDuration(pkt.Duration() + correctionStep)
+		}
+
+		sample := media.Sample{
+			Data:               vBuf.Data(),
+			Timestamp:          pkt.StartTime(),
+			Duration:           pkt.Duration(),
+			PacketTimestamp:    0,
+			PrevDroppedPackets: 0,
+			Metadata:           nil,
+		}
+
+		if err := vt.WriteSample(sample); err != nil {
+			logger.Errorf(pt.done, "Error writing video sample: %v", err)
+		}
+
+		sleep := pkt.Duration() - time.Since(last)
+		pkt.Close()
+
+		if sleep > 0 {
+			time.Sleep(sleep)
+		}
+
+		last = time.Now()
+	}
+	var url string
+
 	for {
 		select {
-		case <-done:
+		case <-pt.done:
 			return
-		case <-flush:
+		case <-vflush:
 		loop:
 			for {
 				select {
 				case pkt := <-vChan:
-					pkt.Close()
-				case pkt := <-aChan:
+					pktURL := pkt.URL()
+					if url == "" {
+						url = pktURL
+					}
+					if pktURL != url {
+						// Packet with new URL is being sent to WebRTC - notify track change
+						processPkt(pkt)
+						notifyTrackChange(pt, pktURL)
+						url = pktURL
+						break loop
+					}
 					pkt.Close()
 				default:
 					break loop
 				}
 			}
 		case pkt := <-vChan:
-			var codecParams []byte
-			if pkt.IsKeyFrame() {
-				codecParams = appendCodecParameters(pkt.CodecParameters())
+			pktURL := pkt.URL()
+			if url == "" {
+				url = pktURL
+			} else if pktURL != url {
+				// Packet with new URL is being sent to WebRTC - notify track change
+				notifyTrackChange(pt, pktURL)
+				url = pktURL
 			}
-
-			// Split NALUs and calculate total size
-			var nalus [][]byte
-			var nalusSize int
-			pkt.View(func(data buffer.PooledBuffer) {
-				nalus, _ = nal.SplitNALUs(data.Data())
-				for _, nalu := range nalus {
-					nalusSize += 4 + len(nalu) // start code (4 bytes) + nalu data
-				}
-			})
-
-			// Resize vBuf once to fit all data
-			totalSize := len(codecParams) + nalusSize
-			vBuf.Resize(totalSize)
-
-			// Copy codec params and NALUs into vBuf
-			offset := copy(vBuf.Data(), codecParams)
-			for _, nalu := range nalus {
-				offset += copy(vBuf.Data()[offset:], []byte{0, 0, 0, 1})
-				offset += copy(vBuf.Data()[offset:], nalu)
-			}
-
-			miss := time.Since(pkt.StartTime()) - delay
-
-			if miss > 0 {
-				pkt.SetDuration(pkt.Duration() - correctionStep)
-			} else if miss < 0 {
-				pkt.SetDuration(pkt.Duration() + correctionStep)
-			}
-
-			sample := media.Sample{
-				Data:               vBuf.Data(),
-				Timestamp:          pkt.StartTime(),
-				Duration:           pkt.Duration(),
-				PacketTimestamp:    0,
-				PrevDroppedPackets: 0,
-				Metadata:           nil,
-			}
-
-			if err := vt.WriteSample(sample); err != nil {
-				logger.Errorf(done, "Error writing video sample: %v", err)
-			}
-
-			sleep := pkt.Duration() - time.Since(last)
-			pkt.Close()
-
-			if sleep > 0 {
-				time.Sleep(sleep)
-			}
-
-			last = time.Now()
+			processPkt(pkt)
 		}
 	}
 }
 
-func writeAudioPacketsToPeer(done chan struct{}, flush chan struct{}, aChan chan gomedia.AudioPacket, at *webrtc.TrackLocalStaticSample, aBuf buffer.PooledBuffer, delay time.Duration) {
+func writeAudioPacketsToPeer(pt *peerTrack, aflush chan struct{}, aChan chan gomedia.AudioPacket, at *webrtc.TrackLocalStaticSample, aBuf buffer.PooledBuffer, delay time.Duration) {
 	last := time.Now()
+	processPkt := func(pkt gomedia.AudioPacket) {
+		pkt.View(func(data buffer.PooledBuffer) {
+			aBuf.Resize(data.Len())
+			copy(aBuf.Data(), data.Data())
+		})
+
+		sample := media.Sample{
+			Data:               aBuf.Data(),
+			Timestamp:          pkt.StartTime(),
+			Duration:           pkt.Duration(),
+			PacketTimestamp:    0,
+			PrevDroppedPackets: 0,
+			Metadata:           nil,
+		}
+
+		err := at.WriteSample(sample)
+		if err != nil {
+			logger.Errorf(pt.done, "Error writing audio sample: %v", err)
+		}
+
+		pkt.Close()
+
+		sleep := pkt.Duration() - time.Since(last)
+
+		if sleep > 0 {
+			time.Sleep(sleep)
+		}
+
+		last = time.Now()
+	}
+
+	var url string
+
 	for {
 		select {
-		case <-done:
+		case <-pt.done:
 			return
-		case <-flush:
+		case <-aflush:
+		loop:
+			for {
+				select {
+				case pkt := <-aChan:
+					pktURL := pkt.URL()
+					if url == "" {
+						url = pktURL
+					}
+					if pktURL != url {
+						// Packet with new URL is being sent to WebRTC - notify track change
+						processPkt(pkt)
+						notifyTrackChange(pt, pktURL)
+						url = pktURL
+						break loop
+					}
+					pkt.Close()
+				default:
+					break loop
+				}
+			}
 		case pkt := <-aChan:
-			pkt.View(func(data buffer.PooledBuffer) {
-				aBuf.Resize(data.Len())
-				copy(aBuf.Data(), data.Data())
-			})
-
-			sample := media.Sample{
-				Data:               aBuf.Data(),
-				Timestamp:          pkt.StartTime(),
-				Duration:           pkt.Duration(),
-				PacketTimestamp:    0,
-				PrevDroppedPackets: 0,
-				Metadata:           nil,
+			pktURL := pkt.URL()
+			if pktURL != url {
+				url = pktURL
 			}
-
-			err := at.WriteSample(sample)
-			if err != nil {
-				logger.Errorf(done, "Error writing audio sample: %v", err)
-			}
-
-			pkt.Close()
-
-			sleep := pkt.Duration() - time.Since(last)
-
-			if sleep > 0 {
-				time.Sleep(sleep)
-			}
-
-			last = time.Now()
+			processPkt(pkt)
 		}
 	}
 }
