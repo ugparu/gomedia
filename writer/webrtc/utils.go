@@ -30,6 +30,7 @@ type dataChanReq struct {
 	Token   string `json:"token"`   // Token associated with the request.
 	Command string `json:"command"` // Command indicating the type of change.
 	Message string `json:"message"` // Additional message or information associated with the change.
+	Status  int    `json:"status"`
 }
 
 // codecReq represents a request related to video codec settings.

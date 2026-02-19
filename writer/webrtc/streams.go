@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/ugparu/gomedia"
@@ -398,6 +399,7 @@ func (ss *sortedStreams) moveTrackToStream(str *stream, pu *peerURL, peerBuf []g
 			Token:   pu.Token,
 			Command: "setStreamUrl",
 			Message: pu.URL,
+			Status:  http.StatusOK,
 		}
 		if pu.Token != "" {
 			reqMsg.Message = "Ok"
