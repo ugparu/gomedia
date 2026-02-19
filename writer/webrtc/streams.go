@@ -399,6 +399,9 @@ func (ss *sortedStreams) moveTrackToStream(str *stream, pu *peerURL, peerBuf []g
 			Command: "setStreamUrl",
 			Message: pu.URL,
 		}
+		if pu.Token != "" {
+			reqMsg.Message = "Ok"
+		}
 
 		bytes, err := json.Marshal(reqMsg)
 		if err != nil {
