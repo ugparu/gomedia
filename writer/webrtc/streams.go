@@ -395,17 +395,23 @@ func (ss *sortedStreams) moveTrackToStream(str *stream, pu *peerURL, peerBuf []g
 
 	// Send setStreamUrl notification with token (if any) after moving the track
 	if pu.peerTrack != nil && pu.peerTrack.DataChannel != nil {
-		reqMsg := &dataChanReq{
-			Token:   pu.Token,
-			Command: "setStreamUrl",
-			Message: pu.URL,
-			Status:  http.StatusOK,
+		var bytes []byte
+		var err error
+		if pu.Token == "" {
+			reqMsg := &dataChanReq{
+				Token:   pu.Token,
+				Command: "setStreamUrl",
+				Message: pu.URL,
+			}
+			bytes, err = json.Marshal(reqMsg)
+		} else {
+			respMsg := &resp{
+				Token:   pu.Token,
+				Status:  http.StatusOK,
+				Message: "Ok",
+			}
+			bytes, err = json.Marshal(respMsg)
 		}
-		if pu.Token != "" {
-			reqMsg.Message = "Ok"
-		}
-
-		bytes, err := json.Marshal(reqMsg)
 		if err != nil {
 			logger.Errorf(ss, "Failed to marshal setStreamUrl notification: %v", err)
 			return
