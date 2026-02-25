@@ -168,7 +168,10 @@ func (pkt *BasePacket[T]) Close() {
 	}
 	count := atomic.AddInt32(&pkt.shared.ref, -1)
 	if count == 0 {
+		pkt.shared.mu.Lock()
 		pkt.shared.buf.Release()
+		pkt.shared.buf = nil
+		pkt.shared.mu.Unlock()
 	} else if count < 0 {
 		panic("packet reference count is negative")
 	}
