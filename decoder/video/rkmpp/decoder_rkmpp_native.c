@@ -1,13 +1,26 @@
 //go:build linux && arm64
 /* SPDX-License-Identifier: Apache-2.0 OR MIT */
 
+#include <errno.h>
+#include <semaphore.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <rga/im2d.h>
 #include <rga/RgaApi.h>
 
 #include "decoder_rkmpp_native.h"
+
+/* RK3588 has 3 RGA cores; limit concurrent RGA jobs to avoid fence timeouts */
+static sem_t g_rga_sem;
+
+__attribute__((constructor))
+static void init_rga_semaphore(void)
+{
+    sem_init(&g_rga_sem, 0, 3);
+}
 
 static MppCodingType codec_id_to_mpp(int codec_id)
 {
@@ -21,52 +34,44 @@ static MppCodingType codec_id_to_mpp(int codec_id)
     }
 }
 
-static void nv12_to_rgb24(const uint8_t *y_plane,
-                          const uint8_t *uv_plane,
-                          int width,
-                          int height,
-                          int y_stride,
-                          int uv_stride,
-                          uint8_t *rgb,
-                          int rgb_stride)
+
+static rga_buffer_handle_t get_src_handle(NativeRkmppDecoder *dec,
+    int fd,
+    int hor_stride,
+    int ver_stride,
+    int rga_fmt)
 {
-    int x, y;
-    for (y = 0; y < height; y++) {
-        const uint8_t *y_row = y_plane + y_stride * y;
-        const uint8_t *uv_row = uv_plane + uv_stride * (y / 2);
-        uint8_t *rgb_row = rgb + rgb_stride * y;
-
-        for (x = 0; x < width; x++) {
-            int Y = y_row[x];
-            int uv_index = (x / 2) * 2;
-            int U = uv_row[uv_index + 0];
-            int V = uv_row[uv_index + 1];
-
-            int C = Y - 16;
-            int D = U - 128;
-            int E = V - 128;
-
-            int R = (298 * C + 409 * E + 128) >> 8;
-            int G = (298 * C - 100 * D - 208 * E + 128) >> 8;
-            int B = (298 * C + 516 * D + 128) >> 8;
-
-            if (R < 0) R = 0; else if (R > 255) R = 255;
-            if (G < 0) G = 0; else if (G > 255) G = 255;
-            if (B < 0) B = 0; else if (B > 255) B = 255;
-
-            rgb_row[3 * x + 0] = (uint8_t)R;
-            rgb_row[3 * x + 1] = (uint8_t)G;
-            rgb_row[3 * x + 2] = (uint8_t)B;
-        }
+    for (int i = 0; i < dec->cache_count; i++) {
+        if (dec->cached_fds[i] == fd)
+            return dec->cached_handles[i];
     }
+
+    im_handle_param_t param;
+    memset(&param, 0, sizeof(param));
+    param.width  = hor_stride;
+    param.height = ver_stride;
+    param.format = rga_fmt;
+
+    rga_buffer_handle_t handle = importbuffer_fd(fd, &param);
+    if (!handle)
+        return 0;
+
+    if (dec->cache_count < 24) {
+        dec->cached_fds[dec->cache_count]    = fd;
+        dec->cached_handles[dec->cache_count] = handle;
+        dec->cache_count++;
+    }
+
+    return handle;
 }
 
-int rga_nv12_to_rgb(MppFrame frame,
+int rga_nv12_to_rgb(NativeRkmppDecoder *dec,
+                    MppFrame frame,
                     uint8_t *dst_buffer,
                     int dst_width,
                     int dst_height)
 {
-    if (!frame || !dst_buffer)
+    if (!dec || !frame || !dst_buffer)
         return -1;
 
     MppBuffer buf = mpp_frame_get_buffer(frame);
@@ -77,8 +82,8 @@ int rga_nv12_to_rgb(MppFrame frame,
     if (fd <= 0)
         return -3;
 
-    RK_U32 width = mpp_frame_get_width(frame);
-    RK_U32 height = mpp_frame_get_height(frame);
+    RK_U32 width      = mpp_frame_get_width(frame);
+    RK_U32 height     = mpp_frame_get_height(frame);
     RK_U32 hor_stride = mpp_frame_get_hor_stride(frame);
     RK_U32 ver_stride = mpp_frame_get_ver_stride(frame);
     MppFrameFormat fmt = mpp_frame_get_fmt(frame);
@@ -95,21 +100,47 @@ int rga_nv12_to_rgb(MppFrame frame,
     if (dst_width <= 0 || dst_height <= 0)
         return -5;
 
-    /* Wrap source DMA buffer and destination virtual buffer for RGA */
-    rga_buffer_t src_img = wrapbuffer_fd(fd,
-                                         (int)width,
-                                         (int)height,
-                                         rga_fmt,
-                                         (int)hor_stride,
-                                         (int)ver_stride);
-    rga_buffer_t dst_img = wrapbuffer_virtualaddr(dst_buffer,
-                                                  dst_width,
-                                                  dst_height,
-                                                  RK_FORMAT_RGB_888);
+    if (!dec->dst_handle || !dec->dst_rgb_buf)
+        return -11;
 
-    IM_STATUS status = imcopy(src_img, dst_img);
+    rga_buffer_handle_t src_handle = get_src_handle(dec, fd, hor_stride, ver_stride, rga_fmt);
+    if (!src_handle)
+        return -12;
+
+    rga_buffer_t src_img = wrapbuffer_handle_t(src_handle,
+                                               (int)width, (int)height,
+                                               (int)hor_stride, (int)ver_stride,
+                                               rga_fmt);
+    rga_buffer_t dst_img = wrapbuffer_handle_t(dec->dst_handle,
+                                               dst_width, dst_height,
+                                               dec->dst_wstride, dst_height,
+                                               RK_FORMAT_RGB_888);
+
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_sec += 2;
+    if (sem_timedwait(&g_rga_sem, &ts) != 0)
+        return -10;
+
+    IM_STATUS status = imcvtcolor_t(src_img, dst_img,
+                                    rga_fmt, RK_FORMAT_RGB_888,
+                                    IM_COLOR_SPACE_DEFAULT, IM_SYNC);
+    sem_post(&g_rga_sem);
+
     if (status != IM_STATUS_SUCCESS)
         return -6;
+
+    /* Copy from aligned internal buffer to caller-provided buffer */
+    if (dec->dst_wstride == dst_width) {
+        memcpy(dst_buffer, dec->dst_rgb_buf, dst_width * dst_height * 3);
+    } else {
+        int src_row_bytes = dec->dst_wstride * 3;
+        int dst_row_bytes = dst_width * 3;
+        for (int y = 0; y < dst_height; y++)
+            memcpy(dst_buffer + y * dst_row_bytes,
+                   dec->dst_rgb_buf + y * src_row_bytes,
+                   dst_row_bytes);
+    }
 
     return 0;
 }
@@ -156,7 +187,7 @@ int init_rkmpp_decoder_native(NativeRkmppDecoder *dec,
 
     ret = mpi->control(ctx, MPP_DEC_GET_CFG, cfg);
     if (ret) {
-        mpp_dec_cfg_deinit(&cfg);
+        mpp_dec_cfg_deinit(cfg);
         mpp_destroy(ctx);
         return -6;
     }
@@ -164,14 +195,14 @@ int init_rkmpp_decoder_native(NativeRkmppDecoder *dec,
     /* Disable internal frame splitter - we will split NAL units ourselves */
     ret = mpp_dec_cfg_set_u32(cfg, "base:split_parse", 1);
     if (ret) {
-        mpp_dec_cfg_deinit(&cfg);
+        mpp_dec_cfg_deinit(cfg);
         mpp_destroy(ctx);
         return -7;
     }
 
     ret = mpi->control(ctx, MPP_DEC_SET_CFG, cfg);
     if (ret) {
-        mpp_dec_cfg_deinit(&cfg);
+        mpp_dec_cfg_deinit(cfg);
         mpp_destroy(ctx);
         return -8;
     }
@@ -253,10 +284,8 @@ try_again:
         return 1;
 
     if (mpp_frame_get_info_change(frame)) {
-        RK_U32 width = mpp_frame_get_width(frame);
-        RK_U32 height = mpp_frame_get_height(frame);
-        RK_U32 hor_stride = mpp_frame_get_hor_stride(frame);
-        RK_U32 ver_stride = mpp_frame_get_ver_stride(frame);
+        RK_U32 width    = mpp_frame_get_width(frame);
+        RK_U32 height   = mpp_frame_get_height(frame);
         RK_U32 buf_size = mpp_frame_get_buf_size(frame);
         MppBufferGroup grp = NULL;
 
@@ -289,8 +318,42 @@ try_again:
             return -7;
         }
 
-        dec->width = (int)width;
+        dec->width  = (int)width;
         dec->height = (int)height;
+        dec->src_buf_size = buf_size;
+
+        /* (Re-)allocate persistent aligned RGB dst buffer for RGA */
+        if (dec->dst_handle) {
+            releasebuffer_handle(dec->dst_handle);
+            dec->dst_handle = 0;
+        }
+        if (dec->dst_rgb_buf) {
+            free(dec->dst_rgb_buf);
+            dec->dst_rgb_buf = NULL;
+        }
+
+        int wstride  = ((int)width + 3) & ~3;
+        int dst_size = wstride * (int)height * 3;
+
+        dec->dst_rgb_buf  = (uint8_t *)malloc(dst_size);
+        if (!dec->dst_rgb_buf) {
+            mpp_frame_deinit(&frame);
+            return -13;
+        }
+        dec->dst_rgb_size = dst_size;
+        dec->dst_wstride  = wstride;
+
+        im_handle_param_t dst_param = {0};
+        dst_param.width  = (uint32_t)wstride;
+        dst_param.height = (uint32_t)height;
+        dst_param.format = RK_FORMAT_RGB_888;
+        dec->dst_handle = importbuffer_virtualaddr(dec->dst_rgb_buf, &dst_param);
+        if (!dec->dst_handle) {
+            free(dec->dst_rgb_buf);
+            dec->dst_rgb_buf = NULL;
+            mpp_frame_deinit(&frame);
+            return -14;
+        }
 
         mpp_frame_deinit(&frame);
         return 1;
@@ -318,7 +381,7 @@ try_again:
             return -9;
         }
 
-        int ret_rga = rga_nv12_to_rgb(frame,
+        int ret_rga = rga_nv12_to_rgb(dec, frame,
                                       rgb_buffer,
                                       dec->width,
                                       dec->height);
@@ -341,11 +404,34 @@ void close_rkmpp_decoder_native(NativeRkmppDecoder *dec)
     if (!dec)
         return;
 
+    for (int i = 0; i < dec->cache_count; i++)
+        releasebuffer_handle(dec->cached_handles[i]);
+    dec->cache_count = 0;
+
+    if (dec->dst_handle) {
+        releasebuffer_handle(dec->dst_handle);
+        dec->dst_handle = 0;
+    }
+    if (dec->dst_rgb_buf) {
+        free(dec->dst_rgb_buf);
+        dec->dst_rgb_buf = NULL;
+    }
+
     if (dec->ctx) {
         dec->mpi->reset(dec->ctx);
         mpp_destroy(dec->ctx);
         dec->ctx = NULL;
         dec->mpi = NULL;
+    }
+
+    if (dec->cfg) {
+        mpp_dec_cfg_deinit(dec->cfg);
+        dec->cfg = NULL;
+    }
+
+    if (dec->frm_grp) {
+        mpp_buffer_group_put(dec->frm_grp);
+        dec->frm_grp = NULL;
     }
 }
 

@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -16,14 +17,16 @@ import (
 
 func main() {
 	var (
-		rtspURL   string
+		rtspURL  string
+		sessions int
 		maxFrames int
-		timeout   int
-		verbose   bool
-		noAudio   bool
+		timeout  int
+		verbose  bool
+		noAudio  bool
 	)
 
 	flag.StringVar(&rtspURL, "url", "", "RTSP URL to decode (required, can also use RTSP_URL env var)")
+	flag.IntVar(&sessions, "sessions", 1, "Number of parallel read+decode sessions")
 	flag.IntVar(&maxFrames, "frames", 100, "Number of frames to decode before exiting (0 = unlimited)")
 	flag.IntVar(&timeout, "timeout", 60, "Timeout in seconds")
 	flag.BoolVar(&verbose, "verbose", false, "Enable verbose logging")
@@ -33,6 +36,10 @@ func main() {
 	if rtspURL == "" {
 		flag.Usage()
 		log.Fatal("RTSP URL is required (use -url flag)")
+	}
+
+	if sessions <= 0 {
+		sessions = 1
 	}
 
 	if verbose {
@@ -45,9 +52,27 @@ func main() {
 	fmt.Printf("RKMPP RTSP Stream Info & Decoder\n")
 	fmt.Printf("========================================\n")
 	fmt.Printf("RTSP URL: %s\n", rtspURL)
+	fmt.Printf("Sessions: %d\n", sessions)
 	fmt.Printf("Max Frames: %d\n", maxFrames)
 	fmt.Printf("Timeout: %d seconds\n", timeout)
 	fmt.Printf("========================================\n\n")
+
+	var wg sync.WaitGroup
+
+	for i := 1; i <= sessions; i++ {
+		sessionID := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			runSession(sessionID, rtspURL, maxFrames, timeout, verbose, noAudio)
+		}()
+	}
+
+	wg.Wait()
+}
+
+func runSession(id int, rtspURL string, maxFrames, timeout int, verbose, noAudio bool) {
+	prefix := fmt.Sprintf("[Session %d] ", id)
 
 	// Create RTSP demuxer
 	var dmx gomedia.Demuxer
@@ -57,27 +82,30 @@ func main() {
 		dmx = rtsp.New(rtspURL)
 	}
 
-	fmt.Println("Connecting to RTSP stream...")
+	fmt.Printf("%sConnecting to RTSP stream...\n", prefix)
 	params, err := dmx.Demux()
 	if err != nil {
-		log.Fatalf("Failed to connect to RTSP stream: %v", err)
+		log.Printf("%sFailed to connect to RTSP stream: %v\n", prefix, err)
+		return
 	}
 
-	fmt.Println("✓ Connected successfully!")
+	fmt.Printf("%s✓ Connected successfully!\n", prefix)
 
-	// Display stream information
-	printStreamInfo(params)
+	// Display stream information (only for first session to reduce noise)
+	if id == 1 {
+		printStreamInfo(params)
+	}
 
 	// Create RKMPP video decoder
 	if params.VideoCodecParameters != nil {
-		fmt.Println("\n========================================")
-		fmt.Println("Initializing RKMPP hardware decoder...")
-		fmt.Println("========================================")
+		fmt.Printf("\n%s========================================\n", prefix)
+		fmt.Printf("%sInitializing RKMPP hardware decoder...\n", prefix)
+		fmt.Printf("%s========================================\n", prefix)
 		dcd := decoder.NewVideo(100, -1, rkmpp.NewFFmpegRKMPPDecoder)
 		dcd.Decode()
 
-		fmt.Println("✓ RKMPP decoder initialized")
-		fmt.Println("Starting decode process...")
+		fmt.Printf("%s✓ RKMPP decoder initialized\n", prefix)
+		fmt.Printf("%sStarting decode process...\n", prefix)
 
 		frameCount := 0
 		packetCount := 0
@@ -91,14 +119,14 @@ func main() {
 			for {
 				select {
 				case <-timeoutChan:
-					fmt.Printf("\n⏱ Timeout reached after %d seconds\n", timeout)
+					fmt.Printf("\n%s⏱ Timeout reached after %d seconds\n", prefix, timeout)
 					return
 
 				default:
 					// Read packet from RTSP stream
 					packet, err := dmx.ReadPacket()
 					if err != nil {
-						fmt.Printf("Error reading packet: %v\n", err)
+						fmt.Printf("%sError reading packet: %v\n", prefix, err)
 						return
 					}
 
@@ -119,7 +147,8 @@ func main() {
 							elapsed := time.Since(startTime).Seconds()
 							dataRateMbps := float64(totalDataSize*8) / elapsed / 1000000
 
-							fmt.Printf("[Packet] Count: %d | Data rate: %.2f Mbps | Keyframe: %v | PTS: %v\n",
+							fmt.Printf("%s[Packet] Count: %d | Data rate: %.2f Mbps | Keyframe: %v | PTS: %v\n",
+								prefix,
 								packetCount,
 								dataRateMbps,
 								vPkt.IsKeyFrame(),
@@ -131,7 +160,8 @@ func main() {
 					} else if aPkt, ok := packet.(gomedia.AudioPacket); ok {
 						audioPacketCount++
 						if audioPacketCount%100 == 0 {
-							fmt.Printf("[Audio] Packets: %d | PTS: %v\n",
+							fmt.Printf("%s[Audio] Packets: %d | PTS: %v\n",
+								prefix,
 								audioPacketCount,
 								aPkt.Timestamp())
 						}
@@ -144,7 +174,7 @@ func main() {
 		for {
 			select {
 			case <-timeoutChan:
-				fmt.Printf("\n⏱ Timeout reached after %d seconds\n", timeout)
+				fmt.Printf("\n%s⏱ Timeout reached after %d seconds\n", prefix, timeout)
 				break main
 			default:
 				img := <-dcd.Images()
@@ -152,7 +182,8 @@ func main() {
 				elapsed := time.Since(startTime).Seconds()
 				fps := float64(frameCount) / elapsed
 
-				fmt.Printf("[Frame %d] Decoded: %dx%d | Avg FPS: %.2f | Elapsed: %.2fs\n",
+				fmt.Printf("%s[Frame %d] Decoded: %dx%d | Avg FPS: %.2f | Elapsed: %.2fs\n",
+					prefix,
 					frameCount,
 					img.Bounds().Dx(),
 					img.Bounds().Dy(),
@@ -160,7 +191,7 @@ func main() {
 					elapsed)
 
 				if maxFrames > 0 && frameCount >= maxFrames {
-					fmt.Printf("\n✓ Reached maximum frame count (%d)\n", maxFrames)
+					fmt.Printf("\n%s✓ Reached maximum frame count (%d)\n", prefix, maxFrames)
 					break main
 				}
 			}
@@ -171,22 +202,22 @@ func main() {
 		dmx.Close()
 
 		// Print summary
-		fmt.Printf("\n========================================\n")
-		fmt.Printf("Summary\n")
-		fmt.Printf("========================================\n")
+		fmt.Printf("\n%s========================================\n", prefix)
+		fmt.Printf("%sSummary\n", prefix)
+		fmt.Printf("%s========================================\n", prefix)
 		elapsed := time.Since(startTime).Seconds()
-		fmt.Printf("Video frames decoded: %d\n", frameCount)
-		fmt.Printf("Video packets received: %d\n", packetCount)
-		fmt.Printf("Audio packets received: %d\n", audioPacketCount)
-		fmt.Printf("Total time: %.2f seconds\n", elapsed)
+		fmt.Printf("%sVideo frames decoded: %d\n", prefix, frameCount)
+		fmt.Printf("%sVideo packets received: %d\n", prefix, packetCount)
+		fmt.Printf("%sAudio packets received: %d\n", prefix, audioPacketCount)
+		fmt.Printf("%sTotal time: %.2f seconds\n", prefix, elapsed)
 		if frameCount > 0 {
-			fmt.Printf("Average FPS: %.2f\n", float64(frameCount)/elapsed)
+			fmt.Printf("%sAverage FPS: %.2f\n", prefix, float64(frameCount)/elapsed)
 		}
-		fmt.Printf("Total data received: %.2f MB\n", float64(totalDataSize)/1024/1024)
-		fmt.Printf("Average data rate: %.2f Mbps\n", float64(totalDataSize*8)/elapsed/1000000)
-		fmt.Printf("========================================\n")
+		fmt.Printf("%sTotal data received: %.2f MB\n", prefix, float64(totalDataSize)/1024/1024)
+		fmt.Printf("%sAverage data rate: %.2f Mbps\n", prefix, float64(totalDataSize*8)/elapsed/1000000)
+		fmt.Printf("%s========================================\n", prefix)
 	} else {
-		fmt.Println("No video stream found!")
+		fmt.Printf("%sNo video stream found!\n", prefix)
 		dmx.Close()
 	}
 }

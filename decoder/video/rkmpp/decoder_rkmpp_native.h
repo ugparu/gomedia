@@ -13,6 +13,7 @@
 #include <stdint.h>
 
 #include "rk_mpi.h"
+#include <rga/im2d.h>
 
 #ifndef MAX_WIDTH
 #define MAX_WIDTH 4096
@@ -38,6 +39,18 @@ typedef struct {
     MppCodingType coding_type;
 
     RK_U32      eos_reached;
+
+    /* RGA src handle cache (lazy, for MPP DMA buffer pool fds) */
+    int                 cached_fds[24];
+    rga_buffer_handle_t cached_handles[24];
+    int                 cache_count;
+    RK_U32              src_buf_size;
+
+    /* RGA dst (persistent RGB buffer, imported once) */
+    uint8_t            *dst_rgb_buf;
+    int                 dst_rgb_size;
+    rga_buffer_handle_t dst_handle;
+    int                 dst_wstride;
 } NativeRkmppDecoder;
 
 /*
@@ -100,17 +113,22 @@ int decode_rkmpp_frame_native(NativeRkmppDecoder *dec,
 /*
  * Convert one decoded NV12 frame from MPP to RGB24 using Rockchip RGA.
  *
+ * dec:
+ *   Decoder instance (holds RGA handle cache and persistent dst buffer).
+ *
  * frame:
  *   MppFrame with pixel format NV12/NV21 (YUV420 semi-planar) backed by
  *   a DMA buffer (fd accessible via mpp_buffer_get_fd()).
  *
  * dst_buffer:
- *   Destination buffer in RGB24 format, size must be at least
- *   dst_width * dst_height * 3 bytes.
+ *   Caller-provided output buffer in RGB24 format, size must be at least
+ *   dst_width * dst_height * 3 bytes.  RGA writes to an internal aligned
+ *   buffer; the result is copied here before returning.
  *
  * Returns 0 on success, negative value on error.
  */
-int rga_nv12_to_rgb(MppFrame frame,
+int rga_nv12_to_rgb(NativeRkmppDecoder *dec,
+                    MppFrame frame,
                     uint8_t *dst_buffer,
                     int dst_width,
                     int dst_height);

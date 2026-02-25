@@ -22,7 +22,7 @@ func main() {
 	)
 
 	flag.StringVar(&rtspURL, "url", "", "RTSP URL (required, can also use RTSP_URL env var)")
-	flag.StringVar(&output, "output", "output.jpg", "Output JPEG file path")
+	flag.StringVar(&output, "output", "./output.jpg", "Output JPEG file path")
 	flag.Parse()
 
 	if rtspURL == "" {
