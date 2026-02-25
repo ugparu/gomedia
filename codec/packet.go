@@ -9,6 +9,7 @@ import (
 
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/utils/buffer"
+	"github.com/ugparu/gomedia/utils/logger"
 )
 
 // sharedBuffer holds the buffer and reference count, shared between packet clones.
@@ -138,12 +139,6 @@ func (pkt *BasePacket[T]) String() string {
 	return fmt.Sprintf("PACKET sz=%d", pkt.shared.buf.Len())
 }
 
-// Retain increases the reference count. Use this when you need to keep a reference
-// to the packet beyond its original scope.
-func (pkt *BasePacket[T]) Retain() {
-	atomic.AddInt32(&pkt.shared.ref, 1)
-}
-
 func (pkt *BasePacket[T]) SwitchToFile(f *os.File, offset int64, size int64, closeFn func() error) (err error) {
 	pkt.shared.mu.Lock()
 	defer pkt.shared.mu.Unlock()
@@ -163,17 +158,13 @@ func (pkt *BasePacket[T]) SwitchToFile(f *os.File, offset int64, size int64, clo
 }
 
 func (pkt *BasePacket[T]) Close() {
-	if pkt.shared == nil {
-		return
-	}
 	count := atomic.AddInt32(&pkt.shared.ref, -1)
 	if count == 0 {
 		pkt.shared.mu.Lock()
 		pkt.shared.buf.Release()
-		pkt.shared.buf = nil
 		pkt.shared.mu.Unlock()
 	} else if count < 0 {
-		panic("packet reference count is negative")
+		logger.Fatalf(pkt, "packet reference count is negative")
 	}
 }
 
