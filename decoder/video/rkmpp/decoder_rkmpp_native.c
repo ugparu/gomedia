@@ -2,25 +2,14 @@
 /* SPDX-License-Identifier: Apache-2.0 OR MIT */
 
 #include <errno.h>
-#include <semaphore.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <unistd.h>
 
 #include <rga/im2d.h>
 #include <rga/RgaApi.h>
 
 #include "decoder_rkmpp_native.h"
-
-/* RK3588 has 3 RGA cores; limit concurrent RGA jobs to avoid fence timeouts */
-static sem_t g_rga_sem;
-
-__attribute__((constructor))
-static void init_rga_semaphore(void)
-{
-    sem_init(&g_rga_sem, 0, 3);
-}
 
 static MppCodingType codec_id_to_mpp(int codec_id)
 {
@@ -116,16 +105,9 @@ int rga_nv12_to_rgb(NativeRkmppDecoder *dec,
                                                dec->dst_wstride, dst_height,
                                                RK_FORMAT_RGB_888);
 
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    ts.tv_sec += 2;
-    if (sem_timedwait(&g_rga_sem, &ts) != 0)
-        return -10;
-
     IM_STATUS status = imcvtcolor_t(src_img, dst_img,
                                     rga_fmt, RK_FORMAT_RGB_888,
                                     IM_COLOR_SPACE_DEFAULT, IM_SYNC);
-    sem_post(&g_rga_sem);
 
     if (status != IM_STATUS_SUCCESS)
         return -6;
