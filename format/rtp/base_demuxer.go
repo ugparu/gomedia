@@ -58,7 +58,7 @@ func WithRingBuffer(size int) DemuxerOption {
 func WithCalculatedRingBuffer(seconds int) DemuxerOption {
 	return func(d *baseDemuxer) {
 		d.useRing = true
-		const ringSize = 1024
+		const ringSize = 1024 * 1024
 		d.ringBuffer = buffer.Get(ringSize)
 		d.ringSeconds = seconds
 	}
