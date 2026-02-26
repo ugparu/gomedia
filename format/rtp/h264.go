@@ -8,6 +8,7 @@ import (
 
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/codec/h264"
+	"github.com/ugparu/gomedia/utils/buffer"
 	"github.com/ugparu/gomedia/utils/logger"
 	"github.com/ugparu/gomedia/utils/nal"
 	"github.com/ugparu/gomedia/utils/sdp"
@@ -51,6 +52,23 @@ func (d *h264Demuxer) Demux() (codecs gomedia.CodecParametersPair, err error) {
 	d.codec = &codecData
 
 	codecs.VideoCodecParameters = d.codec
+
+	if d.useRing && d.ringBuffer == nil {
+		fps := d.codec.FPS()
+		if fps == 0 {
+			fps = 30
+		}
+
+		widht, height := d.codec.Width(), d.codec.Height()
+		if widht == 0 || height == 0 {
+			widht, height = 3840, 2160
+		}
+
+		size := int(widht*height*fps/40) * d.ringSeconds
+		d.ringBuffer = buffer.Get(size)
+		logger.Infof(d, "ringBuffer size: %d", size)
+	}
+
 	return
 }
 
@@ -161,15 +179,16 @@ func (d *h264Demuxer) finalizeFUAPacket() error {
 func (d *h264Demuxer) addPacket(nalU []byte, isKeyFrame bool) {
 	var data []byte
 	if d.ringBuffer != nil {
-		println(d.ringOffset, d.ringBuffer.Len())
 		if d.ringOffset+4+len(nalU) > d.ringBuffer.Len() {
 			logger.Infof(d, "ringBuffer is full, resetting offset")
 			d.ringOffset = 0
 		}
+		start := d.ringOffset
 		copy(d.ringBuffer.Data()[d.ringOffset:], binSize(len(nalU)))
 		d.ringOffset += 4
 		copy(d.ringBuffer.Data()[d.ringOffset:], nalU)
 		d.ringOffset += len(nalU)
+		data = d.ringBuffer.Data()[start:d.ringOffset]
 	} else {
 		data = append(binSize(len(nalU)), nalU...)
 	}

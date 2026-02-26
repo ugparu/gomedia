@@ -88,7 +88,6 @@ func main() {
 
 			// Send packet to segmenter
 			seg.Packets() <- pkt.Clone(false)
-			pkt.Close()
 
 			// Log progress every 5 seconds
 			if time.Since(lastLog) > 5*time.Second {

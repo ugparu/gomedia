@@ -8,6 +8,7 @@ import (
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/codec/h265"
 	"github.com/ugparu/gomedia/utils/buffer"
+	"github.com/ugparu/gomedia/utils/logger"
 	"github.com/ugparu/gomedia/utils/sdp"
 )
 
@@ -19,6 +20,23 @@ type h265Demuxer struct {
 	BufferRTPPacket *bytes.Buffer
 	bufferHasKey    bool
 	slicedPacket    *h265.Packet
+}
+
+func (d *h265Demuxer) storeInRing(data []byte) []byte {
+	if d.ringBuffer == nil {
+		return data
+	}
+
+	if d.ringOffset+len(data) > d.ringBuffer.Len() {
+		logger.Infof(d, "ringBuffer is full, resetting offset")
+		d.ringOffset = 0
+	}
+
+	start := d.ringOffset
+	copy(d.ringBuffer.Data()[d.ringOffset:], data)
+	d.ringOffset += len(data)
+
+	return d.ringBuffer.Data()[start:d.ringOffset]
 }
 
 func NewH265Demuxer(rdr io.Reader, sdp sdp.Media, index uint8, options ...DemuxerOption) gomedia.Demuxer {
@@ -47,6 +65,23 @@ func (d *h265Demuxer) Demux() (codecs gomedia.CodecParametersPair, err error) {
 	d.codec = &codecData
 
 	codecs.VideoCodecParameters = d.codec
+
+	if d.useRing && d.ringBuffer == nil {
+		fps := d.codec.FPS()
+		if fps == 0 {
+			fps = 30
+		}
+
+		widht, height := d.codec.Width(), d.codec.Height()
+		if widht == 0 || height == 0 {
+			widht, height = 3840, 2160
+		}
+
+		size := int(widht*height*fps/80) * d.ringSeconds
+		d.ringBuffer = buffer.Get(size)
+		logger.Infof(d, "ringBuffer size: %d", size)
+	}
+
 	return
 }
 
@@ -98,16 +133,26 @@ func (d *h265Demuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 					if d.slicedPacket != nil {
 						d.packets = append(d.packets, d.slicedPacket)
 					}
-					d.slicedPacket = h265.NewPacket(d.bufferHasKey,
-						time.Duration(d.timestamp/clockrate)*time.Millisecond, time.Now(),
-						append(binSize(len(pktData)), pktData...), "", d.codec)
+
+					data := append(binSize(len(pktData)), pktData...)
+					data = d.storeInRing(data)
+
+					d.slicedPacket = h265.NewPacket(
+						d.bufferHasKey,
+						time.Duration(d.timestamp/clockrate)*time.Millisecond,
+						time.Now(),
+						data,
+						"",
+						d.codec,
+					)
 				} else if d.slicedPacket != nil {
-					d.slicedPacket.View(func(data buffer.PooledBuffer) {
-						oldLen := data.Len()
-						data.Resize(oldLen + len(pktData) + 4)
-						copy(data.Data()[oldLen:], binSize(len(pktData)))
-						copy(data.Data()[oldLen+4:], pktData)
-					})
+					oldLen := d.slicedPacket.Len()
+					buf := d.slicedPacket.Buf[:oldLen]
+					buf = append(buf, binSize(len(pktData))...)
+					buf = append(buf, pktData...)
+					buf = d.storeInRing(buf)
+
+					d.slicedPacket.Buf = buf
 					d.slicedPacket.IsKeyFrm = d.slicedPacket.IsKeyFrm || d.bufferHasKey
 				}
 				d.bufferHasKey = false
@@ -119,16 +164,26 @@ func (d *h265Demuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 				if d.slicedPacket != nil {
 					d.packets = append(d.packets, d.slicedPacket)
 				}
-				d.slicedPacket = h265.NewPacket(h265.IsKey(naluType),
-					time.Duration(d.timestamp/clockrate)*time.Millisecond, time.Now(),
-					append(binSize(len(nal)), nal...), "", d.codec)
+
+				data := append(binSize(len(nal)), nal...)
+				data = d.storeInRing(data)
+
+				d.slicedPacket = h265.NewPacket(
+					h265.IsKey(naluType),
+					time.Duration(d.timestamp/clockrate)*time.Millisecond,
+					time.Now(),
+					data,
+					"",
+					d.codec,
+				)
 			} else if d.slicedPacket != nil {
-				d.slicedPacket.View(func(data buffer.PooledBuffer) {
-					oldLen := data.Len()
-					data.Resize(oldLen + len(nal) + 4)
-					copy(data.Data()[oldLen:], binSize(len(nal)))
-					copy(data.Data()[oldLen+4:], nal)
-				})
+				oldLen := d.slicedPacket.Len()
+				buf := d.slicedPacket.Buf[:oldLen]
+				buf = append(buf, binSize(len(nal))...)
+				buf = append(buf, nal...)
+				buf = d.storeInRing(buf)
+
+				d.slicedPacket.Buf = buf
 			}
 		}
 	}

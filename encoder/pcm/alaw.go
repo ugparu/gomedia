@@ -7,7 +7,6 @@ import (
 	"github.com/ugparu/gomedia/codec/pcm"
 	"github.com/ugparu/gomedia/encoder"
 	"github.com/ugparu/gomedia/utils"
-	"github.com/ugparu/gomedia/utils/buffer"
 	"github.com/winlinvip/go-aresample/aresample"
 	"github.com/zaf/g711"
 )
@@ -53,9 +52,7 @@ func (e *alawEncoder) Init(params *pcm.CodecParameters) error {
 }
 
 func (e *alawEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err error) {
-	pkt.View(func(data buffer.PooledBuffer) {
-		e.buf = append(e.buf, data.Data()...)
-	})
+	e.buf = append(e.buf, pkt.Data()...)
 
 	for len(e.buf) >= AlawFrameSize {
 		inData := e.buf[:AlawFrameSize]

@@ -39,15 +39,6 @@ func (s *segments) removeSegment(id uint64) {
 	s.Lock()
 	defer s.Unlock()
 
-	seg, ok := s.segments[id]
-	if ok {
-		for _, fragment := range seg.fragments {
-			for _, packet := range fragment.packets {
-				packet.Close()
-			}
-		}
-	}
-
 	delete(s.segments, id)
 	for i := 1; i < len(s.segIDs); i++ {
 		s.segIDs[i-1] = s.segIDs[i]
@@ -349,13 +340,6 @@ func (mxr *muxer) Close_() { //nolint:revive // Method name required by interfac
 	mxr.segments.Lock()
 	defer mxr.segments.Unlock()
 
-	for _, seg := range mxr.segments.segments {
-		for _, fragment := range seg.fragments {
-			for _, packet := range fragment.packets {
-				packet.Close()
-			}
-		}
-	}
 	mxr.segments.segments = make(map[uint64]*segment)
 	mxr.segments.segIDs = nil
 }

@@ -64,7 +64,7 @@ func main() {
 	logrus.Info("HLS writer initialized with: segments per playlist=1, fragment count=3, segment size=", segSize)
 
 	// Initialize WebRTC
-	webrtc.Init(2000, 2100, []string{"192.168.1.6"}, []pion.ICEServer{
+	webrtc.Init(2000, 2100, []string{"10.0.112.138"}, []pion.ICEServer{
 		{},
 	})
 	webrtcWr = webrtc.New(100, time.Second*18)
@@ -88,7 +88,7 @@ func main() {
 
 	// Initialize RTSP reader
 	logrus.Info("Connecting to RTSP streams: ", rtspURLs)
-	rdr := reader.NewRTSP(100, rtsp.WithRingBuffer(10*1024*1024))
+	rdr := reader.NewRTSP(100, rtsp.WithCalculatedRingBuffer(10))
 	rdr.Read()
 	for _, rtspURL := range rtspURLs {
 		webrtcWr.AddSource() <- rtspURL
@@ -132,10 +132,8 @@ func main() {
 			case pkt := <-aacEnc.Packets():
 				processEncodedAudioPacket(pkt, hlsWr)
 				processEncodedAudioPacket(pkt, seg)
-				pkt.Close()
 			case pkt := <-alawEnc.Packets():
 				processEncodedAudioPacket(pkt, webrtcWr)
-				pkt.Close()
 			case pkt := <-rdr.Packets():
 				if audioPkt, ok := pkt.(gomedia.AudioPacket); ok {
 					processInputAudioPacket(audioPkt, audioDecoder, hlsWr, webrtcWr, seg)
@@ -150,7 +148,6 @@ func main() {
 					packetCount = 0
 					lastLog = time.Now()
 				}
-				pkt.Close()
 			}
 		}
 	}()
@@ -478,7 +475,6 @@ func processDecodedAudioPacket(packet gomedia.AudioPacket, aacEnc gomedia.AudioE
 	if audioPktType != gomedia.PCMAlaw {
 		alawEnc.Samples() <- packet.Clone(false).(gomedia.AudioPacket)
 	}
-	packet.Close()
 }
 
 func processEncodedAudioPacket(packet gomedia.Packet, wr gomedia.Writer) {

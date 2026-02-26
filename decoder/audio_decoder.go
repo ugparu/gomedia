@@ -68,18 +68,14 @@ func (d *audioDecoder) Step(stopCh <-chan struct{}) (err error) {
 	case <-stopCh:
 		return &lifecycle.BreakError{}
 	case p := <-d.inpPackets:
-		defer p.Close()
-
 		if p.CodecParameters() != d.codecPar {
 			if err = d.updateCodecPar(p.CodecParameters()); err != nil {
 				return
 			}
 		}
 
-		p.View(func(b buffer.PooledBuffer) {
-			d.inBuf.Resize(b.Len())
-			copy(d.inBuf.Data(), b.Data())
-		})
+		d.inBuf.Resize(p.Len())
+		copy(d.inBuf.Data(), p.Data())
 
 		var dPCM []byte
 		if dPCM, err = d.InnerAudioDecoder.Decode(d.inBuf.Data()); err != nil || len(dPCM) == 0 {

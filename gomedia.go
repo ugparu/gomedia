@@ -4,8 +4,6 @@ import (
 	"context"
 	"image"
 	"time"
-
-	"github.com/ugparu/gomedia/utils/buffer"
 )
 
 // CodecParameters defines the interface for multimedia codec configuration.
@@ -43,21 +41,19 @@ type CodecParametersPair struct {
 
 // Packet defines the interface for multimedia data containers.
 type Packet interface {
-	Clone(copyData bool) Packet              // Creates a packet copy, optionally copying the underlying data.
-	URL() string                             // Returns the source URL of the packet.
-	SetURL(string)                           // Sets the source URL for the packet.
-	StreamIndex() uint8                      // Returns the stream index this packet belongs to.
-	SetStreamIndex(uint8)                    // Sets the stream index for this packet.
-	Timestamp() time.Duration                // Returns the presentation timestamp.
-	SetTimestamp(time.Duration)              // Sets the presentation timestamp.
-	StartTime() time.Time                    // Returns the absolute start time.
-	SetStartTime(time.Time)                  // Sets the absolute start time.
-	Duration() time.Duration                 // Returns the duration of the packet content.
-	SetDuration(time.Duration)               // Sets the duration of the packet content.
-	View(fn func(b buffer.PooledBuffer))     // View the raw packet data.
-	Len() int                                // Returns the length of the packet data.
-	SwitchBuffer(newBuf buffer.PooledBuffer) // Switches the underlying buffer of the packet.
-	Close()                                  // Closes the packet and releases resources.
+	Clone(copyData bool) Packet // Creates a packet copy, optionally copying the underlying data.
+	URL() string                // Returns the source URL of the packet.
+	SetURL(string)              // Sets the source URL for the packet.
+	StreamIndex() uint8         // Returns the stream index this packet belongs to.
+	SetStreamIndex(uint8)       // Sets the stream index for this packet.
+	Timestamp() time.Duration   // Returns the presentation timestamp.
+	SetTimestamp(time.Duration) // Sets the presentation timestamp.
+	StartTime() time.Time       // Returns the absolute start time.
+	SetStartTime(time.Time)     // Sets the absolute start time.
+	Duration() time.Duration    // Returns the duration of the packet content.
+	SetDuration(time.Duration)  // Sets the duration of the packet content.
+	Len() int                   // Returns the length of the packet data.
+	Data() []byte               // Returns the packet data.
 }
 
 // VideoPacket extends Packet with video-specific functionality.

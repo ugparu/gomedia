@@ -5,7 +5,6 @@ import (
 
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/codec"
-	"github.com/ugparu/gomedia/utils/buffer"
 )
 
 // Packet stores raw aac data without adts headers.
@@ -15,8 +14,6 @@ type Packet struct {
 
 func NewPacket(data []byte, ts time.Duration, url string,
 	absTime time.Time, codecPar *CodecParameters, dur time.Duration) *Packet {
-	buf := buffer.Get(len(data))
-	copy(buf.Data(), data)
 	return &Packet{
 		AudioPacket: codec.AudioPacket[*CodecParameters]{
 			BasePacket: codec.NewBasePacket(
@@ -24,7 +21,7 @@ func NewPacket(data []byte, ts time.Duration, url string,
 				ts,
 				dur,
 				url,
-				buf,
+				data,
 				absTime,
 				codecPar,
 			),

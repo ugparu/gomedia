@@ -11,20 +11,18 @@ import (
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/format/mp4"
 	"github.com/ugparu/gomedia/utils"
-	"github.com/ugparu/gomedia/utils/buffer"
 	"github.com/ugparu/gomedia/utils/lifecycle"
 	"github.com/ugparu/gomedia/utils/logger"
 )
 
 // activeFile represents a currently open file being written to
 type activeFile struct {
-	file       *os.File
-	muxer      *mp4.Muxer
-	mmapRegion *buffer.MmapRegion
-	startTime  time.Time
-	folder     string
-	name       string
-	duration   time.Duration
+	file      *os.File
+	muxer     *mp4.Muxer
+	startTime time.Time
+	folder    string
+	name      string
+	duration  time.Duration
 }
 
 // ringBuffer holds a window of packets for Event mode pre-buffering
@@ -74,7 +72,6 @@ func (rb *ringBuffer) trim() {
 			if _, ok := rb.packets[i].(gomedia.VideoPacket); ok {
 				trimDur += rb.packets[i].Duration()
 			}
-			rb.packets[i].Close()
 		}
 		rb.packets = rb.packets[trimIdx:]
 		rb.duration -= trimDur
@@ -82,9 +79,6 @@ func (rb *ringBuffer) trim() {
 }
 
 func (rb *ringBuffer) clear() {
-	for _, pkt := range rb.packets {
-		pkt.Close()
-	}
 	rb.packets = rb.packets[:0]
 	rb.duration = 0
 }
@@ -252,22 +246,13 @@ func (s *segmenter) openNewFile(url string, stream *streamState, startTime time.
 		return err
 	}
 
-	const mmapSize = 1 << 30 // 1GB
-
-	region, err := buffer.NewMmapRegion(f.Fd(), mmapSize)
-	if err != nil {
-		_ = f.Close()
-		return err
-	}
-
 	stream.activeFile = &activeFile{
-		file:       f,
-		muxer:      muxer,
-		mmapRegion: region,
-		startTime:  startTime,
-		folder:     folder,
-		name:       name,
-		duration:   0,
+		file:      f,
+		muxer:     muxer,
+		startTime: startTime,
+		folder:    folder,
+		name:      name,
+		duration:  0,
 	}
 
 	return nil
@@ -293,35 +278,18 @@ func (s *segmenter) closeActiveFile(stream *streamState, stopChan <-chan struct{
 	}
 
 	if err := af.muxer.WriteTrailer(); err != nil {
-		// Even on error, we must close captured packets as Muxer likely dropped them
-		for _, pkt := range lastPackets {
-			pkt.Close()
-		}
-		if af.mmapRegion != nil {
-			af.mmapRegion.Release()
-		}
 		_ = af.file.Close()
 		return err
-	}
-
-	for _, pkt := range lastPackets {
-		pkt.Close()
 	}
 
 	// Determine actual written size (after trailer) and shrink file from preallocated 1GB.
 	actualSize, err := af.file.Seek(0, 1)
 	if err != nil {
-		if af.mmapRegion != nil {
-			af.mmapRegion.Release()
-		}
 		_ = af.file.Close()
 		return err
 	}
 
 	if err = af.file.Truncate(actualSize); err != nil {
-		if af.mmapRegion != nil {
-			af.mmapRegion.Release()
-		}
 		_ = af.file.Close()
 		return err
 	}
@@ -336,16 +304,10 @@ func (s *segmenter) closeActiveFile(stream *streamState, stopChan <-chan struct{
 		Resolution: fmt.Sprintf("%dx%d", stream.codecPar.VideoCodecParameters.Width(), stream.codecPar.VideoCodecParameters.Height()),
 	}:
 	case <-stopChan:
-		if af.mmapRegion != nil {
-			af.mmapRegion.Release()
-		}
 		_ = af.file.Close()
 		return err
 	}
 
-	if af.mmapRegion != nil {
-		af.mmapRegion.Release()
-	}
 	_ = af.file.Close()
 
 	return nil
@@ -354,31 +316,13 @@ func (s *segmenter) closeActiveFile(stream *streamState, stopChan <-chan struct{
 // writePacketToFile writes a packet directly to the active file of a stream
 func (s *segmenter) writePacketToFile(stream *streamState, pkt gomedia.Packet) error {
 	if stream.activeFile == nil {
-		pkt.Close()
 		return errors.New("no active file")
 	}
 
 	af := stream.activeFile
 
-	// Get the pre-last packet (the one that will be written)
-	preLastPkt := af.muxer.GetPreLastPacket(pkt.StreamIndex())
-
 	if err := af.muxer.WritePacket(pkt); err != nil {
-		if preLastPkt != nil {
-			preLastPkt.Close()
-		}
 		return err
-	}
-
-	// Switch pre-last packet to file if it was written
-	if preLastPkt != nil {
-		// Get the actual packet data offset and size (excluding SPS/PPS/VPS for keyframes)
-		dataOffset, dataSize := af.muxer.GetLastPacketDataInfo(pkt.StreamIndex())
-		if dataSize > 0 {
-			view := af.mmapRegion.View(int(dataOffset), int(dataSize))
-			preLastPkt.SwitchBuffer(view)
-		}
-		preLastPkt.Close()
 	}
 
 	// Only count video packet durations for segment timing
@@ -442,7 +386,6 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 
 	case inpPkt := <-s.inpPktCh:
 		if s.recordMode == gomedia.Never {
-			inpPkt.Close()
 			return errors.New("attempt to process packet with never record mode")
 		}
 
@@ -458,7 +401,6 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 
 		// Check if URL is registered
 		if !s.hasSource(url) {
-			inpPkt.Close()
 			return nil // Skip packets from unregistered sources
 		}
 
@@ -480,7 +422,6 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 			if vPkt.CodecParameters() != stream.codecPar.VideoCodecParameters {
 				stream.codecPar.VideoCodecParameters = vPkt.CodecParameters()
 				if err = s.closeActiveFile(stream, s.Done()); err != nil {
-					inpPkt.Close()
 					return
 				}
 			}
@@ -489,7 +430,6 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 			if aPkt.CodecParameters() != stream.codecPar.AudioCodecParameters {
 				stream.codecPar.AudioCodecParameters = aPkt.CodecParameters()
 				if err = s.closeActiveFile(stream, s.Done()); err != nil {
-					inpPkt.Close()
 					return
 				}
 			}
@@ -500,7 +440,6 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 		isKeyframe := isVideo && vPkt.IsKeyFrame()
 
 		if !stream.seenKeyframe && !isKeyframe {
-			inpPkt.Close()
 			return nil
 		}
 		if isKeyframe {
@@ -525,7 +464,6 @@ func (s *segmenter) handleAlwaysMode(url string, stream *streamState, stopCh <-c
 	// Check if we need to rotate file (on keyframe when duration exceeded)
 	if isKeyframe && stream.activeFile != nil && stream.activeFile.duration >= s.targetDuration {
 		if err := s.closeActiveFile(stream, stopCh); err != nil {
-			pkt.Close()
 			return err
 		}
 	}
@@ -533,7 +471,6 @@ func (s *segmenter) handleAlwaysMode(url string, stream *streamState, stopCh <-c
 	// Open new file if needed (on keyframe)
 	if stream.activeFile == nil && isKeyframe {
 		if err := s.openNewFile(url, stream, pkt.StartTime()); err != nil {
-			pkt.Close()
 			return err
 		}
 		// Update recording status
@@ -548,7 +485,6 @@ func (s *segmenter) handleAlwaysMode(url string, stream *streamState, stopCh <-c
 		return s.writePacketToFile(stream, pkt)
 	}
 
-	pkt.Close()
 	return nil
 }
 
@@ -583,7 +519,6 @@ func (s *segmenter) handleEventModeActiveFile(url string, stream *streamState, s
 
 	if shouldClose {
 		if err := s.closeActiveFile(stream, stopCh); err != nil {
-			pkt.Close()
 			return err
 		}
 
@@ -600,18 +535,15 @@ func (s *segmenter) handleEventModeActiveFile(url string, stream *streamState, s
 			s.recordCurStatus = false
 			s.recordCurStatusCh <- false
 		}
-		pkt.Close()
 		return nil // Continue to buffer mode in next packet
 	}
 
 	// Check if we need to rotate file (duration exceeded but event still active)
 	if isKeyframe && !s.eventSaved && stream.activeFile.duration >= s.targetDuration {
 		if err := s.closeActiveFile(stream, stopCh); err != nil {
-			pkt.Close()
 			return err
 		}
 		if err := s.openNewFile(url, stream, pkt.StartTime()); err != nil {
-			pkt.Close()
 			return err
 		}
 	}
@@ -629,11 +561,6 @@ func (s *segmenter) startEventRecording(url string, stream *streamState) error {
 	// Find first keyframe in buffer to start file
 	startIdx := s.findFirstKeyframe(bufferedPkts)
 
-	// Close packets before the first keyframe — they can't be used
-	for i := 0; i < startIdx; i++ {
-		bufferedPkts[i].Close()
-	}
-
 	if err := s.openNewFile(url, stream, bufferedPkts[startIdx].StartTime()); err != nil {
 		return err
 	}
@@ -646,10 +573,6 @@ func (s *segmenter) startEventRecording(url string, stream *streamState) error {
 	// Write buffered packets
 	for i := startIdx; i < len(bufferedPkts); i++ {
 		if err := s.writePacketToFile(stream, bufferedPkts[i]); err != nil {
-			// Close remaining packets that won't be written
-			for j := i + 1; j < len(bufferedPkts); j++ {
-				bufferedPkts[j].Close()
-			}
 			return err
 		}
 	}

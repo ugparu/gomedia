@@ -377,14 +377,12 @@ func (ss *sortedStreams) moveTrackToStream(str *stream, pu *peerURL, peerBuf []g
 			select {
 			case pu.peerTrack.vChan <- clonePkt:
 			case <-time.After(sendTimeout):
-				clonePkt.Close()
 				logger.Errorf(ss, "Timeout sending video packet to peer during stream move")
 			}
 		case gomedia.AudioPacket:
 			select {
 			case pu.peerTrack.aChan <- clonePkt:
 			case <-time.After(sendTimeout):
-				clonePkt.Close()
 				logger.Errorf(ss, "Timeout sending audio packet to peer during stream move")
 			}
 		}
@@ -462,7 +460,6 @@ func (ss *sortedStreams) seedTrack(str *stream, peer *peerTrack) error {
 		select {
 		case peer.vChan <- clonePkt.(gomedia.VideoPacket):
 		case <-peer.done:
-			clonePkt.Close()
 			return errors.New("peer disconnected during seeding")
 		}
 	}
@@ -475,7 +472,6 @@ func (ss *sortedStreams) seedTrack(str *stream, peer *peerTrack) error {
 			select {
 			case peer.vChan <- clonePkt:
 			case <-peer.done:
-				clonePkt.Close()
 				return errors.New("peer disconnected during seeding")
 			}
 		case gomedia.AudioPacket:
@@ -483,7 +479,6 @@ func (ss *sortedStreams) seedTrack(str *stream, peer *peerTrack) error {
 			select {
 			case peer.aChan <- clonePkt:
 			case <-peer.done:
-				clonePkt.Close()
 				return errors.New("peer disconnected during seeding")
 			}
 		}
@@ -525,18 +520,14 @@ func (ss *sortedStreams) bufferPacketForPeer(peer *peerTrack, pkt gomedia.Packet
 		select {
 		case peer.vChan <- clonePkt:
 		case <-peer.done:
-			clonePkt.Close()
 		default: // drop if full — real-time streaming, stale frames useless
-			clonePkt.Close()
 		}
 	case gomedia.AudioPacket:
 		clonePkt := packet.Clone(false).(gomedia.AudioPacket)
 		select {
 		case peer.aChan <- clonePkt:
 		case <-peer.done:
-			clonePkt.Close()
 		default:
-			clonePkt.Close()
 		}
 	}
 }
@@ -548,7 +539,6 @@ func (ss *sortedStreams) writePacket(pkt gomedia.Packet) (err error) {
 	if err != nil {
 		// Ignore specific errors that shouldn't propagate
 		if errors.Is(err, ErrPacketTooSmall) || errors.Is(err, ErrStreamNotFound) {
-			pkt.Close()
 			return nil
 		}
 		return err

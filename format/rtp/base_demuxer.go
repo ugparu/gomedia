@@ -31,15 +31,17 @@ const (
 )
 
 type baseDemuxer struct {
-	rdr        io.Reader
-	sdp        sdp.Media
-	payload    buffer.PooledBuffer
-	offset     int
-	end        int
-	timestamp  uint32
-	index      uint8
-	ringBuffer buffer.PooledBuffer
-	ringOffset int
+	rdr         io.Reader
+	sdp         sdp.Media
+	payload     buffer.PooledBuffer
+	offset      int
+	end         int
+	timestamp   uint32
+	index       uint8
+	useRing     bool
+	ringSeconds int
+	ringBuffer  buffer.PooledBuffer
+	ringOffset  int
 }
 
 type DemuxerOption func(*baseDemuxer)
@@ -47,6 +49,13 @@ type DemuxerOption func(*baseDemuxer)
 func WithRingBuffer(size int) DemuxerOption {
 	return func(d *baseDemuxer) {
 		d.ringBuffer = buffer.Get(size)
+	}
+}
+
+func WithCalculatedRingBuffer(seconds int) DemuxerOption {
+	return func(d *baseDemuxer) {
+		d.useRing = true
+		d.ringSeconds = seconds
 	}
 }
 
@@ -59,7 +68,8 @@ func newBaseDemuxer(rdr io.Reader, sdp sdp.Media, index uint8, opts ...DemuxerOp
 		end:        0,
 		timestamp:  0,
 		index:      index,
-		ringBuffer: buffer.Get(5 * 1024 * 1024),
+		useRing:    false,
+		ringBuffer: nil,
 		ringOffset: 0,
 	}
 	for _, opt := range opts {

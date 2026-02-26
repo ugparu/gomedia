@@ -6,7 +6,6 @@ import (
 
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/codec/h264"
-	"github.com/ugparu/gomedia/utils/buffer"
 	"github.com/ugparu/gomedia/utils/nal"
 	"github.com/ugparu/gomedia/utils/sdp"
 )
@@ -49,9 +48,7 @@ func (m *h264Muxer) WritePacket(pkt gomedia.VideoPacket) error {
 	isKey := hp.IsKeyFrame()
 
 	var avccData []byte
-	hp.View(func(b buffer.PooledBuffer) {
-		avccData = append(avccData[:0], b.Data()...)
-	})
+	avccData = append(avccData[:0], hp.Data()...)
 
 	if len(avccData) == 0 {
 		return nil

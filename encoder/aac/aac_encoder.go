@@ -100,9 +100,7 @@ func (v *aacEncoder) Init(codecPar *pcm.CodecParameters) (err error) {
 //
 //	because we will flush the encoder automatically to got the last frames.
 func (v *aacEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err error) {
-	pkt.View(func(data buffer.PooledBuffer) {
-		v.buf = append(v.buf, data.Data()...)
-	})
+	v.buf = append(v.buf, pkt.Data()...)
 
 	for len(v.buf) >= v.frameSize {
 		pcm := v.buf[:v.frameSize]

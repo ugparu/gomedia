@@ -26,7 +26,6 @@ func (b *Buffer) AddPacket(packet gomedia.Packet) {
 	}
 
 	if len(b.gops) == 0 {
-		packet.Close()
 		return
 	}
 
@@ -47,11 +46,7 @@ func (b *Buffer) AdjustSize() {
 	}
 
 	b.duration -= b.gops[0].duration
-	gop := b.gops[0]
 	b.gops = b.gops[1:]
-	for _, packet := range gop.packets {
-		packet.Close()
-	}
 }
 
 func (b *Buffer) GetBuffer(ts time.Time) ([]gomedia.VideoPacket, []gomedia.Packet) {
@@ -109,21 +104,11 @@ func (b *Buffer) GetBuffer(ts time.Time) ([]gomedia.VideoPacket, []gomedia.Packe
 }
 
 func (b *Buffer) Reset() {
-	for _, gop := range b.gops {
-		for _, packet := range gop.packets {
-			packet.Close()
-		}
-	}
 	b.gops = []GoP{}
 	b.duration = 0
 }
 
 func (b *Buffer) Close() {
-	for _, gop := range b.gops {
-		for _, packet := range gop.packets {
-			packet.Close()
-		}
-	}
 	b.gops = nil
 	b.duration = 0
 }

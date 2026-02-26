@@ -90,12 +90,10 @@ func writeVideoPacketsToPeer(pt *peerTrack,
 		// Split NALUs and calculate total size
 		var nalus [][]byte
 		var nalusSize int
-		pkt.View(func(data buffer.PooledBuffer) {
-			nalus, _ = nal.SplitNALUs(data.Data())
-			for _, nalu := range nalus {
-				nalusSize += 4 + len(nalu) // start code (4 bytes) + nalu data
-			}
-		})
+		nalus, _ = nal.SplitNALUs(pkt.Data())
+		for _, nalu := range nalus {
+			nalusSize += 4 + len(nalu) // start code (4 bytes) + nalu data
+		}
 
 		// Resize vBuf once to fit all data
 		totalSize := len(codecParams) + nalusSize
@@ -130,7 +128,6 @@ func writeVideoPacketsToPeer(pt *peerTrack,
 		}
 
 		sleep := pkt.Duration() - time.Since(last)
-		pkt.Close()
 
 		if sleep > 0 {
 			time.Sleep(sleep)
@@ -159,7 +156,6 @@ func writeVideoPacketsToPeer(pt *peerTrack,
 						url = pktURL
 						break loop
 					}
-					pkt.Close()
 				default:
 					break loop
 				}
@@ -180,10 +176,8 @@ func writeVideoPacketsToPeer(pt *peerTrack,
 func writeAudioPacketsToPeer(pt *peerTrack, aflush chan struct{}, aChan chan gomedia.AudioPacket, at *webrtc.TrackLocalStaticSample, aBuf buffer.PooledBuffer, delay time.Duration) {
 	last := time.Now()
 	processPkt := func(pkt gomedia.AudioPacket) {
-		pkt.View(func(data buffer.PooledBuffer) {
-			aBuf.Resize(data.Len())
-			copy(aBuf.Data(), data.Data())
-		})
+		aBuf.Resize(pkt.Len())
+		copy(aBuf.Data(), pkt.Data())
 
 		sample := media.Sample{
 			Data:               aBuf.Data(),
@@ -198,8 +192,6 @@ func writeAudioPacketsToPeer(pt *peerTrack, aflush chan struct{}, aChan chan gom
 		if err != nil {
 			logger.Errorf(pt.done, "Error writing audio sample: %v", err)
 		}
-
-		pkt.Close()
 
 		sleep := pkt.Duration() - time.Since(last)
 
@@ -231,7 +223,6 @@ func writeAudioPacketsToPeer(pt *peerTrack, aflush chan struct{}, aChan chan gom
 						url = pktURL
 						break loop
 					}
-					pkt.Close()
 				default:
 					break loop
 				}

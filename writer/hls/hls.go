@@ -206,19 +206,16 @@ func (hlsw *hlsWriter) Step(stopCh <-chan struct{}) (err error) {
 		switch pkt := inpPkt.(type) {
 		case gomedia.VideoPacket:
 			if err = hlsw.checkCodPar(inpPkt.URL(), pkt.CodecParameters()); err != nil {
-				inpPkt.Close()
 				return
 			}
 		case gomedia.AudioPacket:
 			if err = hlsw.checkCodPar(inpPkt.URL(), pkt.CodecParameters()); err != nil {
-				inpPkt.Close()
 				return
 			}
 		}
 
 		mux, ok := hlsw.muxerURLs[inpPkt.URL()]
 		if !ok {
-			inpPkt.Close()
 			return
 		}
 
@@ -289,12 +286,9 @@ func (hlsw *hlsWriter) Close_() { //nolint: revive
 	// Drain remaining packets from the channel to prevent leaks.
 	for {
 		select {
-		case pkt, ok := <-hlsw.inpPktCh:
+		case _, ok := <-hlsw.inpPktCh:
 			if !ok {
 				return
-			}
-			if pkt != nil {
-				pkt.Close()
 			}
 		default:
 			close(hlsw.inpPktCh)

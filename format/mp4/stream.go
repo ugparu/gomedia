@@ -365,13 +365,8 @@ func (s *Stream) readPacket(tm time.Duration, url string) (pkt gomedia.Packet, e
 				naluWithHeader := append(buf, nal...)
 
 				if s.h265SlicedPacket != nil {
-					s.h265SlicedPacket.View(func(data buffer.PooledBuffer) {
-						// Add to existing sliced packet buffer
-						oldLen := data.Len()
-
-						data.Resize(oldLen + len(naluWithHeader))
-						copy(data.Data()[oldLen:], naluWithHeader)
-					})
+					oldLen := s.h265SlicedPacket.Len()
+					s.h265SlicedPacket.Buf = append(s.h265SlicedPacket.Buf[:oldLen], naluWithHeader...)
 				} else {
 					// Create new packet for parameter sets
 					pkt = h265.NewPacket(false, tm, time.Now(), naluWithHeader, url, h265Par)
@@ -397,11 +392,8 @@ func (s *Stream) readPacket(tm time.Duration, url string) (pkt gomedia.Packet, e
 					s.h265BufferHasKey = sliceIsKey
 				} else if s.h265SlicedPacket != nil {
 					// Subsequent slice: add to current buffered packet
-					s.h265SlicedPacket.View(func(data buffer.PooledBuffer) {
-						oldLen := data.Len()
-						data.Resize(oldLen + len(naluWithHeader))
-						copy(data.Data()[oldLen:], naluWithHeader)
-					})
+					oldLen := s.h265SlicedPacket.Len()
+					s.h265SlicedPacket.Buf = append(s.h265SlicedPacket.Buf[:oldLen], naluWithHeader...)
 					s.h265SlicedPacket.IsKeyFrm = s.h265SlicedPacket.IsKeyFrm || sliceIsKey
 					s.h265BufferHasKey = s.h265BufferHasKey || sliceIsKey
 				} else {
@@ -528,11 +520,9 @@ func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
 	s.lastPacketDataOffset = s.muxer.writePosition + int64(pktSize-pkt.Len())
 	s.lastPacketDataSize = int64(pkt.Len())
 
-	pkt.View(func(data buffer.PooledBuffer) {
-		if _, err = s.muxer.writer.Write(data.Data()); err != nil {
-			return
-		}
-	})
+	if _, err = s.muxer.writer.Write(pkt.Data()); err != nil {
+		return
+	}
 
 	// For video packets, update sync sample information.
 	if vPkt, casted := pkt.(gomedia.VideoPacket); casted {

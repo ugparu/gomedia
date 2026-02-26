@@ -110,12 +110,10 @@ func (element *webRTCWriter) Step(stopCh <-chan struct{}) (err error) {
 		switch pkt := inpPkt.(type) {
 		case gomedia.VideoPacket:
 			if err = element.checkCodecParameters(inpPkt.URL(), pkt.CodecParameters()); err != nil {
-				inpPkt.Close()
 				return
 			}
 		case gomedia.AudioPacket:
 			if err = element.checkCodecParameters(inpPkt.URL(), pkt.CodecParameters()); err != nil {
-				inpPkt.Close()
 				return
 			}
 		}
@@ -549,10 +547,8 @@ func (element *webRTCWriter) removePeer(peer *peerTrack) (err error) {
 	// Drain remaining packets from channels to avoid leaking cloned packets
 	for {
 		select {
-		case pkt := <-peer.vChan:
-			pkt.Close()
-		case pkt := <-peer.aChan:
-			pkt.Close()
+		case <-peer.vChan:
+		case <-peer.aChan:
 		default:
 			return nil
 		}
