@@ -15,7 +15,7 @@ type opusDemuxer struct {
 }
 
 // nolint: mnd
-func NewOPUSDemuxer(rdr io.Reader, sdp sdp.Media, index uint8) gomedia.Demuxer {
+func NewOPUSDemuxer(rdr io.Reader, sdp sdp.Media, index uint8, options ...DemuxerOption) gomedia.Demuxer {
 	var cl gomedia.ChannelLayout
 	switch sdp.ChannelCount {
 	case 1:
@@ -29,7 +29,7 @@ func NewOPUSDemuxer(rdr io.Reader, sdp sdp.Media, index uint8) gomedia.Demuxer {
 	par.SetStreamIndex(index)
 
 	return &opusDemuxer{
-		baseDemuxer:     *newBaseDemuxer(rdr, sdp, index),
+		baseDemuxer:     *newBaseDemuxer(rdr, sdp, index, options...),
 		CodecParameters: par,
 	}
 }

@@ -23,9 +23,9 @@ type h264Demuxer struct {
 	BufferRTPPacket *bytes.Buffer
 }
 
-func NewH264Demuxer(rdr io.Reader, sdp sdp.Media, index uint8) gomedia.Demuxer {
+func NewH264Demuxer(rdr io.Reader, sdp sdp.Media, index uint8, options ...DemuxerOption) gomedia.Demuxer {
 	return &h264Demuxer{
-		hxxxDemuxer:     *newHxxxDemuxer(rdr, sdp, index),
+		hxxxDemuxer:     *newHxxxDemuxer(rdr, sdp, index, options...),
 		sps:             []byte{},
 		pps:             []byte{},
 		codec:           nil,
@@ -159,9 +159,24 @@ func (d *h264Demuxer) finalizeFUAPacket() error {
 
 // addPacket creates and adds a new packet to the packet queue
 func (d *h264Demuxer) addPacket(nalU []byte, isKeyFrame bool) {
+	var data []byte
+	if d.ringBuffer != nil {
+		println(d.ringOffset, d.ringBuffer.Len())
+		if d.ringOffset+4+len(nalU) > d.ringBuffer.Len() {
+			logger.Infof(d, "ringBuffer is full, resetting offset")
+			d.ringOffset = 0
+		}
+		copy(d.ringBuffer.Data()[d.ringOffset:], binSize(len(nalU)))
+		d.ringOffset += 4
+		copy(d.ringBuffer.Data()[d.ringOffset:], nalU)
+		d.ringOffset += len(nalU)
+	} else {
+		data = append(binSize(len(nalU)), nalU...)
+	}
+
 	pkt := h264.NewPacket(isKeyFrame,
 		time.Duration(d.timestamp)*time.Millisecond/time.Duration(clockrate), time.Now(),
-		append(binSize(len(nalU)), nalU...), "", d.codec)
+		data, "", d.codec)
 	d.packets = append(d.packets, pkt)
 }
 

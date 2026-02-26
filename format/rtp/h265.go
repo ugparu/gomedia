@@ -21,9 +21,9 @@ type h265Demuxer struct {
 	slicedPacket    *h265.Packet
 }
 
-func NewH265Demuxer(rdr io.Reader, sdp sdp.Media, index uint8) gomedia.Demuxer {
+func NewH265Demuxer(rdr io.Reader, sdp sdp.Media, index uint8, options ...DemuxerOption) gomedia.Demuxer {
 	return &h265Demuxer{
-		hxxxDemuxer:     *newHxxxDemuxer(rdr, sdp, index),
+		hxxxDemuxer:     *newHxxxDemuxer(rdr, sdp, index, options...),
 		sps:             []byte{},
 		pps:             []byte{},
 		vps:             []byte{},

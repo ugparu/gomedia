@@ -20,47 +20,64 @@ import (
 )
 
 type innerRTSPDemuxer struct {
-	url              string
-	videoDemuxer     gomedia.Demuxer
-	videoIdx         int8
-	audioDemuxer     gomedia.Demuxer
-	audioIdx         int8
-	chTMP            int
-	mediaSDP         []sdp.Media
-	lastPktRcv       time.Time
-	client           *client
-	ticker           *time.Ticker
-	buffer           *bytes.Buffer
-	packets          []gomedia.Packet
-	noVideo, noAudio bool
-	readBuffer       buffer.PooledBuffer
+	url               string
+	videoDemuxer      gomedia.Demuxer
+	videoIdx          int8
+	audioDemuxer      gomedia.Demuxer
+	audioIdx          int8
+	chTMP             int
+	mediaSDP          []sdp.Media
+	lastPktRcv        time.Time
+	client            *client
+	ticker            *time.Ticker
+	buffer            *bytes.Buffer
+	packets           []gomedia.Packet
+	noVideo, noAudio  bool
+	readBuffer        buffer.PooledBuffer
+	rtpRingBufferSize int
 }
 
-func New(url string, inpPars ...gomedia.InputParameter) gomedia.Demuxer {
-	d := &innerRTSPDemuxer{
-		url:          url,
-		videoDemuxer: nil,
-		videoIdx:     -128,
-		audioDemuxer: nil,
-		audioIdx:     -128,
-		chTMP:        0,
-		mediaSDP:     []sdp.Media{},
-		lastPktRcv:   time.Now(),
-		client:       newClient(),
-		ticker:       time.NewTicker(pingTimeout),
-		buffer:       bytes.NewBuffer(nil),
-		packets:      []gomedia.Packet{},
-		noVideo:      false,
-		noAudio:      false,
-		readBuffer:   buffer.Get(0),
+type DemuxerOption func(d *innerRTSPDemuxer)
+
+func NoVideo() DemuxerOption {
+	return func(d *innerRTSPDemuxer) {
+		d.noVideo = true
 	}
-	for _, inpPar := range inpPars {
-		switch inpPar {
-		case gomedia.NoVideo:
-			d.noVideo = true
-		case gomedia.NoAudio:
-			d.noAudio = true
-		}
+}
+
+func NoAudio() DemuxerOption {
+	return func(d *innerRTSPDemuxer) {
+		d.noAudio = true
+	}
+}
+
+func WithRingBuffer(size int) DemuxerOption {
+	return func(d *innerRTSPDemuxer) {
+		d.rtpRingBufferSize = size
+	}
+}
+
+func New(url string, opts ...DemuxerOption) gomedia.Demuxer {
+	d := &innerRTSPDemuxer{
+		url:               url,
+		videoDemuxer:      nil,
+		videoIdx:          -128,
+		audioDemuxer:      nil,
+		audioIdx:          -128,
+		chTMP:             0,
+		mediaSDP:          []sdp.Media{},
+		lastPktRcv:        time.Now(),
+		client:            newClient(),
+		ticker:            time.NewTicker(pingTimeout),
+		buffer:            bytes.NewBuffer(nil),
+		packets:           []gomedia.Packet{},
+		noVideo:           false,
+		noAudio:           false,
+		readBuffer:        buffer.Get(0),
+		rtpRingBufferSize: 0,
+	}
+	for _, opt := range opts {
+		opt(d)
 	}
 	return d
 }
@@ -126,21 +143,21 @@ func (dmx *innerRTSPDemuxer) findStreams() (params gomedia.CodecParametersPair, 
 			switch i2.Type {
 			case gomedia.H264:
 				var h264Pair gomedia.CodecParametersPair
-				dmx.videoDemuxer = rtp.NewH264Demuxer(dmx.buffer, i2, uint8(index)) //nolint:gosec
+				dmx.videoDemuxer = rtp.NewH264Demuxer(dmx.buffer, i2, uint8(index), rtp.WithRingBuffer(dmx.rtpRingBufferSize)) //nolint:gosec
 				if h264Pair, err = dmx.videoDemuxer.Demux(); err != nil {
 					return
 				}
 				params.VideoCodecParameters = h264Pair.VideoCodecParameters
 			case gomedia.H265:
 				var h265Pair gomedia.CodecParametersPair
-				dmx.videoDemuxer = rtp.NewH265Demuxer(dmx.buffer, i2, uint8(index)) //nolint:gosec
+				dmx.videoDemuxer = rtp.NewH265Demuxer(dmx.buffer, i2, uint8(index), rtp.WithRingBuffer(dmx.rtpRingBufferSize)) //nolint:gosec
 				if h265Pair, err = dmx.videoDemuxer.Demux(); err != nil {
 					return
 				}
 				params.VideoCodecParameters = h265Pair.VideoCodecParameters
 			case gomedia.MJPEG:
 				var mjpegPair gomedia.CodecParametersPair
-				dmx.videoDemuxer = rtp.NewMJPEGDemuxer(dmx.buffer, i2, uint8(index)) //nolint:gosec
+				dmx.videoDemuxer = rtp.NewMJPEGDemuxer(dmx.buffer, i2, uint8(index), rtp.WithRingBuffer(dmx.rtpRingBufferSize)) //nolint:gosec
 				if mjpegPair, err = dmx.videoDemuxer.Demux(); err != nil {
 					return
 				}
@@ -153,21 +170,21 @@ func (dmx *innerRTSPDemuxer) findStreams() (params gomedia.CodecParametersPair, 
 			switch i2.Type {
 			case gomedia.PCM, gomedia.PCMAlaw, gomedia.PCMUlaw:
 				var pcmPair gomedia.CodecParametersPair
-				dmx.audioDemuxer = rtp.NewPCMDemuxer(dmx.buffer, i2, uint8(index), i2.Type) //nolint:gosec
+				dmx.audioDemuxer = rtp.NewPCMDemuxer(dmx.buffer, i2, uint8(index), i2.Type, rtp.WithRingBuffer(dmx.rtpRingBufferSize)) //nolint:gosec
 				if pcmPair, err = dmx.audioDemuxer.Demux(); err != nil {
 					return
 				}
 				params.AudioCodecParameters = pcmPair.AudioCodecParameters
 			case gomedia.AAC:
 				var aacPair gomedia.CodecParametersPair
-				dmx.audioDemuxer = rtp.NewAACDemuxer(dmx.buffer, i2, uint8(index)) //nolint:gosec
+				dmx.audioDemuxer = rtp.NewAACDemuxer(dmx.buffer, i2, uint8(index), rtp.WithRingBuffer(dmx.rtpRingBufferSize)) //nolint:gosec
 				if aacPair, err = dmx.audioDemuxer.Demux(); err != nil {
 					return
 				}
 				params.AudioCodecParameters = aacPair.AudioCodecParameters
 			case gomedia.OPUS:
 				var opusPair gomedia.CodecParametersPair
-				dmx.audioDemuxer = rtp.NewOPUSDemuxer(dmx.buffer, i2, uint8(index)) //nolint:gosec
+				dmx.audioDemuxer = rtp.NewOPUSDemuxer(dmx.buffer, i2, uint8(index), rtp.WithRingBuffer(dmx.rtpRingBufferSize)) //nolint:gosec
 				if opusPair, err = dmx.audioDemuxer.Demux(); err != nil {
 					return
 				}

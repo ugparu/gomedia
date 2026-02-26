@@ -31,25 +31,41 @@ const (
 )
 
 type baseDemuxer struct {
-	rdr       io.Reader
-	sdp       sdp.Media
-	payload   buffer.PooledBuffer
-	offset    int
-	end       int
-	timestamp uint32
-	index     uint8
+	rdr        io.Reader
+	sdp        sdp.Media
+	payload    buffer.PooledBuffer
+	offset     int
+	end        int
+	timestamp  uint32
+	index      uint8
+	ringBuffer buffer.PooledBuffer
+	ringOffset int
 }
 
-func newBaseDemuxer(rdr io.Reader, sdp sdp.Media, index uint8) *baseDemuxer {
-	return &baseDemuxer{
-		rdr:       rdr,
-		sdp:       sdp,
-		payload:   buffer.Get(rtspHeaderSize),
-		offset:    0,
-		end:       0,
-		timestamp: 0,
-		index:     index,
+type DemuxerOption func(*baseDemuxer)
+
+func WithRingBuffer(size int) DemuxerOption {
+	return func(d *baseDemuxer) {
+		d.ringBuffer = buffer.Get(size)
 	}
+}
+
+func newBaseDemuxer(rdr io.Reader, sdp sdp.Media, index uint8, opts ...DemuxerOption) *baseDemuxer {
+	bd := &baseDemuxer{
+		rdr:        rdr,
+		sdp:        sdp,
+		payload:    buffer.Get(rtspHeaderSize),
+		offset:     0,
+		end:        0,
+		timestamp:  0,
+		index:      index,
+		ringBuffer: buffer.Get(5 * 1024 * 1024),
+		ringOffset: 0,
+	}
+	for _, opt := range opts {
+		opt(bd)
+	}
+	return bd
 }
 
 func (d *baseDemuxer) Demux() (codecs gomedia.CodecParametersPair, err error) {

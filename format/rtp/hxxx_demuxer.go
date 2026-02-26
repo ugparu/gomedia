@@ -14,9 +14,10 @@ type hxxxDemuxer struct {
 	nals [][]byte
 }
 
-func newHxxxDemuxer(rdr io.Reader, sdp sdp.Media, index uint8) *hxxxDemuxer {
+func newHxxxDemuxer(rdr io.Reader, sdp sdp.Media, index uint8, options ...DemuxerOption) *hxxxDemuxer {
+	bd := newBaseDemuxer(rdr, sdp, index, options...)
 	return &hxxxDemuxer{
-		baseDemuxer: newBaseDemuxer(rdr, sdp, index),
+		baseDemuxer: bd,
 		nals:        nil,
 	}
 }

@@ -17,12 +17,12 @@ import (
 
 func main() {
 	var (
-		rtspURL  string
-		sessions int
+		rtspURL   string
+		sessions  int
 		maxFrames int
-		timeout  int
-		verbose  bool
-		noAudio  bool
+		timeout   int
+		verbose   bool
+		noAudio   bool
 	)
 
 	flag.StringVar(&rtspURL, "url", "", "RTSP URL to decode (required, can also use RTSP_URL env var)")
@@ -77,7 +77,7 @@ func runSession(id int, rtspURL string, maxFrames, timeout int, verbose, noAudio
 	// Create RTSP demuxer
 	var dmx gomedia.Demuxer
 	if noAudio {
-		dmx = rtsp.New(rtspURL, gomedia.NoAudio)
+		dmx = rtsp.New(rtspURL, rtsp.NoAudio())
 	} else {
 		dmx = rtsp.New(rtspURL)
 	}

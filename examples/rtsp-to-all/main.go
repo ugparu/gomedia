@@ -23,6 +23,7 @@ import (
 	"github.com/ugparu/gomedia/encoder"
 	"github.com/ugparu/gomedia/encoder/aac"
 	pcmEnc "github.com/ugparu/gomedia/encoder/pcm"
+	"github.com/ugparu/gomedia/format/rtsp"
 	"github.com/ugparu/gomedia/reader"
 	"github.com/ugparu/gomedia/utils/logger"
 	"github.com/ugparu/gomedia/writer/hls"
@@ -87,7 +88,7 @@ func main() {
 
 	// Initialize RTSP reader
 	logrus.Info("Connecting to RTSP streams: ", rtspURLs)
-	rdr := reader.NewRTSP(100)
+	rdr := reader.NewRTSP(100, rtsp.WithRingBuffer(10*1024*1024))
 	rdr.Read()
 	for _, rtspURL := range rtspURLs {
 		webrtcWr.AddSource() <- rtspURL

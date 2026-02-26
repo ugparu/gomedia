@@ -14,9 +14,9 @@ type alawDemuxer struct {
 	*pcm.CodecParameters
 }
 
-func NewPCMDemuxer(rdr io.Reader, sdp sdp.Media, index uint8, ct gomedia.CodecType) gomedia.Demuxer {
+func NewPCMDemuxer(rdr io.Reader, sdp sdp.Media, index uint8, ct gomedia.CodecType, options ...DemuxerOption) gomedia.Demuxer {
 	return &alawDemuxer{
-		baseDemuxer: *newBaseDemuxer(rdr, sdp, index),
+		baseDemuxer: *newBaseDemuxer(rdr, sdp, index, options...),
 		CodecParameters: pcm.NewCodecParameters(index, ct,
 			uint8(sdp.ChannelCount), uint64(sdp.TimeScale)), //nolint:gosec
 	}

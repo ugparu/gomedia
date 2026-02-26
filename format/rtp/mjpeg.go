@@ -46,7 +46,7 @@ type mjpegDemuxer struct {
 }
 
 // NewMJPEGDemuxer creates a new MJPEG RTP demuxer
-func NewMJPEGDemuxer(rdr io.Reader, sdp sdp.Media, index uint8) gomedia.Demuxer {
+func NewMJPEGDemuxer(rdr io.Reader, sdp sdp.Media, index uint8, options ...DemuxerOption) gomedia.Demuxer {
 	return &mjpegDemuxer{
 		baseDemuxer:          newBaseDemuxer(rdr, sdp, index), // Using base demuxer pattern
 		packets:              []*mjpeg.Packet{},

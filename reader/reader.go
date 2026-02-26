@@ -21,17 +21,18 @@ const (
 // reader is an internal structure implementing the gomedia.Reader interface.
 type reader struct {
 	lifecycle.AsyncManager[*reader] // Embedding an AsyncManager for asynchronous operations.
-	newDmx                          func(string, ...gomedia.InputParameter) gomedia.Demuxer
+	newDmx                          func(string, ...rtsp.DemuxerOption) gomedia.Demuxer
 	packets                         chan gomedia.Packet
 	addURLCh                        chan string
 	removeURLCh                     chan string
 	dmxStoppers                     map[string]chan struct{}
 	name                            string
 	mu                              sync.Mutex
+	opts                            []rtsp.DemuxerOption
 }
 
 // NewRTSP creates a new RTSP reader with the specified URL and channel size.
-func NewRTSP(chanSize int) gomedia.Reader {
+func NewRTSP(chanSize int, opts ...rtsp.DemuxerOption) gomedia.Reader {
 	rdr := &reader{
 		AsyncManager: nil,
 		newDmx:       rtsp.New,
@@ -41,6 +42,7 @@ func NewRTSP(chanSize int) gomedia.Reader {
 		dmxStoppers:  make(map[string]chan struct{}),
 		name:         "READER",
 		mu:           sync.Mutex{},
+		opts:         opts,
 	}
 
 	rdr.AsyncManager = lifecycle.NewFailSafeAsyncManager(rdr)
@@ -58,7 +60,7 @@ func (rdr *reader) repackPackets(src string, stopCh <-chan struct{}) {
 	videoOffsetHandler := new(offsetHandler)
 	audioOffsetHandler := new(offsetHandler)
 
-	dmx := rdr.newDmx(src)
+	dmx := rdr.newDmx(src, rdr.opts...)
 	pars, err := dmx.Demux()
 	if err != nil {
 		logger.Warningf(rdr, "Failed to start demuxer: %s", err.Error())

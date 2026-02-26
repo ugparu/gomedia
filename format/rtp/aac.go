@@ -15,11 +15,11 @@ type aacDemuxer struct {
 	packets []*aac.Packet
 }
 
-func NewAACDemuxer(rdr io.Reader, sdp sdp.Media, index uint8) gomedia.Demuxer {
+func NewAACDemuxer(rdr io.Reader, sdp sdp.Media, index uint8, options ...DemuxerOption) gomedia.Demuxer {
 	par, _ := aac.NewCodecDataFromMPEG4AudioConfigBytes(sdp.Config)
 	par.SetStreamIndex(index)
 	return &aacDemuxer{
-		baseDemuxer:     *newBaseDemuxer(rdr, sdp, index),
+		baseDemuxer:     *newBaseDemuxer(rdr, sdp, index, options...),
 		CodecParameters: &par,
 		packets:         []*aac.Packet{},
 	}
