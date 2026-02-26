@@ -2,7 +2,6 @@ package codec
 
 import (
 	"fmt"
-	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,7 +12,7 @@ import (
 )
 
 // sharedBuffer holds the buffer and reference count, shared between packet clones.
-// This ensures all clones see the same buffer when it's swapped (e.g., via SwitchToFile).
+// This ensures all clones see the same buffer when it's swapped (e.g., via SwitchBuffer).
 type sharedBuffer struct {
 	buf buffer.PooledBuffer
 	ref int32
@@ -66,7 +65,7 @@ func (pkt *BasePacket[T]) Clone(copyData bool) BasePacket[T] {
 		copy(buf.Data(), pkt.shared.buf.Data())
 		newPkt.shared = &sharedBuffer{buf: buf, ref: 1, mu: &sync.RWMutex{}}
 	} else {
-		// Share the same buffer - all clones will see buffer changes (e.g., SwitchToFile)
+		// Share the same buffer - all clones will see buffer changes (e.g., SwitchBuffer)
 		atomic.AddInt32(&pkt.shared.ref, 1)
 		newPkt.shared = pkt.shared
 	}
@@ -139,22 +138,15 @@ func (pkt *BasePacket[T]) String() string {
 	return fmt.Sprintf("PACKET sz=%d", pkt.shared.buf.Len())
 }
 
-func (pkt *BasePacket[T]) SwitchToFile(f *os.File, offset int64, size int64, closeFn func() error) (err error) {
+func (pkt *BasePacket[T]) SwitchBuffer(newBuf buffer.PooledBuffer) {
 	pkt.shared.mu.Lock()
 	defer pkt.shared.mu.Unlock()
-
-	buf, err := buffer.GetMmap(f, offset, int(size), closeFn)
-	if err != nil {
-		return err
-	}
 
 	// Replace the buffer in the shared structure.
 	// All clones will see this change since they share the same sharedBuffer pointer.
 	oldBuf := pkt.shared.buf
-	pkt.shared.buf = buf
+	pkt.shared.buf = newBuf
 	oldBuf.Release()
-
-	return nil
 }
 
 func (pkt *BasePacket[T]) Close() {

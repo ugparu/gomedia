@@ -306,7 +306,7 @@ func (mux *Muxer) WriteTrailer() (err error) {
 	}
 
 	// Move to the end of the file and write the MOOV atom.
-	if _, err = mux.writer.Seek(0, 2); err != nil { //nolint: mnd
+	if _, err = mux.writer.Seek(mux.writePosition, 0); err != nil {
 		return
 	}
 	b := make([]byte, moov.Len())

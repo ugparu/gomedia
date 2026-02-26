@@ -11,20 +11,20 @@ import (
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/format/mp4"
 	"github.com/ugparu/gomedia/utils"
+	"github.com/ugparu/gomedia/utils/buffer"
 	"github.com/ugparu/gomedia/utils/lifecycle"
 	"github.com/ugparu/gomedia/utils/logger"
 )
 
 // activeFile represents a currently open file being written to
 type activeFile struct {
-	file      *os.File
-	muxer     *mp4.Muxer
-	startTime time.Time
-	folder    string
-	name      string
-	duration  time.Duration
-	wg        sync.WaitGroup // Track pending packet closures for SwitchToFile
-	count     int
+	file       *os.File
+	muxer      *mp4.Muxer
+	mmapRegion *buffer.MmapRegion
+	startTime  time.Time
+	folder     string
+	name       string
+	duration   time.Duration
 }
 
 // ringBuffer holds a window of packets for Event mode pre-buffering
@@ -252,14 +252,22 @@ func (s *segmenter) openNewFile(url string, stream *streamState, startTime time.
 		return err
 	}
 
+	const mmapSize = 1 << 30 // 1GB
+
+	region, err := buffer.NewMmapRegion(f.Fd(), mmapSize)
+	if err != nil {
+		_ = f.Close()
+		return err
+	}
+
 	stream.activeFile = &activeFile{
-		file:      f,
-		muxer:     muxer,
-		startTime: startTime,
-		folder:    folder,
-		name:      name,
-		duration:  0,
-		wg:        sync.WaitGroup{},
+		file:       f,
+		muxer:      muxer,
+		mmapRegion: region,
+		startTime:  startTime,
+		folder:     folder,
+		name:       name,
+		duration:   0,
 	}
 
 	return nil
@@ -289,6 +297,9 @@ func (s *segmenter) closeActiveFile(stream *streamState, stopChan <-chan struct{
 		for _, pkt := range lastPackets {
 			pkt.Close()
 		}
+		if af.mmapRegion != nil {
+			af.mmapRegion.Release()
+		}
 		_ = af.file.Close()
 		return err
 	}
@@ -297,8 +308,20 @@ func (s *segmenter) closeActiveFile(stream *streamState, stopChan <-chan struct{
 		pkt.Close()
 	}
 
-	fi, err := af.file.Stat()
+	// Determine actual written size (after trailer) and shrink file from preallocated 1GB.
+	actualSize, err := af.file.Seek(0, 1)
 	if err != nil {
+		if af.mmapRegion != nil {
+			af.mmapRegion.Release()
+		}
+		_ = af.file.Close()
+		return err
+	}
+
+	if err = af.file.Truncate(actualSize); err != nil {
+		if af.mmapRegion != nil {
+			af.mmapRegion.Release()
+		}
 		_ = af.file.Close()
 		return err
 	}
@@ -308,32 +331,22 @@ func (s *segmenter) closeActiveFile(stream *streamState, stopChan <-chan struct{
 		Name:       af.folder + af.name,
 		Start:      af.startTime,
 		Stop:       af.startTime.Add(af.duration),
-		Size:       int(fi.Size()),
+		Size:       int(actualSize),
 		URL:        stream.codecPar.URL,
 		Resolution: fmt.Sprintf("%dx%d", stream.codecPar.VideoCodecParameters.Width(), stream.codecPar.VideoCodecParameters.Height()),
 	}:
 	case <-stopChan:
+		if af.mmapRegion != nil {
+			af.mmapRegion.Release()
+		}
+		_ = af.file.Close()
 		return err
 	}
 
-	// Close file in separate goroutine after all referenced packets are closed
-	go func(af *activeFile) {
-		// Wait for all packets to be closed with timeout of 2x duration
-		waitDone := make(chan struct{})
-		go func() {
-			af.wg.Wait()
-			close(waitDone)
-		}()
-
-		select {
-		case <-waitDone:
-		case <-time.After(s.targetDuration * 3):
-			logger.Warningf(af.folder, "timeout waiting for packets to close for file %s (waited %v), closing anyway",
-				af.name, s.targetDuration*3)
-		}
-
-		_ = af.file.Close()
-	}(af)
+	if af.mmapRegion != nil {
+		af.mmapRegion.Release()
+	}
+	_ = af.file.Close()
 
 	return nil
 }
@@ -362,18 +375,8 @@ func (s *segmenter) writePacketToFile(stream *streamState, pkt gomedia.Packet) e
 		// Get the actual packet data offset and size (excluding SPS/PPS/VPS for keyframes)
 		dataOffset, dataSize := af.muxer.GetLastPacketDataInfo(pkt.StreamIndex())
 		if dataSize > 0 {
-			af.wg.Add(1)
-			af.count++
-			done := func() error {
-				af.wg.Done()
-				af.count--
-				return nil
-			}
-			if err := preLastPkt.SwitchToFile(af.file, dataOffset, dataSize, done); err != nil {
-				af.wg.Done() // Ensure WaitGroup is decremented on error
-				preLastPkt.Close()
-				return err
-			}
+			view := af.mmapRegion.View(int(dataOffset), int(dataSize))
+			preLastPkt.SwitchBuffer(view)
 		}
 		preLastPkt.Close()
 	}
