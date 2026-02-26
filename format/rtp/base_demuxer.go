@@ -171,7 +171,7 @@ func (d *baseDemuxer) isRTCPPacket() bool {
 
 func (d *baseDemuxer) handleRingOverflow(needed int) {
 	if d.useRing && d.ringBuffer != nil && d.ringSeconds > 0 {
-		limit := time.Duration(float64(d.ringSeconds)*1.1) * time.Second
+		limit := time.Duration(float64(d.ringSeconds)*1.2) * time.Second
 		if time.Since(d.lastResetTime) < limit {
 			old := d.ringBuffer
 			oldLen := old.Len()
