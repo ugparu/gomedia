@@ -4,9 +4,11 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/utils/buffer"
+	"github.com/ugparu/gomedia/utils/logger"
 	"github.com/ugparu/gomedia/utils/sdp"
 )
 
@@ -31,17 +33,18 @@ const (
 )
 
 type baseDemuxer struct {
-	rdr         io.Reader
-	sdp         sdp.Media
-	payload     buffer.PooledBuffer
-	offset      int
-	end         int
-	timestamp   uint32
-	index       uint8
-	useRing     bool
-	ringSeconds int
-	ringBuffer  buffer.PooledBuffer
-	ringOffset  int
+	rdr           io.Reader
+	sdp           sdp.Media
+	payload       buffer.PooledBuffer
+	offset        int
+	end           int
+	timestamp     uint32
+	index         uint8
+	useRing       bool
+	ringSeconds   int
+	ringBuffer    buffer.PooledBuffer
+	ringOffset    int
+	lastResetTime time.Time
 }
 
 type DemuxerOption func(*baseDemuxer)
@@ -55,22 +58,26 @@ func WithRingBuffer(size int) DemuxerOption {
 func WithCalculatedRingBuffer(seconds int) DemuxerOption {
 	return func(d *baseDemuxer) {
 		d.useRing = true
+		const ringSize = 1024
+		d.ringBuffer = buffer.Get(ringSize)
 		d.ringSeconds = seconds
 	}
 }
 
 func newBaseDemuxer(rdr io.Reader, sdp sdp.Media, index uint8, opts ...DemuxerOption) *baseDemuxer {
+	now := time.Now()
 	bd := &baseDemuxer{
-		rdr:        rdr,
-		sdp:        sdp,
-		payload:    buffer.Get(rtspHeaderSize),
-		offset:     0,
-		end:        0,
-		timestamp:  0,
-		index:      index,
-		useRing:    false,
-		ringBuffer: nil,
-		ringOffset: 0,
+		rdr:           rdr,
+		sdp:           sdp,
+		payload:       buffer.Get(rtspHeaderSize),
+		offset:        0,
+		end:           0,
+		timestamp:     0,
+		index:         index,
+		useRing:       false,
+		ringBuffer:    nil,
+		ringOffset:    0,
+		lastResetTime: now,
 	}
 	for _, opt := range opts {
 		opt(bd)
@@ -151,9 +158,35 @@ func (d *baseDemuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 
 func (d *baseDemuxer) Close() {
 	d.payload.Release()
+
+	if d.ringBuffer != nil {
+		d.ringBuffer.Release()
+	}
 }
 
 func (d *baseDemuxer) isRTCPPacket() bool {
 	rtcpPacketType := d.payload.Data()[5]
 	return rtcpPacketType == rtcpSenderReport || rtcpPacketType == rtcpReceiverReport
+}
+
+func (d *baseDemuxer) handleRingOverflow(needed int) {
+	if d.useRing && d.ringBuffer != nil && d.ringSeconds > 0 {
+		limit := time.Duration(float64(d.ringSeconds)*1.1) * time.Second
+		if time.Since(d.lastResetTime) < limit {
+			old := d.ringBuffer
+			oldLen := old.Len()
+
+			newSize := oldLen + needed + oldLen/4
+
+			d.ringBuffer = buffer.Get(newSize)
+			d.ringOffset = 0
+
+			logger.Infof(d, "ringBuffer grown to %d", newSize)
+			return
+		}
+	}
+
+	logger.Infof(d, "ringBuffer is full, resetting offset")
+	d.ringOffset = 0
+	d.lastResetTime = time.Now()
 }

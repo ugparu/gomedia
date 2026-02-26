@@ -92,5 +92,3 @@ func (b *memBuffer) Release() {
 		bufPool.Put(b)
 	}
 }
-
-// (legacy mmap-based implementation moved to mmap_region.go)

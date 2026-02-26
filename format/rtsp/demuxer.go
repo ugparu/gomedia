@@ -146,7 +146,7 @@ func (dmx *innerRTSPDemuxer) findStreams() (params gomedia.CodecParametersPair, 
 		var opts []rtp.DemuxerOption
 		if dmx.ringSeconds > 0 {
 			opts = append(opts, rtp.WithCalculatedRingBuffer(dmx.ringSeconds))
-		} else {
+		} else if dmx.rtpRingBufferSize > 0 {
 			opts = append(opts, rtp.WithRingBuffer(dmx.rtpRingBufferSize))
 		}
 		switch i2.AVType {
