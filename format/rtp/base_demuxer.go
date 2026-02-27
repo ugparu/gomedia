@@ -179,11 +179,11 @@ func (d *baseDemuxer) handleRingOverflow(needed int) {
 			newSize := oldLen + needed + oldLen/4
 
 			d.ringBuffer = buffer.Get(newSize)
-			logger.Infof(d, "ringBuffer grown to %d", newSize)
+			logger.Debugf(d, "ringBuffer grown to %d", newSize)
 		}
 	}
 
-	logger.Infof(d, "ringBuffer is full, resetting offset")
+	logger.Debugf(d, "ringBuffer is full, resetting offset")
 	d.ringOffset = 0
 	d.lastResetTime = time.Now()
 }
