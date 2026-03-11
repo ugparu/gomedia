@@ -54,6 +54,7 @@ func (e *audioEncoder) Step(doneCh <-chan struct{}) error {
 	case <-doneCh:
 		return &lifecycle.BreakError{}
 	case aPkt := <-e.inpSamples:
+		defer aPkt.Release()
 		pkt, ok := aPkt.(*pcm.Packet)
 		if !ok {
 			return fmt.Errorf("invalid packet type: %T", pkt)

@@ -185,7 +185,8 @@ func (dec *videoDecoder) Step(stopCh <-chan struct{}) (err error) {
 				select {
 				case <-stopCh:
 					return &lifecycle.BreakError{}
-				case <-dec.inpPktCh:
+				case drainPkt := <-dec.inpPktCh:
+				drainPkt.Release()
 				default:
 					return
 				}
@@ -198,6 +199,7 @@ func (dec *videoDecoder) Step(stopCh <-chan struct{}) (err error) {
 			}
 		}
 	case inpPkt := <-dec.inpPktCh:
+		defer inpPkt.Release()
 		if dec.targetFPS == 0 {
 			return errors.New("attempt to process packet on zero fps decoder")
 		}

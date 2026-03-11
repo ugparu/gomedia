@@ -68,6 +68,7 @@ func (d *audioDecoder) Step(stopCh <-chan struct{}) (err error) {
 	case <-stopCh:
 		return &lifecycle.BreakError{}
 	case p := <-d.inpPackets:
+		defer p.Release()
 		if p.CodecParameters() != d.codecPar {
 			if err = d.updateCodecPar(p.CodecParameters()); err != nil {
 				return
