@@ -103,12 +103,12 @@ func (g *GrowingRingAlloc) Alloc(n int) ([]byte, *SlotHandle) {
 	}
 
 	grov := 20
-	if g.current.bcap > 1024*1024 {
-		grov = 14
+	if g.current.bcap > 1024*1024*10 {
+		grov = 11
 	} else if g.current.bcap > 1024*1024*5 {
 		grov = 12
-	} else if g.current.bcap > 1024*1024*10 {
-		grov = 11
+	} else if g.current.bcap > 1024*1024 {
+		grov = 14
 	}
 
 	newSize := max(g.current.bcap*grov/10, n*2)

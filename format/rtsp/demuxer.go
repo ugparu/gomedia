@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -136,9 +137,16 @@ func (dmx *innerRTSPDemuxer) findStreams() (params gomedia.CodecParametersPair, 
 		if idx, err = dmx.client.setup(dmx.chTMP, dmx.controlTrack(i2.Control), "play"); err != nil {
 			return
 		}
+
 		var opts []rtp.DemuxerOption
 		if dmx.rtpRingBufferSize > 0 {
-			opts = append(opts, rtp.WithRingBuffer(dmx.rtpRingBufferSize, buffer.WithLogName("RTP_"+i2.Type.String())))
+			logName := "RTP_" + i2.Type.String()
+			parsedURL, err := url.Parse(dmx.url)
+			if err == nil {
+				logName = parsedURL.Host + "_" + logName
+			}
+
+			opts = append(opts, rtp.WithRingBuffer(dmx.rtpRingBufferSize, buffer.WithLogName(logName)))
 		}
 		switch i2.AVType {
 		case video:

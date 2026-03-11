@@ -47,10 +47,10 @@ func init() {
 	go func() {
 		sb := new(bytes.Buffer)
 		for logPair := range logCh {
-			if len(logPair.obj) > 20 {
-				logPair.obj = logPair.obj[:20]
+			if len(logPair.obj) > 25 {
+				logPair.obj = logPair.obj[:25]
 			}
-			sb.WriteString(fmt.Sprintf("|%20s|%-100s", logPair.obj, logPair.msg))
+			sb.WriteString(fmt.Sprintf("|%25s|%-100s", logPair.obj, logPair.msg))
 			logPair.logFn(sb.String())
 			sb.Reset()
 		}
