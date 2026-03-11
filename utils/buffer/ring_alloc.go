@@ -83,12 +83,13 @@ func NewRingAlloc(size int, opts ...RingAllocOption) *RingAlloc {
 // Must be driven by a single producer goroutine (same constraint as RingAlloc).
 type GrowingRingAlloc struct {
 	current *RingAlloc
+	opts    []RingAllocOption
 }
 
 // NewGrowingRingAlloc creates a growing ring allocator with the given initial
 // byte capacity.
 func NewGrowingRingAlloc(initSize int, opts ...RingAllocOption) *GrowingRingAlloc {
-	return &GrowingRingAlloc{current: NewRingAlloc(initSize, opts...)}
+	return &GrowingRingAlloc{current: NewRingAlloc(initSize, opts...), opts: opts}
 }
 
 // Alloc carves n contiguous bytes from the current ring. When the ring is full
@@ -116,7 +117,7 @@ func (g *GrowingRingAlloc) Alloc(n int) ([]byte, *SlotHandle) {
 	} else {
 		logger.Infof(g.current.logName, "Growing ring alloc to %dkb", newSize/1024)
 	}
-	g.current = NewRingAlloc(newSize)
+	g.current = NewRingAlloc(newSize, g.opts...)
 	return g.current.Alloc(n)
 }
 
