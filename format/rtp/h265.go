@@ -7,6 +7,7 @@ import (
 
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/codec/h265"
+	"github.com/ugparu/gomedia/utils/buffer"
 	"github.com/ugparu/gomedia/utils/sdp"
 )
 
@@ -18,29 +19,33 @@ type h265Demuxer struct {
 	BufferRTPPacket *bytes.Buffer
 	bufferHasKey    bool
 	slicedPacket    *h265.Packet
+	slicedHandle    *buffer.SlotHandle // ring handle for slicedPacket; nil = heap
 }
 
+// addPacket allocates [4-byte size | nalU] from the ring (or heap), creates a
+// new sliced packet for the NAL unit, and moves the previous sliced packet into
+// the ready queue.
 func (d *h265Demuxer) addPacket(nalU []byte, isKeyFrame bool) {
+	needed := 4 + len(nalU)
+
 	var data []byte
-	if d.ringBuffer != nil {
-		if d.ringOffset+4+len(nalU) > d.ringBuffer.Len() {
-			d.handleRingOverflow(4 + len(nalU))
-		}
-		start := d.ringOffset
-		copy(d.ringBuffer.Data()[d.ringOffset:], binSize(len(nalU)))
-		d.ringOffset += 4
-		copy(d.ringBuffer.Data()[d.ringOffset:], nalU)
-		d.ringOffset += len(nalU)
-		data = d.ringBuffer.Data()[start:d.ringOffset]
-	} else {
-		data = append(binSize(len(nalU)), nalU...)
+	var handle *buffer.SlotHandle
+
+	if d.ring != nil {
+		data, handle = d.ring.Alloc(needed)
 	}
+	if data == nil {
+		data = make([]byte, needed)
+	}
+
+	writeSizePrefix(data, 0, len(nalU))
+	copy(data[4:], nalU)
 
 	if d.slicedPacket != nil {
 		d.packets = append(d.packets, d.slicedPacket)
 	}
 
-	d.slicedPacket = h265.NewPacket(
+	pkt := h265.NewPacket(
 		isKeyFrame,
 		time.Duration(d.timestamp/clockrate)*time.Millisecond,
 		time.Now(),
@@ -48,8 +53,21 @@ func (d *h265Demuxer) addPacket(nalU []byte, isKeyFrame bool) {
 		"",
 		d.codec,
 	)
+	pkt.Slot = handle
+
+	d.slicedPacket = pkt
+	d.slicedHandle = handle
 }
 
+// appendToPacket appends [4-byte size | nalU] to the current sliced packet.
+//
+// Ring path: if the write cursor is still at the end of the current slot
+// (no other allocation happened since addPacket), Extend grows the slot
+// in-place — zero extra allocation, zero copy.
+//
+// Fallback: if the slot cannot be extended (ring full, or another allocation
+// intervened), the existing data is copied into a fresh heap buffer, the old
+// slot is released, and the new data is appended.
 func (d *h265Demuxer) appendToPacket(nalU []byte, isKeyFrame bool) {
 	if d.slicedPacket == nil {
 		return
@@ -57,37 +75,50 @@ func (d *h265Demuxer) appendToPacket(nalU []byte, isKeyFrame bool) {
 
 	needed := 4 + len(nalU)
 
-	if d.ringBuffer != nil {
-		if d.ringOffset+needed > d.ringBuffer.Len() {
-			oldLen := d.slicedPacket.Len()
-			oldBuf := make([]byte, oldLen)
-			copy(oldBuf, d.slicedPacket.Buf[:oldLen])
-
-			d.handleRingOverflow(oldLen + needed)
-
-			start := d.ringOffset
-			copy(d.ringBuffer.Data()[d.ringOffset:], oldBuf)
-			d.ringOffset += oldLen
-			copy(d.ringBuffer.Data()[d.ringOffset:], binSize(len(nalU)))
-			d.ringOffset += 4
-			copy(d.ringBuffer.Data()[d.ringOffset:], nalU)
-			d.ringOffset += len(nalU)
-			d.slicedPacket.Buf = d.ringBuffer.Data()[start:d.ringOffset]
-		} else {
-			copy(d.ringBuffer.Data()[d.ringOffset:], binSize(len(nalU)))
-			d.ringOffset += 4
-			copy(d.ringBuffer.Data()[d.ringOffset:], nalU)
-			d.ringOffset += len(nalU)
-			d.slicedPacket.Buf = d.slicedPacket.Buf[:d.slicedPacket.Len()+needed]
+	if d.ring != nil && d.slicedHandle != nil {
+		if newBuf, ok := d.ring.Extend(d.slicedHandle, needed); ok {
+			// In-place extension — update size prefix for the new NAL unit and
+			// copy data into the freshly reserved tail bytes.
+			offset := len(d.slicedPacket.Buf)
+			writeSizePrefix(newBuf, offset, len(nalU))
+			copy(newBuf[offset+4:], nalU)
+			d.slicedPacket.Buf = newBuf
+			d.slicedPacket.IsKeyFrm = d.slicedPacket.IsKeyFrm || isKeyFrame
+			return
 		}
-	} else {
-		oldLen := d.slicedPacket.Len()
-		buf := d.slicedPacket.Buf[:oldLen]
-		buf = append(buf, binSize(len(nalU))...)
-		buf = append(buf, nalU...)
-		d.slicedPacket.Buf = buf
+
+		// Cannot extend in-place: allocate a new contiguous region and copy.
+		oldData := d.slicedPacket.Buf
+		newNeeded := len(oldData) + needed
+
+		var newData []byte
+		var newHandle *buffer.SlotHandle
+		newData, newHandle = d.ring.Alloc(newNeeded)
+
+		if newData == nil {
+			newData = make([]byte, newNeeded)
+		}
+		copy(newData, oldData)
+		writeSizePrefix(newData, len(oldData), len(nalU))
+		copy(newData[len(oldData)+4:], nalU)
+
+		// Release the old slot now that its data has been copied.
+		d.slicedHandle.Release()
+
+		d.slicedPacket.Buf = newData
+		d.slicedPacket.Slot = newHandle
+		d.slicedHandle = newHandle
+		d.slicedPacket.IsKeyFrm = d.slicedPacket.IsKeyFrm || isKeyFrame
+		return
 	}
 
+	// Heap path (no ring or no handle on sliced packet).
+	oldLen := len(d.slicedPacket.Buf)
+	buf := make([]byte, oldLen+needed)
+	copy(buf, d.slicedPacket.Buf)
+	writeSizePrefix(buf, oldLen, len(nalU))
+	copy(buf[oldLen+4:], nalU)
+	d.slicedPacket.Buf = buf
 	d.slicedPacket.IsKeyFrm = d.slicedPacket.IsKeyFrm || isKeyFrame
 }
 
@@ -102,6 +133,7 @@ func NewH265Demuxer(rdr io.Reader, sdp sdp.Media, index uint8, options ...Demuxe
 		BufferRTPPacket: &bytes.Buffer{},
 		bufferHasKey:    false,
 		slicedPacket:    nil,
+		slicedHandle:    nil,
 	}
 }
 

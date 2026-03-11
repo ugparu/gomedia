@@ -1,0 +1,10 @@
+{
+  "url": "rtsp://10.0.110.181:8554/gorizont_0.stream",
+  "video": {
+    "codec": "H264",
+    "stream_index": 0,
+    "record": "AU1AKP/hACJnTUAolZAHgCJ+XARAAAD6AAAw1DgAAAW42AAB6Egu8uCgAQAEaOuPIA==",
+    "sps": "Z01AKJWQB4AiflwEQAAA+gAAMNQ4AAAFuNgAAehILvLgoA==",
+    "pps": "aOuPIA=="
+  }
+}

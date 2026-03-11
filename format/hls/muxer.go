@@ -74,7 +74,7 @@ type muxer struct {
 }
 
 // NewHLSMuxer creates a new HLS muxer with the specified segment duration and segment count.
-func NewHLSMuxer(segmentDuration time.Duration, segmentCount uint8) gomedia.HLSMuxer {
+func NewHLSMuxer(segmentDuration time.Duration, segmentCount uint8, partHoldBack float64) gomedia.HLSMuxer {
 	newHLS := &muxer{
 		Manager: nil,
 		segments: &segments{
@@ -94,7 +94,7 @@ func NewHLSMuxer(segmentDuration time.Duration, segmentCount uint8) gomedia.HLSM
 #EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,PART-HOLD-BACK=%.5f	
 #EXT-X-MAP:URI="init.mp4"
 #EXT-X-PART-INF:PART-TARGET=%.5f
-`, int(segmentDuration.Seconds()), segmentDuration.Seconds(), partTarget),
+`, int(segmentDuration.Seconds()), partHoldBack, partTarget),
 		codecPars: gomedia.CodecParametersPair{AudioCodecParameters: nil, VideoCodecParameters: nil, URL: ""},
 	}
 	newHLS.Manager = lifecycle.NewDefaultManager(newHLS)

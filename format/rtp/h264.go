@@ -8,6 +8,7 @@ import (
 
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/codec/h264"
+	"github.com/ugparu/gomedia/utils/buffer"
 	"github.com/ugparu/gomedia/utils/logger"
 	"github.com/ugparu/gomedia/utils/nal"
 	"github.com/ugparu/gomedia/utils/sdp"
@@ -158,26 +159,37 @@ func (d *h264Demuxer) finalizeFUAPacket() error {
 	return nil
 }
 
-// addPacket creates and adds a new packet to the packet queue
+// addPacket writes [4-byte size | nalU] into the ring slab (or a heap slice
+// when no ring is configured), creates the packet, and attaches the SlotHandle.
+// The packet starts with refs=1; the consumer is the sole owner and must call
+// pkt.Release() when done.
 func (d *h264Demuxer) addPacket(nalU []byte, isKeyFrame bool) {
+	needed := 4 + len(nalU)
+
 	var data []byte
-	if d.ringBuffer != nil {
-		if d.ringOffset+4+len(nalU) > d.ringBuffer.Len() {
-			d.handleRingOverflow(4 + len(nalU))
-		}
-		start := d.ringOffset
-		copy(d.ringBuffer.Data()[d.ringOffset:], binSize(len(nalU)))
-		d.ringOffset += 4
-		copy(d.ringBuffer.Data()[d.ringOffset:], nalU)
-		d.ringOffset += len(nalU)
-		data = d.ringBuffer.Data()[start:d.ringOffset]
-	} else {
-		data = append(binSize(len(nalU)), nalU...)
+	var handle *buffer.SlotHandle
+
+	if d.ring != nil {
+		data, handle = d.ring.Alloc(needed)
+	}
+	if data == nil {
+		// Ring full or not configured — fall back to a heap allocation.
+		data = make([]byte, needed)
 	}
 
-	pkt := h264.NewPacket(isKeyFrame,
-		time.Duration(d.timestamp)*time.Millisecond/time.Duration(clockrate), time.Now(),
-		data, "", d.codec)
+	writeSizePrefix(data, 0, len(nalU))
+	copy(data[4:], nalU)
+
+	pkt := h264.NewPacket(
+		isKeyFrame,
+		time.Duration(d.timestamp)*time.Millisecond/time.Duration(clockrate),
+		time.Now(),
+		data,
+		"",
+		d.codec,
+	)
+	pkt.Slot = handle // nil for heap-backed packets → Release() is a no-op
+
 	d.packets = append(d.packets, pkt)
 }
 

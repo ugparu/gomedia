@@ -85,6 +85,7 @@ func (w *rtspWriter) Step(stopCh <-chan struct{}) (err error) {
 
 		// If source URL is set, drop packets from other sources.
 		if w.srcURL != "" && pkt.URL() != w.srcURL {
+			pkt.Release()
 			return nil
 		}
 
@@ -93,22 +94,27 @@ func (w *rtspWriter) Step(stopCh <-chan struct{}) (err error) {
 			// Initialize muxer on first video packet if not started yet.
 			if !w.started {
 				if err = w.initMuxerFromVideoPacket(p); err != nil {
+					pkt.Release()
 					return err
 				}
 			}
 
 			if w.muxer == nil {
+				pkt.Release()
 				return fmt.Errorf("rtsp writer muxer is not initialized")
 			}
 
 			if err = w.muxer.WritePacket(pkt); err != nil {
+				pkt.Release()
 				w.resetMuxer()
 				return err
 			}
+			pkt.Release()
 
 		default:
 			// Ignore non-video packets for now, as RTSP muxer currently
 			// only supports video packets. Close to free resources.
+			pkt.Release()
 			return nil
 		}
 	}

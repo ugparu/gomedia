@@ -7,6 +7,7 @@ import (
 	"github.com/ugparu/gomedia/codec/pcm"
 	"github.com/ugparu/gomedia/encoder"
 	"github.com/ugparu/gomedia/utils"
+	"github.com/ugparu/gomedia/utils/buffer"
 	"github.com/winlinvip/go-aresample/aresample"
 	"github.com/zaf/g711"
 )
@@ -21,6 +22,7 @@ type alawEncoder struct {
 	frameDuration time.Duration
 	buf           []uint8
 	codecPar      *pcm.CodecParameters
+	ring          *buffer.GrowingRingAlloc
 }
 
 func NewAlawEncoder() encoder.InnerAudioEncoder {
@@ -47,6 +49,7 @@ func (e *alawEncoder) Init(params *pcm.CodecParameters) error {
 	e.frameDuration = time.Duration(ALAWSampleRate/frameDurationDivisor) * time.Second / time.Duration(ALAWSampleRate)
 
 	e.codecPar = pcm.NewCodecParameters(params.StreamIndex(), gomedia.PCMAlaw, 1, ALAWSampleRate)
+	e.ring = buffer.NewGrowingRingAlloc(64 * 1024)
 
 	return err
 }
@@ -77,7 +80,20 @@ func (e *alawEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err e
 		if inBuf, err = e.r.Resample(inBuf); err != nil {
 			return
 		}
-		resp = append(resp, pcm.NewPacket(g711.EncodeAlaw(inBuf), 0, pkt.URL(), pkt.StartTime(), e.codecPar, e.frameDuration))
+		encoded := g711.EncodeAlaw(inBuf)
+		var outData []byte
+		var handle *buffer.SlotHandle
+		if e.ring != nil {
+			outData, handle = e.ring.Alloc(len(encoded))
+		}
+		if outData == nil {
+			outData = encoded
+		} else {
+			copy(outData, encoded)
+		}
+		p := pcm.NewPacket(outData, 0, pkt.URL(), pkt.StartTime(), e.codecPar, e.frameDuration)
+		p.Slot = handle
+		resp = append(resp, p)
 	}
 	return
 }

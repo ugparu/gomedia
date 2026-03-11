@@ -22,6 +22,7 @@ import (
 	"github.com/ugparu/gomedia/decoder/pcm"
 	"github.com/ugparu/gomedia/encoder"
 	"github.com/ugparu/gomedia/encoder/aac"
+	"github.com/ugparu/gomedia/format/rtsp"
 	"github.com/ugparu/gomedia/reader"
 	"github.com/ugparu/gomedia/utils/logger"
 	"github.com/ugparu/gomedia/writer/hls"
@@ -29,10 +30,10 @@ import (
 
 var rtspURLs = strings.Split(os.Getenv("RTSP_URLS"), ",")
 
-const segSize = 6 * time.Second
+const segSize = 4 * time.Second
 
 // Debug HLS writer
-var hlsWr = hls.New(1, 3, segSize, 100)
+var hlsWr = hls.New(1, 3, segSize, 100, 5.)
 
 func main() {
 	fmt.Println("Starting HLS debug server...")
@@ -57,7 +58,7 @@ func main() {
 
 	// Initialize RTSP reader
 	logrus.Info("Connecting to RTSP streams: ", rtspURLs)
-	rdr := reader.NewRTSP(100)
+	rdr := reader.NewRTSP(100, rtsp.WithRingBuffer(1024*1024))
 	rdr.Read()
 	for _, rtspURL := range rtspURLs {
 		rdr.AddURL() <- rtspURL

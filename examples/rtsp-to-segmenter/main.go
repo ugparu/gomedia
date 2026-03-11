@@ -9,6 +9,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/ugparu/gomedia"
+	"github.com/ugparu/gomedia/format/rtsp"
 	"github.com/ugparu/gomedia/reader"
 	"github.com/ugparu/gomedia/writer/segmenter"
 )
@@ -37,12 +38,14 @@ func main() {
 		channelSize     = 100
 	)
 
+	os.RemoveAll("./recordings/")
+
 	seg := segmenter.New("./recordings/", segmentDuration, gomedia.Always, channelSize)
 	seg.Write()
 	logrus.Infof("Segmenter initialized: destination=./recordings/, segment_duration=%v, record_mode=Always", segmentDuration)
 
 	// Initialize RTSP reader
-	rdr := reader.NewRTSP(channelSize)
+	rdr := reader.NewRTSP(channelSize, rtsp.WithRingBuffer(1024))
 	rdr.Read()
 
 	// Add all RTSP URLs to both the segmenter and reader
@@ -88,6 +91,7 @@ func main() {
 
 			// Send packet to segmenter
 			seg.Packets() <- pkt.Clone(false)
+			pkt.Release()
 
 			// Log progress every 5 seconds
 			if time.Since(lastLog) > 5*time.Second {

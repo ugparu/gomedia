@@ -1,0 +1,11 @@
+{
+  "url": "rtsp://cubiccv:b2jlbde6@10.0.60.56:554/live/main",
+  "video": {
+    "codec": "H265",
+    "stream_index": 0,
+    "record": "AQFgAAAAAAAAAAAAAAAAAAAAAAAAAwMgAAEAF0ABDAH//wFgAAADAIAAAAMAAAMAlqwJIQABAD9CAQEBYAAAAwCAAAADAAADAJagAVAgBfH+Nru1N3cl1gLcBAQEEAAAPoAAAu4HId7lEAPTgAETnAB6cAAic4giAAEACkQBwXKwnBwOYkA=",
+    "sps": "QgEBAWAAAAMAgAAAAwAAAwCWoAFQIAXx/ja7tTd3JdYC3AQEBBAAAD6AAALuByHe5RAD04ABE5wAenAAInOI",
+    "pps": "RAHBcrCcHA5iQA==",
+    "vps": "QAEMAf//AWAAAAMAgAAAAwAAAwCWrAk="
+  }
+}

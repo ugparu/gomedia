@@ -41,7 +41,15 @@ type CodecParametersPair struct {
 
 // Packet defines the interface for multimedia data containers.
 type Packet interface {
-	Clone(copyData bool) Packet // Creates a packet copy, optionally copying the underlying data.
+	// Clone creates a copy of the packet. When copyData is false the clone shares
+	// the same underlying buffer (reference count is incremented); when true a heap
+	// copy is made and the clone is fully independent. Every owner — original and
+	// each clone — must call Release exactly once when finished.
+	Clone(copyData bool) Packet
+	// Release decrements the shared buffer reference count. When it reaches zero
+	// the backing memory is returned to the ring allocator (or becomes GC-eligible
+	// for heap-backed packets). Must be called exactly once per owner.
+	Release()
 	URL() string                // Returns the source URL of the packet.
 	SetURL(string)              // Sets the source URL for the packet.
 	StreamIndex() uint8         // Returns the stream index this packet belongs to.

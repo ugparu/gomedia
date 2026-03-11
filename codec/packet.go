@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/ugparu/gomedia"
+	"github.com/ugparu/gomedia/utils/buffer"
 )
 
 type BasePacket[T gomedia.CodecParameters] struct {
@@ -15,9 +16,12 @@ type BasePacket[T gomedia.CodecParameters] struct {
 	Buf          []byte // Returns the packet data.
 	AbsoluteTime time.Time
 	CodecPar     T
+	// Slot is non-nil for ring-backed packets. Shared across Clone(false) copies;
+	// each owner must call Release() exactly once.
+	Slot *buffer.SlotHandle
 }
 
-// NewBasePacket creates a new BasePacket with the given buffer properly initialized.
+// NewBasePacket creates a new heap-backed BasePacket (Slot is nil; Release is a no-op).
 func NewBasePacket[T gomedia.CodecParameters](
 	idx uint8,
 	relativeTime time.Duration,
@@ -38,6 +42,9 @@ func NewBasePacket[T gomedia.CodecParameters](
 	}
 }
 
+// Clone copies the packet metadata. When copyData is false the clone shares the
+// same Buf and Slot (Retain is called to add an owner). When copyData is true a
+// new heap buffer is allocated and the clone is independent (Slot is nil).
 func (pkt *BasePacket[T]) Clone(copyData bool) BasePacket[T] {
 	newPkt := BasePacket[T]{
 		Idx:          pkt.Idx,
@@ -51,8 +58,19 @@ func (pkt *BasePacket[T]) Clone(copyData bool) BasePacket[T] {
 	if copyData {
 		newPkt.Buf = make([]byte, len(pkt.Buf))
 		copy(newPkt.Buf, pkt.Buf)
+		// Slot stays nil — independent heap copy, Release is a no-op.
+	} else {
+		newPkt.Slot = pkt.Slot
+		pkt.Slot.Retain() // register the clone as an additional owner
 	}
 	return newPkt
+}
+
+// Release decrements the reference count of the backing ring slot. When it
+// reaches zero the slab region is recycled. Safe to call on heap-backed packets
+// (Slot == nil) — it is a no-op.
+func (pkt *BasePacket[T]) Release() {
+	pkt.Slot.Release()
 }
 
 func (pkt *BasePacket[T]) Len() int {

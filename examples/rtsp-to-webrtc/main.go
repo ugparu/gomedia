@@ -10,6 +10,7 @@ import (
 	pion "github.com/pion/webrtc/v4"
 	"github.com/sirupsen/logrus"
 	"github.com/ugparu/gomedia"
+	"github.com/ugparu/gomedia/format/rtsp"
 	"github.com/ugparu/gomedia/reader"
 	"github.com/ugparu/gomedia/utils/logger"
 	"github.com/ugparu/gomedia/writer/webrtc"
@@ -42,19 +43,19 @@ var (
 )
 
 func main() {
-	logrus.SetLevel(logrus.DebugLevel)
+	logrus.SetLevel(logrus.InfoLevel)
 	// Initialize reader once at startup
-	rdr = reader.NewRTSP(100)
+	rdr = reader.NewRTSP(100, rtsp.WithRingBuffer(1024*1024))
 	rdr.Read()
 	defer rdr.Close()
 
-	if err := webrtc.Init(2000, 2100, []string{"10.10.0.7"}, []pion.ICEServer{
+	if err := webrtc.Init(2000, 2100, []string{"10.0.112.138"}, []pion.ICEServer{
 		{},
 	}); err != nil {
 		log.Fatalf("Failed to initialize WebRTC: %v", err)
 	}
 
-	webrtcWrt = webrtc.New(100, time.Second*15)
+	webrtcWrt = webrtc.New(100, time.Second*12)
 	webrtcWrt.Write()
 	defer webrtcWrt.Close()
 

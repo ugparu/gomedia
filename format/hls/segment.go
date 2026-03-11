@@ -11,19 +11,31 @@ import (
 	"github.com/ugparu/gomedia/utils/logger"
 )
 
+// staticBuffer wraps a pre-generated []byte as a read-only PooledBuffer.
+// Release is a no-op: the backing slice is owned by the fragment/segment struct
+// and its lifetime is managed explicitly via ring-slot reference counting.
+type staticBuffer struct{ data []byte }
+
+func (b *staticBuffer) Data() []byte { return b.data }
+func (b *staticBuffer) Len() int     { return len(b.data) }
+func (b *staticBuffer) Cap() int     { return cap(b.data) }
+func (b *staticBuffer) Release()     {}
+func (b *staticBuffer) Resize(int)   {}
+
 // segment represents a segment of an HLS video stream.
 type segment struct {
 	id                 uint64                      // Identifier for the segment.
 	targetFragDuration time.Duration               // Target duration for each fragment in the segment.
 	targetDuration     time.Duration               // Target duration for the entire segment.
 	duration           time.Duration               // Actual duration of the segment.
-	finished           chan struct{}               // Channel to signal completion of the segment.
+	finished           chan struct{}                // Channel to signal completion of the segment.
 	curFragment        *fragment                   // Atomic value to store the current fragment.
 	manifestEntry      string                      // HLS manifest entry for the segment.
 	codecPars          gomedia.CodecParametersPair // Codec parameters for the segment.
 	cacheEntry         string                      // Cache entry for manifest generation.
 	fragments          []*fragment                 // List of fragments in the segment.
 	time               time.Time                   // Time when the segment was created.
+	cachedMp4          []byte                      // Pre-generated full-segment MP4; set before finished is closed.
 }
 
 // newSegment creates a new segment with the specified parameters.
@@ -45,6 +57,7 @@ func newSegment(
 		cacheEntry:         "",
 		curFragment:        nil,
 		manifestEntry:      "",
+		cachedMp4:          nil,
 	}
 	seg.manifestEntry = seg.fragments[0].manifestEntry
 	seg.curFragment = seg.fragments[0]
@@ -84,28 +97,50 @@ func (element *segment) writePacket(packet gomedia.Packet) (err error) {
 	return
 }
 
-// close finalizes the segment by signaling completion.
-// The MP4 buffer is generated lazily on demand via getMp4Buffer().
+// close pre-generates the full-segment MP4 from the retained ring-backed packets,
+// releases all packet ring slots, then signals completion.
+//
+// By the time finished is closed, both cachedMp4 and every fragment's cachedMp4
+// are fully populated, so HTTP goroutines never touch raw packet memory.
 func (element *segment) close() (err error) {
 	logger.Tracef(element, "Finishing segment")
-	defer close(element.finished)
 
+	// Pre-generate the full-segment MP4 while ring-backed packets are still live.
+	mux := fmp4.NewMuxer()
+	if muxErr := mux.Mux(element.codecPars); muxErr != nil {
+		logger.Errorf(element, "segment cache: mux error: %v", muxErr)
+	} else {
+		for _, frag := range element.fragments {
+			for _, pkt := range frag.packets {
+				if wErr := mux.WritePacket(pkt); wErr != nil {
+					logger.Errorf(element, "segment cache: WritePacket error: %v", wErr)
+				}
+			}
+		}
+		if buf := mux.GetMP4Fragment(int(element.id)); buf != nil {
+			element.cachedMp4 = make([]byte, len(buf.Data()))
+			copy(element.cachedMp4, buf.Data())
+			buf.Release()
+		}
+	}
+
+	// Release all retained ring-buffer slots now that both the fragment and
+	// segment MP4 caches have been generated.
+	for _, frag := range element.fragments {
+		for _, pkt := range frag.packets {
+			pkt.Release()
+		}
+		frag.packets = nil
+	}
+
+	// Signal completion only after all caches are populated and slots released.
+	close(element.finished)
 	return nil
 }
 
-// getMp4Buffer returns the MP4 buffer, generating it on first access.
-// Uses sync.Once to ensure the buffer is generated only once and reused.
+// getMp4Buffer returns the pre-generated full-segment MP4 data.
 func (element *segment) getMp4Buffer() buffer.PooledBuffer {
-	mux := fmp4.NewMuxer()
-	if err := mux.Mux(element.codecPars); err != nil {
-		return nil
-	}
-	for _, fragment := range element.fragments {
-		for _, packet := range fragment.packets {
-			mux.WritePacket(packet)
-		}
-	}
-	return mux.GetMP4Fragment(int(element.id))
+	return &staticBuffer{element.cachedMp4}
 }
 
 // getFragment gets the MP4 content of a specific fragment in the segment.

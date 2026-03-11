@@ -377,12 +377,14 @@ func (ss *sortedStreams) moveTrackToStream(str *stream, pu *peerURL, peerBuf []g
 			select {
 			case pu.peerTrack.vChan <- clonePkt:
 			case <-time.After(sendTimeout):
+				clonePkt.Release()
 				logger.Errorf(ss, "Timeout sending video packet to peer during stream move")
 			}
 		case gomedia.AudioPacket:
 			select {
 			case pu.peerTrack.aChan <- clonePkt:
 			case <-time.After(sendTimeout):
+				clonePkt.Release()
 				logger.Errorf(ss, "Timeout sending audio packet to peer during stream move")
 			}
 		}
@@ -454,12 +456,13 @@ func (ss *sortedStreams) seedTrack(str *stream, peer *peerTrack) error {
 	seedBuf, peerBuf := str.buffer.GetBuffer(time.Now().Add(-peer.delay))
 
 	for _, vPkt := range seedBuf {
-		clonePkt := vPkt.Clone(false)
+		clonePkt := vPkt.Clone(false).(gomedia.VideoPacket)
 		const pktDur = time.Millisecond * 5
 		clonePkt.SetDuration(pktDur)
 		select {
-		case peer.vChan <- clonePkt.(gomedia.VideoPacket):
+		case peer.vChan <- clonePkt:
 		case <-peer.done:
+			clonePkt.Release()
 			return errors.New("peer disconnected during seeding")
 		}
 	}
@@ -472,6 +475,7 @@ func (ss *sortedStreams) seedTrack(str *stream, peer *peerTrack) error {
 			select {
 			case peer.vChan <- clonePkt:
 			case <-peer.done:
+				clonePkt.Release()
 				return errors.New("peer disconnected during seeding")
 			}
 		case gomedia.AudioPacket:
@@ -479,6 +483,7 @@ func (ss *sortedStreams) seedTrack(str *stream, peer *peerTrack) error {
 			select {
 			case peer.aChan <- clonePkt:
 			case <-peer.done:
+				clonePkt.Release()
 				return errors.New("peer disconnected during seeding")
 			}
 		}
@@ -520,14 +525,18 @@ func (ss *sortedStreams) bufferPacketForPeer(peer *peerTrack, pkt gomedia.Packet
 		select {
 		case peer.vChan <- clonePkt:
 		case <-peer.done:
+			clonePkt.Release()
 		default: // drop if full — real-time streaming, stale frames useless
+			clonePkt.Release()
 		}
 	case gomedia.AudioPacket:
 		clonePkt := packet.Clone(false).(gomedia.AudioPacket)
 		select {
 		case peer.aChan <- clonePkt:
 		case <-peer.done:
+			clonePkt.Release()
 		default:
+			clonePkt.Release()
 		}
 	}
 }
@@ -537,6 +546,9 @@ func (ss *sortedStreams) writePacket(pkt gomedia.Packet) (err error) {
 	// Validate input packet
 	str, err := ss.validatePacket(pkt)
 	if err != nil {
+		if pkt != nil {
+			pkt.Release()
+		}
 		// Ignore specific errors that shouldn't propagate
 		if errors.Is(err, ErrPacketTooSmall) || errors.Is(err, ErrStreamNotFound) {
 			return nil
@@ -544,8 +556,12 @@ func (ss *sortedStreams) writePacket(pkt gomedia.Packet) (err error) {
 		return err
 	}
 
-	// Add packet to buffer
-	str.buffer.AddPacket(pkt)
+	// Add packet to buffer; if dropped (pre-first-keyframe) release and bail —
+	// distributing a pre-keyframe packet to peers serves no purpose.
+	if stored := str.buffer.AddPacket(pkt); !stored {
+		pkt.Release()
+		return nil
+	}
 
 	// Process pending tracks
 	removeFromToAdd := ss.processPendingTracks(str, pkt)

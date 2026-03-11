@@ -96,6 +96,7 @@ func (element *webRTCWriter) Step(stopCh <-chan struct{}) (err error) {
 			err = errors.Join(err, element.removePeer(peerTrack))
 			return err
 		}
+		element.sendAvailableStreamsToPeer(peerTrack)
 	case peer := <-element.closePeersChan:
 		if err = element.removePeer(peer); err != nil {
 			return err
@@ -110,10 +111,12 @@ func (element *webRTCWriter) Step(stopCh <-chan struct{}) (err error) {
 		switch pkt := inpPkt.(type) {
 		case gomedia.VideoPacket:
 			if err = element.checkCodecParameters(inpPkt.URL(), pkt.CodecParameters()); err != nil {
+				inpPkt.Release()
 				return
 			}
 		case gomedia.AudioPacket:
 			if err = element.checkCodecParameters(inpPkt.URL(), pkt.CodecParameters()); err != nil {
+				inpPkt.Release()
 				return
 			}
 		}
@@ -361,9 +364,7 @@ func (element *webRTCWriter) addConnection(inpPeer *gomedia.WebRTCPeer, targetUR
 	pt.done = make(chan struct{})
 	const bufSize = 500
 	pt.vChan = make(chan gomedia.VideoPacket, bufSize)
-	pt.vBuf = buffer.Get(0)
 	pt.aChan = make(chan gomedia.AudioPacket, bufSize)
-	pt.aBuf = buffer.Get(0)
 
 	var once sync.Once
 	peer.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
@@ -381,9 +382,6 @@ func (element *webRTCWriter) addConnection(inpPeer *gomedia.WebRTCPeer, targetUR
 		d.OnOpen(func() {
 			pt.DataChannel = d
 			logger.Infof(element, "Data channel '%s'-'%d' opened", d.Label(), d.ID())
-
-			// Send available streams to the newly connected peer immediately
-			element.sendAvailableStreamsToPeer(pt)
 
 			element.connectPeersChan <- pt
 		})
@@ -495,6 +493,9 @@ func (element *webRTCWriter) addConnection(inpPeer *gomedia.WebRTCPeer, targetUR
 		return inpPeer.Err
 	}
 
+	pt.aBuf = buffer.Get(0)
+	pt.vBuf = buffer.Get(0)
+
 	<-gatherCompletePromise
 
 	inpPeer.SDP = base64.StdEncoding.EncodeToString([]byte(peer.LocalDescription().SDP))
@@ -538,17 +539,16 @@ func (element *webRTCWriter) removePeer(peer *peerTrack) (err error) {
 	logger.Debug(element, "Closing peer connection")
 	_ = peer.PeerConnection.Close()
 
-	peer.vBuf.Release()
-	peer.aBuf.Release()
-
 	logger.Debug(element, "Closing done channel")
 	close(peer.done)
 
 	// Drain remaining packets from channels to avoid leaking cloned packets
 	for {
 		select {
-		case <-peer.vChan:
-		case <-peer.aChan:
+		case pkt := <-peer.vChan:
+			pkt.Release()
+		case pkt := <-peer.aChan:
+			pkt.Release()
 		default:
 			return nil
 		}
@@ -559,6 +559,11 @@ func (element *webRTCWriter) removePeer(peer *peerTrack) (err error) {
 // It calls the removePeer method for each existing peer.
 func (element *webRTCWriter) Close_() { //nolint: revive
 	close(element.inpPktCh)
+	for pkt := range element.inpPktCh {
+		if pkt != nil {
+			pkt.Release()
+		}
+	}
 	for _, peers := range element.streams.streams {
 		for peer := range peers.tracks {
 			if err := element.removePeer(peer); err != nil {
@@ -580,7 +585,7 @@ func (element *webRTCWriter) Close_() { //nolint: revive
 // Parameters returns the sorted URLs and codec parameters map of the innerWriter.
 // It returns nil for both values if the innerWriter is nil.
 func (element *webRTCWriter) SortedResolutions() *gomedia.WebRTCCodec {
-	codec := &gomedia.WebRTCCodec{HasAudio: false, Resolutions: make([]gomedia.Resolution, 0)}
+	codec := &gomedia.WebRTCCodec{HasAudio: false, Resolutions: make([]gomedia.Resolution, 0, len(element.streams.sortedURLs))}
 
 	for _, url := range element.streams.sortedURLs {
 		if element.streams.streams[url].codecPar.AudioCodecParameters != nil {

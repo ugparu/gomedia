@@ -6,6 +6,7 @@ import (
 
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/codec/opus"
+	"github.com/ugparu/gomedia/utils/buffer"
 	"github.com/ugparu/gomedia/utils/sdp"
 )
 
@@ -45,9 +46,19 @@ func (d *opusDemuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 		return
 	}
 
-	buf := make([]byte, d.end-d.offset)
+	needed := d.end - d.offset
+	var buf []byte
+	var handle *buffer.SlotHandle
+	if d.ring != nil {
+		buf, handle = d.ring.Alloc(needed)
+	}
+	if buf == nil {
+		buf = make([]byte, needed)
+	}
 	copy(buf, d.payload.Data()[d.offset:d.end])
-	pkt = opus.NewPacket(buf, (time.Duration(d.timestamp)*time.Second)/time.Duration(d.sdp.TimeScale), "", time.Now(),
+	p := opus.NewPacket(buf, (time.Duration(d.timestamp)*time.Second)/time.Duration(d.sdp.TimeScale), "", time.Now(),
 		d.CodecParameters, 20*time.Millisecond)
+	p.Slot = handle
+	pkt = p
 	return
 }

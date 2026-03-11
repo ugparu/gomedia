@@ -1,7 +1,6 @@
 package webrtc
 
 import (
-	"bytes"
 	"time"
 
 	"github.com/pion/webrtc/v4"
@@ -80,12 +79,10 @@ func writeVideoPacketsToPeer(pt *peerTrack,
 	vflush chan struct{},
 	vChan chan gomedia.VideoPacket,
 	vt *webrtc.TrackLocalStaticSample, vBuf buffer.PooledBuffer, delay time.Duration) {
+	defer vBuf.Release()
 	last := time.Now()
 	processPkt := func(pkt gomedia.VideoPacket) {
-		var codecParams []byte
-		if pkt.IsKeyFrame() {
-			codecParams = appendCodecParameters(pkt.CodecParameters())
-		}
+		defer pkt.Release()
 
 		// Split NALUs and calculate total size
 		var nalus [][]byte
@@ -95,12 +92,19 @@ func writeVideoPacketsToPeer(pt *peerTrack,
 			nalusSize += 4 + len(nalu) // start code (4 bytes) + nalu data
 		}
 
-		// Resize vBuf once to fit all data
-		totalSize := len(codecParams) + nalusSize
+		// Resize vBuf once to fit all data; write codec headers directly into it
+		// to avoid an intermediate heap allocation on every keyframe.
+		totalSize := nalusSize
+		if pkt.IsKeyFrame() {
+			totalSize += codecParametersSize(pkt.CodecParameters())
+		}
 		vBuf.Resize(totalSize)
 
-		// Copy codec params and NALUs into vBuf
-		offset := copy(vBuf.Data(), codecParams)
+		// Write codec params (SPS/PPS/VPS) then NALUs directly into vBuf.
+		offset := 0
+		if pkt.IsKeyFrame() {
+			offset = writeCodecParameters(vBuf.Data(), pkt.CodecParameters())
+		}
 		for _, nalu := range nalus {
 			offset += copy(vBuf.Data()[offset:], []byte{0, 0, 0, 1})
 			offset += copy(vBuf.Data()[offset:], nalu)
@@ -156,6 +160,7 @@ func writeVideoPacketsToPeer(pt *peerTrack,
 						url = pktURL
 						break loop
 					}
+					pkt.Release() // stale same-URL packet drained during flush
 				default:
 					break loop
 				}
@@ -174,8 +179,10 @@ func writeVideoPacketsToPeer(pt *peerTrack,
 }
 
 func writeAudioPacketsToPeer(pt *peerTrack, aflush chan struct{}, aChan chan gomedia.AudioPacket, at *webrtc.TrackLocalStaticSample, aBuf buffer.PooledBuffer, delay time.Duration) {
+	defer aBuf.Release()
 	last := time.Now()
 	processPkt := func(pkt gomedia.AudioPacket) {
+		defer pkt.Release()
 		aBuf.Resize(pkt.Len())
 		copy(aBuf.Data(), pkt.Data())
 
@@ -223,6 +230,7 @@ func writeAudioPacketsToPeer(pt *peerTrack, aflush chan struct{}, aChan chan gom
 						url = pktURL
 						break loop
 					}
+					pkt.Release() // stale same-URL packet drained during flush
 				default:
 					break loop
 				}
@@ -237,16 +245,35 @@ func writeAudioPacketsToPeer(pt *peerTrack, aflush chan struct{}, aChan chan gom
 	}
 }
 
-func appendCodecParameters(codecPar gomedia.CodecParameters) []byte {
-	var data []byte
-
-	switch codecPar := codecPar.(type) {
+// codecParametersSize returns the exact number of bytes needed to write the
+// SPS/PPS (H.264) or VPS/SPS/PPS (H.265) codec headers with start codes.
+func codecParametersSize(codecPar gomedia.CodecParameters) int {
+	switch p := codecPar.(type) {
 	case *h264.CodecParameters:
-		data = append([]byte{0, 0, 0, 1}, bytes.Join([][]byte{codecPar.SPS(), codecPar.PPS()}, []byte{0, 0, 0, 1})...)
+		return 4 + len(p.SPS()) + 4 + len(p.PPS())
 	case *h265.CodecParameters:
-		data = append([]byte{0, 0, 0, 1},
-			bytes.Join([][]byte{codecPar.VPS(), codecPar.SPS(), codecPar.PPS()}, []byte{0, 0, 0, 1})...)
+		return 4 + len(p.VPS()) + 4 + len(p.SPS()) + 4 + len(p.PPS())
 	}
+	return 0
+}
 
-	return data
+// writeCodecParameters writes the SPS/PPS/VPS start-code-prefixed NALUs
+// directly into dst without allocating. Returns the number of bytes written.
+func writeCodecParameters(dst []byte, codecPar gomedia.CodecParameters) int {
+	startCode := [4]byte{0, 0, 0, 1}
+	off := 0
+	write := func(nalu []byte) {
+		off += copy(dst[off:], startCode[:])
+		off += copy(dst[off:], nalu)
+	}
+	switch p := codecPar.(type) {
+	case *h264.CodecParameters:
+		write(p.SPS())
+		write(p.PPS())
+	case *h265.CodecParameters:
+		write(p.VPS())
+		write(p.SPS())
+		write(p.PPS())
+	}
+	return off
 }

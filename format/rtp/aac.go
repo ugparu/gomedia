@@ -6,6 +6,7 @@ import (
 
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/codec/aac"
+	"github.com/ugparu/gomedia/utils/buffer"
 	"github.com/ugparu/gomedia/utils/sdp"
 )
 
@@ -28,6 +29,22 @@ func NewAACDemuxer(rdr io.Reader, sdp sdp.Media, index uint8, options ...Demuxer
 func (d *aacDemuxer) Demux() (codecs gomedia.CodecParametersPair, err error) {
 	codecs.AudioCodecParameters = d.CodecParameters
 	return
+}
+
+// allocBuf copies src into ring-backed memory when a ring is configured,
+// falling back to a heap allocation. The returned handle is nil for heap-backed
+// buffers; consumers must call Release() on ring-backed packets.
+func (d *aacDemuxer) allocBuf(src []byte) ([]byte, *buffer.SlotHandle) {
+	var data []byte
+	var handle *buffer.SlotHandle
+	if d.ring != nil {
+		data, handle = d.ring.Alloc(len(src))
+	}
+	if data == nil {
+		data = make([]byte, len(src))
+	}
+	copy(data, src)
+	return data, handle
 }
 
 // nolint: mnd
@@ -53,7 +70,10 @@ func (d *aacDemuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 				return
 			}
 		}
-		d.packets = append(d.packets, aac.NewPacket(buf[hdrlen:], ts, "", time.Now(), d.CodecParameters, duration))
+		data, handle := d.allocBuf(buf[hdrlen:])
+		p := aac.NewPacket(data, ts, "", time.Now(), d.CodecParameters, duration)
+		p.Slot = handle
+		d.packets = append(d.packets, p)
 	} else {
 		auHeadersLength := uint16(0) | (uint16(buf[0]) << 8) | uint16(buf[1])
 		auHeadersCount := auHeadersLength >> 4
@@ -68,9 +88,10 @@ func (d *aacDemuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 
 			auHeaders = auHeaders[2:]
 			framesPayload = framesPayload[frameSize:]
-			frameBuf := make([]byte, len(frame))
-			copy(frameBuf, frame)
-			d.packets = append(d.packets, aac.NewPacket(frameBuf, ts, "", time.Now(), d.CodecParameters, duration))
+			data, handle := d.allocBuf(frame)
+			p := aac.NewPacket(data, ts, "", time.Now(), d.CodecParameters, duration)
+			p.Slot = handle
+			d.packets = append(d.packets, p)
 			ts += duration
 		}
 	}

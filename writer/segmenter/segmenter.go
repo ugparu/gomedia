@@ -72,19 +72,26 @@ func (rb *ringBuffer) trim() {
 				trimDur += rb.packets[i].Duration()
 			}
 		}
+		// Release ring-buffer slots for the dropped packets.
+		for i := 0; i < trimIdx; i++ {
+			rb.packets[i].Release()
+		}
 		rb.packets = rb.packets[trimIdx:]
 		rb.duration -= trimDur
 	}
 }
 
 func (rb *ringBuffer) clear() {
+	for _, pkt := range rb.packets {
+		pkt.Release()
+	}
 	rb.packets = rb.packets[:0]
 	rb.duration = 0
 }
 
 func (rb *ringBuffer) drain() []gomedia.Packet {
 	pkts := rb.packets
-	rb.packets = make([]gomedia.Packet, 0)
+	rb.packets = rb.packets[:0] // reuse capacity
 	rb.duration = 0
 	return pkts
 }
@@ -262,23 +269,41 @@ func (s *segmenter) flushSegment(stream *streamState, stopChan <-chan struct{}) 
 
 	f, err := createFile(filename)
 	if err != nil {
+		for _, p := range af.packets {
+			p.Release()
+		}
 		return err
 	}
 
 	muxer := mp4.NewMuxer(f)
 	if err = muxer.Mux(stream.codecPar); err != nil {
+		for _, p := range af.packets {
+			p.Release()
+		}
 		_ = f.Close()
 		return err
 	}
 
 	for _, pkt := range af.packets {
 		if err = muxer.WritePacket(pkt); err != nil {
+			for _, p := range af.packets {
+				p.Release()
+			}
 			_ = f.Close()
 			return err
 		}
+		// Do NOT release here. stream.writePacket buffers one packet internally
+		// and writes the *previous* packet on the next call. Releasing here would
+		// free the ring slot while the muxer still holds lastPacket pointing to it.
 	}
 
-	if err = muxer.WriteTrailer(); err != nil {
+	err = muxer.WriteTrailer()
+
+	for _, pkt := range af.packets {
+		pkt.Release()
+	}
+
+	if err != nil {
 		_ = f.Close()
 		return err
 	}
@@ -288,7 +313,6 @@ func (s *segmenter) flushSegment(stream *streamState, stopChan <-chan struct{}) 
 		_ = f.Close()
 		return err
 	}
-
 	_ = f.Close()
 
 	select {
@@ -376,6 +400,7 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 
 	case inpPkt := <-s.inpPktCh:
 		if s.recordMode == gomedia.Never {
+			inpPkt.Release()
 			return errors.New("attempt to process packet with never record mode")
 		}
 
@@ -391,6 +416,7 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 
 		// Check if URL is registered
 		if !s.hasSource(url) {
+			inpPkt.Release()
 			return nil // Skip packets from unregistered sources
 		}
 
@@ -430,6 +456,7 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 		isKeyframe := isVideo && vPkt.IsKeyFrame()
 
 		if !stream.seenKeyframe && !isKeyframe {
+			inpPkt.Release()
 			return nil
 		}
 		if isKeyframe {
@@ -475,6 +502,9 @@ func (s *segmenter) handleAlwaysMode(url string, stream *streamState, stopCh <-c
 		return s.bufferPacket(stream, pkt)
 	}
 
+	// No active file and not a keyframe: waiting for next keyframe to open a new
+	// segment. The packet is not stored anywhere, so release its ring slot.
+	pkt.Release()
 	return nil
 }
 
@@ -509,6 +539,7 @@ func (s *segmenter) handleEventModeActiveFile(url string, stream *streamState, s
 
 	if shouldClose {
 		if err := s.flushSegment(stream, stopCh); err != nil {
+			pkt.Release()
 			return err
 		}
 
@@ -525,7 +556,9 @@ func (s *segmenter) handleEventModeActiveFile(url string, stream *streamState, s
 			s.recordCurStatus = false
 			s.recordCurStatusCh <- false
 		}
-		return nil // Continue to buffer mode in next packet
+		// Switching back to buffer mode. Current packet is not stored; release it.
+		pkt.Release()
+		return nil
 	}
 
 	// Check if we need to rotate file (duration exceeded but event still active)
@@ -551,7 +584,15 @@ func (s *segmenter) startEventRecording(url string, stream *streamState) error {
 	// Find first keyframe in buffer to start file
 	startIdx := s.findFirstKeyframe(bufferedPkts)
 
+	// Release packets before the start keyframe — they won't be written.
+	for i := 0; i < startIdx; i++ {
+		bufferedPkts[i].Release()
+	}
+
 	if err := s.openNewSegment(url, stream, bufferedPkts[startIdx].StartTime()); err != nil {
+		for i := startIdx; i < len(bufferedPkts); i++ {
+			bufferedPkts[i].Release()
+		}
 		return err
 	}
 

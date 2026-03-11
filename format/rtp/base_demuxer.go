@@ -4,11 +4,9 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"time"
 
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/utils/buffer"
-	"github.com/ugparu/gomedia/utils/logger"
 	"github.com/ugparu/gomedia/utils/sdp"
 )
 
@@ -33,51 +31,53 @@ const (
 )
 
 type baseDemuxer struct {
-	rdr           io.Reader
-	sdp           sdp.Media
-	payload       buffer.PooledBuffer
-	offset        int
-	end           int
-	timestamp     uint32
-	index         uint8
-	useRing       bool
-	ringSeconds   int
-	ringBuffer    buffer.PooledBuffer
-	ringOffset    int
-	lastResetTime time.Time
+	rdr     io.Reader
+	sdp     sdp.Media
+	payload buffer.PooledBuffer
+	offset  int
+	end     int
+
+	timestamp uint32
+	index     uint8
+
+	// ring is non-nil when WithRingBuffer or WithCalculatedRingBuffer is used.
+	// Packet data is carved directly from the current slab; when the slab is
+	// full a new one is created automatically and the old one is GC'd once all
+	// outstanding SlotHandles have been released by consumers.
+	ring *buffer.GrowingRingAlloc
 }
 
 type DemuxerOption func(*baseDemuxer)
 
+// WithRingBuffer enables the growing ring allocator with the given initial byte
+// capacity. The ring grows automatically when full; the initial size is a hint,
+// not a hard limit.
 func WithRingBuffer(size int) DemuxerOption {
 	return func(d *baseDemuxer) {
-		d.ringBuffer = buffer.Get(size)
+		d.ring = buffer.NewGrowingRingAlloc(size)
 	}
 }
 
+// WithCalculatedRingBuffer enables the growing ring allocator with an initial
+// capacity estimated for the given number of seconds at ~1 Mbit/s (128 KB/s),
+// minimum 256 KB. The ring grows automatically if the actual bitrate is higher.
 func WithCalculatedRingBuffer(seconds int) DemuxerOption {
 	return func(d *baseDemuxer) {
-		d.useRing = true
-		const ringSize = 1024 * 1024
-		d.ringBuffer = buffer.Get(ringSize)
-		d.ringSeconds = seconds
+		const bytesPerSecond = 128 * 1024 // ~1 Mbit/s
+		size := seconds * bytesPerSecond
+		if size < 256*1024 {
+			size = 256 * 1024
+		}
+		d.ring = buffer.NewGrowingRingAlloc(size)
 	}
 }
 
 func newBaseDemuxer(rdr io.Reader, sdp sdp.Media, index uint8, opts ...DemuxerOption) *baseDemuxer {
-	now := time.Now()
 	bd := &baseDemuxer{
-		rdr:           rdr,
-		sdp:           sdp,
-		payload:       buffer.Get(rtspHeaderSize),
-		offset:        0,
-		end:           0,
-		timestamp:     0,
-		index:         index,
-		useRing:       false,
-		ringBuffer:    nil,
-		ringOffset:    0,
-		lastResetTime: now,
+		rdr:     rdr,
+		sdp:     sdp,
+		payload: buffer.Get(rtspHeaderSize),
+		index:   index,
 	}
 	for _, opt := range opts {
 		opt(bd)
@@ -158,32 +158,11 @@ func (d *baseDemuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 
 func (d *baseDemuxer) Close() {
 	d.payload.Release()
-
-	if d.ringBuffer != nil {
-		d.ringBuffer.Release()
-	}
+	// ring slab is a plain []byte; it becomes GC-eligible once all outstanding
+	// SlotHandles have been released by consumers. Nothing to close explicitly.
 }
 
 func (d *baseDemuxer) isRTCPPacket() bool {
 	rtcpPacketType := d.payload.Data()[5]
 	return rtcpPacketType == rtcpSenderReport || rtcpPacketType == rtcpReceiverReport
-}
-
-func (d *baseDemuxer) handleRingOverflow(needed int) {
-	if d.useRing && d.ringBuffer != nil && d.ringSeconds > 0 {
-		limit := time.Duration(float64(d.ringSeconds)*1.2) * time.Second
-		if time.Since(d.lastResetTime) < limit {
-			old := d.ringBuffer
-			oldLen := old.Len()
-
-			newSize := oldLen + needed + oldLen/4
-
-			d.ringBuffer = buffer.Get(newSize)
-			logger.Debugf(d, "ringBuffer grown to %d", newSize)
-		}
-	}
-
-	logger.Debugf(d, "ringBuffer is full, resetting offset")
-	d.ringOffset = 0
-	d.lastResetTime = time.Now()
 }

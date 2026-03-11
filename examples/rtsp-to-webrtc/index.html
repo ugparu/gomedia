@@ -578,6 +578,8 @@
         let switchingStream = false;
         // Track which input URL is currently active (stable toggle even if server normalizes URL)
         let currentInputKey = null; // 'url1' | 'url2' | null
+        // URL we're in the process of switching to (used to update UI on status-200 response)
+        let pendingSwitchUrl = '';
 
         // Per-player reconnect state (one player failing must not affect others)
         const reconnectTimers = [];
@@ -784,6 +786,7 @@
             }
 
             switchingStream = true;
+            pendingSwitchUrl = url;
             // Optimistically set which input is now intended (toggle button depends on it)
             const url1 = urlInput1.value.trim();
             const url2 = urlInput2.value.trim();
@@ -857,9 +860,15 @@
                         if (data.status !== undefined) {
                             if (data.status === 200) {
                                 console.log('Stream switch successful');
+                                // Server confirmed the switch; update display using the URL we were switching to
+                                if (pendingSwitchUrl) {
+                                    handleStreamUrlChange(pendingSwitchUrl);
+                                    pendingSwitchUrl = '';
+                                }
                             } else {
                                 console.error('Stream switch failed:', data.message);
                                 switchingStream = false;
+                                pendingSwitchUrl = '';
                                 // Remove switching state
                                 document.querySelectorAll('.stream-option.switching').forEach(opt => {
                                     opt.classList.remove('switching');
@@ -1188,6 +1197,7 @@
             availableStreams = [];
             currentStreamUrl = '';
             switchingStream = false;
+            pendingSwitchUrl = '';
             currentInputKey = null;
             streamSwitcher.classList.remove('visible');
 

@@ -35,7 +35,6 @@ type innerRTSPDemuxer struct {
 	noVideo, noAudio  bool
 	readBuffer        buffer.PooledBuffer
 	rtpRingBufferSize int
-	ringSeconds       int
 }
 
 type DemuxerOption func(d *innerRTSPDemuxer)
@@ -55,12 +54,6 @@ func NoAudio() DemuxerOption {
 func WithRingBuffer(size int) DemuxerOption {
 	return func(d *innerRTSPDemuxer) {
 		d.rtpRingBufferSize = size
-	}
-}
-
-func WithCalculatedRingBuffer(seconds int) DemuxerOption {
-	return func(d *innerRTSPDemuxer) {
-		d.ringSeconds = seconds
 	}
 }
 
@@ -144,9 +137,7 @@ func (dmx *innerRTSPDemuxer) findStreams() (params gomedia.CodecParametersPair, 
 			return
 		}
 		var opts []rtp.DemuxerOption
-		if dmx.ringSeconds > 0 {
-			opts = append(opts, rtp.WithCalculatedRingBuffer(dmx.ringSeconds))
-		} else if dmx.rtpRingBufferSize > 0 {
+		if dmx.rtpRingBufferSize > 0 {
 			opts = append(opts, rtp.WithRingBuffer(dmx.rtpRingBufferSize))
 		}
 		switch i2.AVType {

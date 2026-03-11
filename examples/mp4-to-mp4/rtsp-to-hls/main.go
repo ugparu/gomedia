@@ -149,7 +149,7 @@ func main() {
 	rdr.AddURL() <- rtspURL
 
 	// Initialize HLS writer
-	hlsWriter = hls.New(0, 2, 6*time.Second, 10)
+	hlsWriter = hls.New(0, 2, 6*time.Second, 10, 5.)
 	hlsWriter.Write()
 	defer hlsWriter.Close()
 

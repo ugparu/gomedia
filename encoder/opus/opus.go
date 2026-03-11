@@ -11,6 +11,7 @@ import (
 	"github.com/ugparu/gomedia/codec/pcm"
 	"github.com/ugparu/gomedia/encoder"
 	"github.com/ugparu/gomedia/utils"
+	"github.com/ugparu/gomedia/utils/buffer"
 	"github.com/winlinvip/go-aresample/aresample"
 )
 
@@ -23,6 +24,7 @@ type opusEncoder struct {
 	buf           []int16
 	r             aresample.ResampleSampleRate
 	codecPar      *goopus.CodecParameters
+	ring          *buffer.GrowingRingAlloc
 }
 
 func NewOpusEncoder() encoder.InnerAudioEncoder {
@@ -31,7 +33,7 @@ func NewOpusEncoder() encoder.InnerAudioEncoder {
 
 func (e *opusEncoder) Init(params *pcm.CodecParameters) error {
 	var err error
-	e.Encoder, err = opus.NewEncoder(opusSampleRate, int(params.Channels()), opus.AppVoIP)
+	e.Encoder, err = opus.NewEncoder(opusSampleRate, int(params.Channels()), opus.Application(opus.AppAudio))
 	if err != nil {
 		return err
 	}
@@ -62,6 +64,7 @@ func (e *opusEncoder) Init(params *pcm.CodecParameters) error {
 	}
 
 	e.codecPar = goopus.NewCodecParameters(params.StreamIndex(), cl, opusSampleRate)
+	e.ring = buffer.NewGrowingRingAlloc(64 * 1024)
 
 	return err
 }
@@ -78,14 +81,24 @@ func (e *opusEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err e
 		e.buf = e.buf[e.frameSize:]
 
 		const bufSize = 1000
-		outData := make([]byte, bufSize)
+		var outData []byte
+		var handle *buffer.SlotHandle
+		if e.ring != nil {
+			outData, handle = e.ring.Alloc(bufSize)
+		}
+		if outData == nil {
+			outData = make([]byte, bufSize)
+		}
 
 		var n int
 		if n, err = e.Encoder.Encode(pcm, outData); err != nil {
+			handle.Release()
 			return nil, err
 		}
 
-		resp = append(resp, goopus.NewPacket(outData[:n], 0, pkt.URL(), pkt.StartTime(), e.codecPar, e.frameDuration))
+		p := goopus.NewPacket(outData[:n], 0, pkt.URL(), pkt.StartTime(), e.codecPar, e.frameDuration)
+		p.Slot = handle
+		resp = append(resp, p)
 	}
 }
 

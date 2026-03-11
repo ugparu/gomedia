@@ -27,15 +27,16 @@ type hlsWriter struct {
 	segmentDurationChan chan time.Duration
 	rmSrcCh             chan string
 
-	muxerIDs   map[uint8]gomedia.HLSMuxer
-	muxerURLs  map[string]gomedia.HLSMuxer
-	codPars    map[string]*gomedia.CodecParametersPair
-	sortedURLs []string
-	mu         sync.RWMutex
-	master     string
+	muxerIDs     map[uint8]gomedia.HLSMuxer
+	muxerURLs    map[string]gomedia.HLSMuxer
+	codPars      map[string]*gomedia.CodecParametersPair
+	sortedURLs   []string
+	mu           sync.RWMutex
+	master       string
+	partHoldBack float64
 }
 
-func New(id uint64, segCnt uint8, segDur time.Duration, chanSize int) gomedia.HLSStreamer {
+func New(id uint64, segCnt uint8, segDur time.Duration, chanSize int, partHoldBack float64) gomedia.HLSStreamer {
 	hwr := &hlsWriter{
 		AsyncManager:    nil,
 		segmentCount:    segCnt,
@@ -46,14 +47,15 @@ func New(id uint64, segCnt uint8, segDur time.Duration, chanSize int) gomedia.HL
 		segmentDurationChan: make(chan time.Duration, chanSize),
 		rmSrcCh:             make(chan string, chanSize),
 
-		muxerIDs:   map[uint8]gomedia.HLSMuxer{},
-		muxerURLs:  make(map[string]gomedia.HLSMuxer),
-		codPars:    map[string]*gomedia.CodecParametersPair{},
-		sortedURLs: []string{},
-		mu:         sync.RWMutex{},
-		master:     "",
+		muxerIDs:     map[uint8]gomedia.HLSMuxer{},
+		muxerURLs:    make(map[string]gomedia.HLSMuxer),
+		codPars:      map[string]*gomedia.CodecParametersPair{},
+		sortedURLs:   []string{},
+		mu:           sync.RWMutex{},
+		master:       "",
+		partHoldBack: partHoldBack,
 	}
-	logger.Infof(hwr, "Initialized HLS writer with %d segments, %.2f seconds per segment", segCnt, segDur.Seconds())
+	logger.Infof(hwr, "Initialized HLS writer with %d segments, %.2f seconds per segment, part hold back %.2f", segCnt, segDur.Seconds(), partHoldBack)
 
 	hwr.AsyncManager = lifecycle.NewFailSafeAsyncManager(hwr)
 	return hwr
@@ -98,7 +100,7 @@ func (hlsw *hlsWriter) checkCodPar(url string, codecPar gomedia.CodecParameters)
 		if ok {
 			mux.Close()
 		}
-		mux = hls.NewHLSMuxer(hlsw.segmentDuration, hlsw.segmentCount)
+		mux = hls.NewHLSMuxer(hlsw.segmentDuration, hlsw.segmentCount, hlsw.partHoldBack)
 		if err = mux.Mux(*par); err != nil {
 			return
 		}
@@ -216,10 +218,13 @@ func (hlsw *hlsWriter) Step(stopCh <-chan struct{}) (err error) {
 
 		mux, ok := hlsw.muxerURLs[inpPkt.URL()]
 		if !ok {
+			inpPkt.Release()
 			return
 		}
 
-		if err = mux.WritePacket(inpPkt); err != nil {
+		err = mux.WritePacket(inpPkt)
+		inpPkt.Release()
+		if err != nil {
 			return err
 		}
 	case hlsw.segmentDuration = <-hlsw.segmentDurationChan:
@@ -286,9 +291,12 @@ func (hlsw *hlsWriter) Close_() { //nolint: revive
 	// Drain remaining packets from the channel to prevent leaks.
 	for {
 		select {
-		case _, ok := <-hlsw.inpPktCh:
+		case pkt, ok := <-hlsw.inpPktCh:
 			if !ok {
 				return
+			}
+			if pkt != nil {
+				pkt.Release()
 			}
 		default:
 			close(hlsw.inpPktCh)

@@ -18,7 +18,10 @@ type Buffer struct {
 	targetDuration time.Duration
 }
 
-func (b *Buffer) AddPacket(packet gomedia.Packet) {
+// AddPacket stores packet in the current GOP buffer.
+// Returns false when the packet is dropped (no GOP started yet — waiting for
+// the first key frame). The caller must release the packet when false is returned.
+func (b *Buffer) AddPacket(packet gomedia.Packet) bool {
 	vPkt, ok := packet.(gomedia.VideoPacket)
 	if ok && vPkt.IsKeyFrame() {
 		b.gops = append(b.gops, GoP{})
@@ -26,7 +29,7 @@ func (b *Buffer) AddPacket(packet gomedia.Packet) {
 	}
 
 	if len(b.gops) == 0 {
-		return
+		return false
 	}
 
 	b.gops[len(b.gops)-1].packets = append(b.gops[len(b.gops)-1].packets, packet)
@@ -34,17 +37,17 @@ func (b *Buffer) AddPacket(packet gomedia.Packet) {
 		b.gops[len(b.gops)-1].duration += packet.Duration()
 		b.duration += packet.Duration()
 	}
+	return true
 }
 
 func (b *Buffer) AdjustSize() {
-	if b.duration < b.targetDuration {
+	if b.duration < b.targetDuration || b.duration-b.gops[0].duration < b.targetDuration {
 		return
 	}
 
-	if b.duration-b.gops[0].duration < b.targetDuration {
-		return
+	for _, pkt := range b.gops[0].packets {
+		pkt.Release()
 	}
-
 	b.duration -= b.gops[0].duration
 	b.gops = b.gops[1:]
 }
@@ -54,6 +57,9 @@ func (b *Buffer) GetBuffer(ts time.Time) ([]gomedia.VideoPacket, []gomedia.Packe
 
 	gopsID := len(b.gops)
 	for i := range b.gops {
+		if len(b.gops[i].packets) == 0 {
+			continue
+		}
 		if b.gops[i].packets[0].StartTime().After(ts) {
 			gopsID = i
 			logger.Debugf(b, "Found GOP at index %d with start_time=%v after ts=%v", i, b.gops[i].packets[0].StartTime(), ts)
@@ -104,11 +110,21 @@ func (b *Buffer) GetBuffer(ts time.Time) ([]gomedia.VideoPacket, []gomedia.Packe
 }
 
 func (b *Buffer) Reset() {
-	b.gops = []GoP{}
+	for _, gop := range b.gops {
+		for _, pkt := range gop.packets {
+			pkt.Release()
+		}
+	}
+	b.gops = b.gops[:0]
 	b.duration = 0
 }
 
 func (b *Buffer) Close() {
+	for _, gop := range b.gops {
+		for _, pkt := range gop.packets {
+			pkt.Release()
+		}
+	}
 	b.gops = nil
 	b.duration = 0
 }

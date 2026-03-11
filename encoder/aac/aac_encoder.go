@@ -24,6 +24,7 @@ type aacEncoder struct {
 	buf           []uint8
 	aacBuf        buffer.PooledBuffer
 	param         *aac.CodecParameters
+	ring          *buffer.GrowingRingAlloc
 }
 
 func NewAacEncoder() encoder.InnerAudioEncoder {
@@ -85,6 +86,7 @@ func (v *aacEncoder) Init(codecPar *pcm.CodecParameters) (err error) {
 		return err
 	}
 	v.param = &aacPar
+	v.ring = buffer.NewGrowingRingAlloc(256 * 1024)
 
 	return
 }
@@ -133,7 +135,18 @@ func (v *aacEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err er
 			break
 		}
 
-		resp = append(resp, aac.NewPacket(v.aacBuf.Data()[:valid], pkt.Timestamp(), pkt.URL(), pkt.StartTime(), v.param, v.frameDuration))
+		var outData []byte
+		var handle *buffer.SlotHandle
+		if v.ring != nil {
+			outData, handle = v.ring.Alloc(valid)
+		}
+		if outData == nil {
+			outData = make([]byte, valid)
+		}
+		copy(outData, v.aacBuf.Data()[:valid])
+		p := aac.NewPacket(outData, pkt.Timestamp(), pkt.URL(), pkt.StartTime(), v.param, v.frameDuration)
+		p.Slot = handle
+		resp = append(resp, p)
 	}
 	return
 }

@@ -427,6 +427,12 @@
                 </div>
                 <div class="player-controls">
                     <div class="control-group">
+                        <label for="webrtcQuality" style="color: var(--text-secondary); font-size: 0.9rem;">Quality:</label>
+                        <select id="webrtcQuality" disabled>
+                            <option value="">Auto</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
                         <button id="webrtcStart" class="btn-primary">
                             <span>▶</span> Start
                         </button>
@@ -637,12 +643,75 @@
         const webrtcStatus = document.getElementById('webrtcStatus');
         const webrtcStart = document.getElementById('webrtcStart');
         const webrtcStop = document.getElementById('webrtcStop');
+        const webrtcQuality = document.getElementById('webrtcQuality');
 
         let peerConnection = null;
         let dataChannel = null;
         let sdpSent = false;
         let stream = null;
         let isConnecting = false;
+        let webrtcResolutions = [];
+        let currentStreamUrl = null;
+        const pendingSwitches = new Map(); // token -> url
+
+        function setActiveWebRTCQuality(url) {
+            currentStreamUrl = url;
+            if (!webrtcResolutions.length) return;
+
+            let found = false;
+            for (let i = 0; i < webrtcQuality.options.length; i++) {
+                if (webrtcQuality.options[i].value === url) {
+                    webrtcQuality.selectedIndex = i;
+                    found = true;
+                    break;
+                }
+            }
+
+            if (found) {
+                const res = webrtcResolutions.find(r => r.url === url);
+                if (res) {
+                    webrtcStatus.textContent = `Playing ${res.height}p`;
+                    webrtcStatus.className = 'status-text connected';
+                }
+            }
+        }
+
+        function updateWebRTCQualityOptions(resolutions) {
+            webrtcResolutions = resolutions || [];
+            webrtcQuality.disabled = webrtcResolutions.length === 0;
+
+            while (webrtcQuality.options.length > 1) {
+                webrtcQuality.remove(1);
+            }
+
+            webrtcResolutions.forEach((r) => {
+                const option = document.createElement('option');
+                option.value = r.url;
+                option.textContent = r.height
+                    ? `${r.height}p (${r.url})`
+                    : r.url;
+                webrtcQuality.appendChild(option);
+            });
+        }
+
+        function sendChangeStream(url) {
+            if (!dataChannel || dataChannel.readyState !== 'open') {
+                log('WebRTC: Data channel not ready for changeStream', 'webrtc');
+                return;
+            }
+
+            const token = `switch-${Date.now()}`;
+            pendingSwitches.set(token, url);
+
+            const msg = {
+                token,
+                command: 'changeStream',
+                message: url,
+            };
+
+            log(`WebRTC: Sending changeStream for ${url}`, 'webrtc');
+            dataChannel.send(JSON.stringify(msg));
+        }
 
         async function startWebRTC() {
             if (isConnecting) return;
@@ -661,6 +730,64 @@
 
                 peerConnection = new RTCPeerConnection(configuration);
                 dataChannel = peerConnection.createDataChannel('control');
+
+                dataChannel.onopen = () => {
+                    log('WebRTC: Data channel opened', 'webrtc');
+                };
+
+                dataChannel.onmessage = (event) => {
+                    let msg;
+                    try {
+                        msg = JSON.parse(event.data);
+                    } catch {
+                        log(`WebRTC: Non-JSON message: ${event.data}`, 'webrtc');
+                        return;
+                    }
+
+                    // Messages with command field
+                    if (msg.command === 'setAvailableStreams' && msg.message && Array.isArray(msg.message.resolutions)) {
+                        log(`WebRTC: Available streams updated (${msg.message.resolutions.length})`, 'webrtc');
+                        updateWebRTCQualityOptions(msg.message.resolutions);
+                        // Если текущий url ещё не выбран — выбираем первый как активный визуально
+                        if (!currentStreamUrl && msg.message.resolutions.length > 0) {
+                            setActiveWebRTCQuality(msg.message.resolutions[0].url);
+                        }
+                        return;
+                    }
+
+                    if (msg.command === 'startStream') {
+                        log('WebRTC: startStream received', 'webrtc');
+                        if (!currentStreamUrl && webrtcResolutions.length > 0) {
+                            setActiveWebRTCQuality(webrtcResolutions[0].url);
+                        }
+                        return;
+                    }
+
+                    if (msg.command === 'setStreamUrl') {
+                        // Старый формат без токена: message == url
+                        if (typeof msg.message === 'string' && msg.message) {
+                            log(`WebRTC: setStreamUrl -> ${msg.message}`, 'webrtc');
+                            setActiveWebRTCQuality(msg.message);
+                        }
+                        return;
+                    }
+
+                    // ACK по токену: {token, status, message}
+                    if (typeof msg.status === 'number' && typeof msg.token === 'string') {
+                        const url = pendingSwitches.get(msg.token);
+                        if (!url) {
+                            return;
+                        }
+                        pendingSwitches.delete(msg.token);
+
+                        if (msg.status === 200) {
+                            log(`WebRTC: changeStream ACK for ${url}`, 'webrtc');
+                            setActiveWebRTCQuality(url);
+                        } else {
+                            log(`WebRTC: changeStream failed for ${url} (${msg.status})`, 'webrtc');
+                        }
+                    }
+                };
 
                 peerConnection.onicecandidate = event => {
                     if (event.candidate === null && !sdpSent) {
@@ -803,6 +930,11 @@
         }
 
         webrtcStart.addEventListener('click', startWebRTC);
+        webrtcQuality.addEventListener('change', () => {
+            const url = webrtcQuality.value;
+            if (!url) return;
+            sendChangeStream(url);
+        });
         webrtcStop.addEventListener('click', async () => {
             await stopWebRTC();
             webrtcStart.disabled = false;

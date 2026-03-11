@@ -33,11 +33,11 @@ import (
 
 var rtspURLs = strings.Split(os.Getenv("RTSP_URLS"), ",")
 
-const segSize = 6 * time.Second
+const segSize = 4 * time.Second
 
 // Writers
 var (
-	hlsWr    = hls.New(1, 3, segSize, 100)
+	hlsWr    = hls.New(1, 3, segSize, 100, 5.)
 	webrtcWr gomedia.WebRTCStreamer
 	seg      gomedia.Segmenter
 )
@@ -64,15 +64,17 @@ func main() {
 	logrus.Info("HLS writer initialized with: segments per playlist=1, fragment count=3, segment size=", segSize)
 
 	// Initialize WebRTC
-	webrtc.Init(2000, 2100, []string{"10.0.112.138"}, []pion.ICEServer{
+	webrtc.Init(2000, 2100, []string{"10.10.0.7"}, []pion.ICEServer{
 		{},
 	})
-	webrtcWr = webrtc.New(100, time.Second*18)
+	webrtcWr = webrtc.New(100, time.Second*12)
 	webrtcWr.Write()
 	logrus.Info("WebRTC writer initialized")
 
+	os.RemoveAll("./recordings/")
+
 	// Initialize Segmenter for MP4 recording
-	seg = segmenter.New("./recordings/", time.Second*15, gomedia.Always, 100)
+	seg = segmenter.New("./recordings/", time.Second*10, gomedia.Always, 100)
 	seg.Write()
 	logrus.Info("Segmenter initialized for MP4 recording")
 
@@ -88,7 +90,7 @@ func main() {
 
 	// Initialize RTSP reader
 	logrus.Info("Connecting to RTSP streams: ", rtspURLs)
-	rdr := reader.NewRTSP(100, rtsp.WithCalculatedRingBuffer(10))
+	rdr := reader.NewRTSP(100, rtsp.WithRingBuffer(1024))
 	rdr.Read()
 	for _, rtspURL := range rtspURLs {
 		webrtcWr.AddSource() <- rtspURL
@@ -148,6 +150,7 @@ func main() {
 					packetCount = 0
 					lastLog = time.Now()
 				}
+				pkt.Release()
 			}
 		}
 	}()
