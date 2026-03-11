@@ -6,11 +6,19 @@ import (
 	"github.com/ugparu/gomedia/utils/logger"
 )
 
+type RingAllocOption func(*RingAlloc)
+
+func WithLogName(name string) RingAllocOption {
+	return func(r *RingAlloc) {
+		r.logName = name
+	}
+}
+
 // ringSlotCount is the maximum number of in-flight allocations tracked at once.
 // Must be a power of two. 4096 comfortably covers 30 s @ 30 fps + audio.
 const ringSlotCount = 4096
 
-const danderRingSize = 1024 * 1024 * 10 // 10MB
+const danderRingSize = 1024 * 1024 * 25 // 25MB
 
 // RingAlloc is a fixed-size byte slab with FIFO slot tracking and atomic reference
 // counting. It is designed for a single producer goroutine (demuxer) and N consumer
@@ -35,6 +43,8 @@ type RingAlloc struct {
 	slots [ringSlotCount]ringSlot
 	head  atomic.Uint64 // index of oldest live slot; advanced by consumers via CAS
 	tail  atomic.Uint64 // next slot index; written by producer, read by consumers
+
+	logName string
 }
 
 type ringSlot struct {
@@ -53,11 +63,17 @@ type SlotHandle struct {
 }
 
 // NewRingAlloc creates a ring allocator backed by a slab of the given byte size.
-func NewRingAlloc(size int) *RingAlloc {
-	return &RingAlloc{
+func NewRingAlloc(size int, opts ...RingAllocOption) *RingAlloc {
+	r := &RingAlloc{
 		buf:  make([]byte, size),
 		bcap: size,
 	}
+
+	for _, opt := range opts {
+		opt(r)
+	}
+
+	return r
 }
 
 // GrowingRingAlloc wraps RingAlloc and creates a fresh, larger ring when the
@@ -71,8 +87,8 @@ type GrowingRingAlloc struct {
 
 // NewGrowingRingAlloc creates a growing ring allocator with the given initial
 // byte capacity.
-func NewGrowingRingAlloc(initSize int) *GrowingRingAlloc {
-	return &GrowingRingAlloc{current: NewRingAlloc(initSize)}
+func NewGrowingRingAlloc(initSize int, opts ...RingAllocOption) *GrowingRingAlloc {
+	return &GrowingRingAlloc{current: NewRingAlloc(initSize, opts...)}
 }
 
 // Alloc carves n contiguous bytes from the current ring. When the ring is full
@@ -84,11 +100,21 @@ func (g *GrowingRingAlloc) Alloc(n int) ([]byte, *SlotHandle) {
 	if buf, h := g.current.Alloc(n); buf != nil {
 		return buf, h
 	}
-	newSize := max(g.current.bcap*14/10, n*2)
+
+	grov := 20
+	if g.current.bcap > 1024*1024 {
+		grov = 14
+	} else if g.current.bcap > 1024*1024*5 {
+		grov = 12
+	} else if g.current.bcap > 1024*1024*10 {
+		grov = 11
+	}
+
+	newSize := max(g.current.bcap*grov/10, n*2)
 	if newSize > danderRingSize {
-		logger.Warningf(g, "Growing ring alloc to %dkb is too large", newSize/1024)
+		logger.Warningf(g.current.logName, "Growing ring alloc to %dkb is too large", newSize/1024)
 	} else {
-		logger.Infof(g, "Growing ring alloc to %dkb", newSize/1024)
+		logger.Infof(g.current.logName, "Growing ring alloc to %dkb", newSize/1024)
 	}
 	g.current = NewRingAlloc(newSize)
 	return g.current.Alloc(n)

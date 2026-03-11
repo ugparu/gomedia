@@ -208,10 +208,12 @@ func (hlsw *hlsWriter) Step(stopCh <-chan struct{}) (err error) {
 		switch pkt := inpPkt.(type) {
 		case gomedia.VideoPacket:
 			if err = hlsw.checkCodPar(inpPkt.URL(), pkt.CodecParameters()); err != nil {
+				inpPkt.Release()
 				return
 			}
 		case gomedia.AudioPacket:
 			if err = hlsw.checkCodPar(inpPkt.URL(), pkt.CodecParameters()); err != nil {
+				inpPkt.Release()
 				return
 			}
 		}

@@ -21,7 +21,7 @@ type fragment struct {
 	manifestEntry  string        // HLS manifest entry.
 	packets        []gomedia.Packet
 	codecPars      gomedia.CodecParametersPair // Codec parameters for the fragment.
-	cachedMp4      []byte                      // Pre-generated MP4 data; populated before finished is closed.
+	cachedMp4      []byte                      // Lazily generated MP4 data; populated on first HTTP request.
 }
 
 // newFragment creates a new fragment with the specified parameters.
@@ -45,7 +45,7 @@ func newFragment(id uint8, segID uint64, targetDuration time.Duration, codecPars
 
 // writePacket writes a multimedia packet to the fragment.
 // Clone(false) retains the ring-buffer slot so the backing memory stays valid
-// until the fragment explicitly releases it in segment.close().
+// until segment.release() is called when the segment is evicted.
 func (fr *fragment) writePacket(packet gomedia.Packet) error {
 	logger.Tracef(fr, "Writing packet %v", packet)
 
@@ -67,9 +67,9 @@ func (fr *fragment) writePacket(packet gomedia.Packet) error {
 	return nil
 }
 
-// close finalizes the fragment, pre-generates the MP4 cache while the
-// ring-backed packets are still live, then signals completion.
-// HTTP goroutines wait on finished and always find a populated cache.
+// close finalizes the fragment metadata and signals completion.
+// MP4 data is NOT generated here — it is produced lazily on first HTTP request
+// via generateMp4(), called under the owning segment's mutex.
 func (fr *fragment) close() error {
 	logger.Tracef(fr, "Finishing fragment")
 
@@ -90,33 +90,34 @@ func (fr *fragment) close() error {
 		)
 	}
 
-	// Pre-generate the fragment MP4 while ring-backed packets are still retained.
-	// Packets are NOT released here — segment.close() releases them after it has
-	// also encoded the full-segment MP4.
-	mux := fmp4.NewMuxer()
-	if err := mux.Mux(fr.codecPars); err != nil {
-		logger.Errorf(fr, "fragment cache: mux error: %v", err)
-	} else {
-		for _, pkt := range fr.packets {
-			if err := mux.WritePacket(pkt); err != nil {
-				logger.Errorf(fr, "fragment cache: WritePacket error: %v", err)
-			}
-		}
-		if buf := mux.GetMP4Fragment(int(fr.id)); buf != nil {
-			fr.cachedMp4 = make([]byte, len(buf.Data()))
-			copy(fr.cachedMp4, buf.Data())
-			buf.Release()
-		}
-	}
-
-	// Signal completion only after the cache is fully populated.
 	close(fr.finished)
 	return nil
 }
 
-// getMp4Buffer returns the pre-generated MP4 data for this fragment.
-// The cache is always populated before finished is closed, so callers
-// that wait on finished will never see a nil cache.
+// generateMp4 lazily produces the MP4 data from retained ring-backed packets.
+// Must be called under the owning segment's mu while packets are still live.
+func (fr *fragment) generateMp4() {
+	if fr.cachedMp4 != nil || len(fr.packets) == 0 {
+		return
+	}
+	mux := fmp4.NewMuxer()
+	if err := mux.Mux(fr.codecPars); err != nil {
+		logger.Errorf(fr, "fragment cache: mux error: %v", err)
+		return
+	}
+	for _, pkt := range fr.packets {
+		if err := mux.WritePacket(pkt); err != nil {
+			logger.Errorf(fr, "fragment cache: WritePacket error: %v", err)
+		}
+	}
+	if buf := mux.GetMP4Fragment(int(fr.id)); buf != nil {
+		fr.cachedMp4 = make([]byte, len(buf.Data()))
+		copy(fr.cachedMp4, buf.Data())
+		buf.Release()
+	}
+}
+
+// getMp4Buffer returns the cached MP4 data for this fragment.
 func (fr *fragment) getMp4Buffer() buffer.PooledBuffer {
 	return &staticBuffer{fr.cachedMp4}
 }

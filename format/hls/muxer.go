@@ -37,13 +37,17 @@ func (s *segments) addSegment(seg *segment) {
 
 func (s *segments) removeSegment(id uint64) {
 	s.Lock()
-	defer s.Unlock()
-
+	seg := s.segments[id]
 	delete(s.segments, id)
 	for i := 1; i < len(s.segIDs); i++ {
 		s.segIDs[i-1] = s.segIDs[i]
 	}
 	s.segIDs = s.segIDs[:len(s.segIDs)-1]
+	s.Unlock()
+
+	if seg != nil {
+		seg.release()
+	}
 }
 
 func (s *segments) getSegment(id uint64) (*segment, bool) {
@@ -300,6 +304,7 @@ func (mxr *muxer) GetInit() ([]byte, error) {
 }
 
 // GetSegment returns the MP4 content of a specific segment.
+// The MP4 is generated lazily on first request and cached.
 func (mxr *muxer) GetSegment(ctx context.Context, index uint64) ([]byte, error) {
 	seg, ok := mxr.getSegment(index)
 	if !ok {
@@ -311,21 +316,27 @@ func (mxr *muxer) GetSegment(ctx context.Context, index uint64) ([]byte, error) 
 	case <-seg.finished:
 	}
 	buf := seg.getMp4Buffer()
+	if buf == nil {
+		return nil, errors.New("segment expired")
+	}
 	defer buf.Release()
 	return buf.Data(), nil
 }
 
 // GetFragment returns the MP4 content of a specific fragment within a segment.
+// The MP4 is generated lazily on first request and cached.
 func (mxr *muxer) GetFragment(ctx context.Context, segindex uint64, index uint8) ([]byte, error) {
 	seg, ok := mxr.getSegment(segindex)
 	if !ok {
 		return nil, errors.New("segment not found")
 	}
 
-	// waitFragment doesn't return an error, so don't try to handle one
 	seg.waitFragment(ctx, index)
 
 	buf := seg.getFragment(ctx, index)
+	if buf == nil {
+		return nil, errors.New("fragment expired")
+	}
 	defer buf.Release()
 	bytes := buf.Data()
 
@@ -335,13 +346,20 @@ func (mxr *muxer) GetFragment(ctx context.Context, segindex uint64, index uint8)
 	return bytes, nil
 }
 
-// Close_ closes the HLS muxer.
+// Close_ closes the HLS muxer, releasing all retained packet slots.
 func (mxr *muxer) Close_() { //nolint:revive // Method name required by interface
 	mxr.segments.Lock()
-	defer mxr.segments.Unlock()
-
+	segs := make([]*segment, 0, len(mxr.segments.segments))
+	for _, seg := range mxr.segments.segments {
+		segs = append(segs, seg)
+	}
 	mxr.segments.segments = make(map[uint64]*segment)
 	mxr.segments.segIDs = nil
+	mxr.segments.Unlock()
+
+	for _, seg := range segs {
+		seg.release()
+	}
 }
 
 // GetMasterEntry returns the master entry for the HLS playlist.

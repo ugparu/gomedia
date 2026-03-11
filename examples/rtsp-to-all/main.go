@@ -131,11 +131,14 @@ func main() {
 			select {
 			case smpl := <-audioDecoder.Samples():
 				processDecodedAudioPacket(smpl, aacEnc, alawEnc)
+				smpl.Release()
 			case pkt := <-aacEnc.Packets():
 				processEncodedAudioPacket(pkt, hlsWr)
 				processEncodedAudioPacket(pkt, seg)
+				pkt.Release()
 			case pkt := <-alawEnc.Packets():
 				processEncodedAudioPacket(pkt, webrtcWr)
+				pkt.Release()
 			case pkt := <-rdr.Packets():
 				if audioPkt, ok := pkt.(gomedia.AudioPacket); ok {
 					processInputAudioPacket(audioPkt, audioDecoder, hlsWr, webrtcWr, seg)

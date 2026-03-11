@@ -52,23 +52,9 @@ type DemuxerOption func(*baseDemuxer)
 // WithRingBuffer enables the growing ring allocator with the given initial byte
 // capacity. The ring grows automatically when full; the initial size is a hint,
 // not a hard limit.
-func WithRingBuffer(size int) DemuxerOption {
+func WithRingBuffer(size int, opts ...buffer.RingAllocOption) DemuxerOption {
 	return func(d *baseDemuxer) {
-		d.ring = buffer.NewGrowingRingAlloc(size)
-	}
-}
-
-// WithCalculatedRingBuffer enables the growing ring allocator with an initial
-// capacity estimated for the given number of seconds at ~1 Mbit/s (128 KB/s),
-// minimum 256 KB. The ring grows automatically if the actual bitrate is higher.
-func WithCalculatedRingBuffer(seconds int) DemuxerOption {
-	return func(d *baseDemuxer) {
-		const bytesPerSecond = 128 * 1024 // ~1 Mbit/s
-		size := seconds * bytesPerSecond
-		if size < 256*1024 {
-			size = 256 * 1024
-		}
-		d.ring = buffer.NewGrowingRingAlloc(size)
+		d.ring = buffer.NewGrowingRingAlloc(size, opts...)
 	}
 }
 

@@ -138,7 +138,7 @@ func (dmx *innerRTSPDemuxer) findStreams() (params gomedia.CodecParametersPair, 
 		}
 		var opts []rtp.DemuxerOption
 		if dmx.rtpRingBufferSize > 0 {
-			opts = append(opts, rtp.WithRingBuffer(dmx.rtpRingBufferSize))
+			opts = append(opts, rtp.WithRingBuffer(dmx.rtpRingBufferSize, buffer.WithLogName("RTP_"+i2.Type.String())))
 		}
 		switch i2.AVType {
 		case video:

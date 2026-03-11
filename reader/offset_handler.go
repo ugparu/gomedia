@@ -13,6 +13,14 @@ type offsetHandler struct {
 	offsetDown   time.Duration
 }
 
+// releaseLastPacket releases the one-behind cached packet if present.
+func (oh *offsetHandler) releaseLastPacket() {
+	if oh.lastPacket != nil {
+		oh.lastPacket.Release()
+		oh.lastPacket = nil
+	}
+}
+
 func (oh *offsetHandler) RecalcForGap() {
 	if oh.lastPacket == nil {
 		return
@@ -24,6 +32,7 @@ func (oh *offsetHandler) RecalcForGap() {
 		oh.offsetUp *= oh.lastDuration
 	}
 	oh.offsetUp = time.Duration(oh.offsetUp.Milliseconds()/10*10) * time.Millisecond //nolint: mnd
+	oh.lastPacket.Release()
 	oh.lastPacket = nil
 }
 

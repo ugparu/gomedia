@@ -222,7 +222,20 @@ func (dec *videoDecoder) Close() {
 // Close_ stops the inner decoder and closes associated channels.
 func (dec *videoDecoder) Close_() { //nolint:revive // required by lifecycle.AsyncInstance interface
 	dec.stopDecoder()
-	close(dec.inpPktCh)
+	// Drain remaining packets from the channel to prevent leaks.
+	for {
+		select {
+		case pkt, ok := <-dec.inpPktCh:
+			if !ok {
+				goto drained
+			}
+			pkt.Release()
+		default:
+			close(dec.inpPktCh)
+			goto drained
+		}
+	}
+drained:
 	close(dec.outFrmCh)
 	close(dec.fpsChan)
 }

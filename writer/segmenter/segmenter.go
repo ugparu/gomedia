@@ -438,6 +438,7 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 			if vPkt.CodecParameters() != stream.codecPar.VideoCodecParameters {
 				stream.codecPar.VideoCodecParameters = vPkt.CodecParameters()
 				if err = s.flushSegment(stream, s.Done()); err != nil {
+					inpPkt.Release()
 					return
 				}
 			}
@@ -446,6 +447,7 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 			if aPkt.CodecParameters() != stream.codecPar.AudioCodecParameters {
 				stream.codecPar.AudioCodecParameters = aPkt.CodecParameters()
 				if err = s.flushSegment(stream, s.Done()); err != nil {
+					inpPkt.Release()
 					return
 				}
 			}
@@ -481,6 +483,7 @@ func (s *segmenter) handleAlwaysMode(url string, stream *streamState, stopCh <-c
 	// Check if we need to rotate file (on keyframe when duration exceeded)
 	if isKeyframe && stream.activeFile != nil && stream.activeFile.duration >= s.targetDuration {
 		if err := s.flushSegment(stream, stopCh); err != nil {
+			pkt.Release()
 			return err
 		}
 	}
@@ -488,6 +491,7 @@ func (s *segmenter) handleAlwaysMode(url string, stream *streamState, stopCh <-c
 	// Open new file if needed (on keyframe)
 	if stream.activeFile == nil && isKeyframe {
 		if err := s.openNewSegment(url, stream, pkt.StartTime()); err != nil {
+			pkt.Release()
 			return err
 		}
 		// Update recording status
@@ -564,9 +568,11 @@ func (s *segmenter) handleEventModeActiveFile(url string, stream *streamState, s
 	// Check if we need to rotate file (duration exceeded but event still active)
 	if isKeyframe && !s.eventSaved && stream.activeFile.duration >= s.targetDuration {
 		if err := s.flushSegment(stream, stopCh); err != nil {
+			pkt.Release()
 			return err
 		}
 		if err := s.openNewSegment(url, stream, pkt.StartTime()); err != nil {
+			pkt.Release()
 			return err
 		}
 	}
@@ -631,19 +637,36 @@ func (s *segmenter) Close_() { //nolint: revive
 		close(stopCh)
 	}()
 
-	// Close all active files
+	// Close all active files and clear ring buffers
 	s.streamsMu.Lock()
 	for _, stream := range s.streams {
 		if stream.activeFile != nil {
 			_ = s.flushSegment(stream, stopCh)
 		}
+		stream.ringBuf.clear()
 	}
 	s.streamsMu.Unlock()
 
 	if s.recordCurStatus {
 		s.recordCurStatusCh <- false
 	}
-	close(s.inpPktCh)
+
+	// Drain remaining packets from the channel to prevent leaks.
+	for {
+		select {
+		case pkt, ok := <-s.inpPktCh:
+			if !ok {
+				goto drained
+			}
+			if pkt != nil {
+				pkt.Release()
+			}
+		default:
+			close(s.inpPktCh)
+			goto drained
+		}
+	}
+drained:
 	close(s.outInfoCh)
 	close(s.recordCurStatusCh)
 }

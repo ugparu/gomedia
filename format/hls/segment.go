@@ -3,6 +3,7 @@ package hls
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/ugparu/gomedia"
@@ -35,7 +36,9 @@ type segment struct {
 	cacheEntry         string                      // Cache entry for manifest generation.
 	fragments          []*fragment                 // List of fragments in the segment.
 	time               time.Time                   // Time when the segment was created.
-	cachedMp4          []byte                      // Pre-generated full-segment MP4; set before finished is closed.
+	cachedMp4          []byte                      // Lazily generated full-segment MP4.
+	mu                 sync.Mutex                  // Protects lazy MP4 generation vs packet release.
+	released           bool                        // True after packets have been released.
 }
 
 // newSegment creates a new segment with the specified parameters.
@@ -97,53 +100,71 @@ func (element *segment) writePacket(packet gomedia.Packet) (err error) {
 	return
 }
 
-// close pre-generates the full-segment MP4 from the retained ring-backed packets,
-// releases all packet ring slots, then signals completion.
-//
-// By the time finished is closed, both cachedMp4 and every fragment's cachedMp4
-// are fully populated, so HTTP goroutines never touch raw packet memory.
+// close finalizes the segment metadata and signals completion.
+// MP4 data is NOT generated here — it is produced lazily on first HTTP request.
+// Packets are NOT released here — they stay alive for lazy generation and are
+// released in release() when the segment is evicted from the playlist.
 func (element *segment) close() (err error) {
 	logger.Tracef(element, "Finishing segment")
+	close(element.finished)
+	return nil
+}
 
-	// Pre-generate the full-segment MP4 while ring-backed packets are still live.
-	mux := fmp4.NewMuxer()
-	if muxErr := mux.Mux(element.codecPars); muxErr != nil {
-		logger.Errorf(element, "segment cache: mux error: %v", muxErr)
-	} else {
-		for _, frag := range element.fragments {
-			for _, pkt := range frag.packets {
-				if wErr := mux.WritePacket(pkt); wErr != nil {
-					logger.Errorf(element, "segment cache: WritePacket error: %v", wErr)
-				}
-			}
-		}
-		if buf := mux.GetMP4Fragment(int(element.id)); buf != nil {
-			element.cachedMp4 = make([]byte, len(buf.Data()))
-			copy(element.cachedMp4, buf.Data())
-			buf.Release()
-		}
+// release frees all retained ring-buffer packet slots.
+// Called when the segment is evicted from the playlist or the muxer is closed.
+func (element *segment) release() {
+	element.mu.Lock()
+	defer element.mu.Unlock()
+
+	if element.released {
+		return
 	}
+	element.released = true
 
-	// Release all retained ring-buffer slots now that both the fragment and
-	// segment MP4 caches have been generated.
 	for _, frag := range element.fragments {
 		for _, pkt := range frag.packets {
 			pkt.Release()
 		}
 		frag.packets = nil
 	}
-
-	// Signal completion only after all caches are populated and slots released.
-	close(element.finished)
-	return nil
 }
 
-// getMp4Buffer returns the pre-generated full-segment MP4 data.
+// getMp4Buffer lazily generates and returns the full-segment MP4 data.
+// Returns nil if the segment's packets have already been released.
 func (element *segment) getMp4Buffer() buffer.PooledBuffer {
+	element.mu.Lock()
+	defer element.mu.Unlock()
+
+	if element.cachedMp4 != nil {
+		return &staticBuffer{element.cachedMp4}
+	}
+	if element.released {
+		return nil
+	}
+
+	mux := fmp4.NewMuxer()
+	if muxErr := mux.Mux(element.codecPars); muxErr != nil {
+		logger.Errorf(element, "segment cache: mux error: %v", muxErr)
+		return nil
+	}
+	for _, frag := range element.fragments {
+		for _, pkt := range frag.packets {
+			if wErr := mux.WritePacket(pkt); wErr != nil {
+				logger.Errorf(element, "segment cache: WritePacket error: %v", wErr)
+			}
+		}
+	}
+	if buf := mux.GetMP4Fragment(int(element.id)); buf != nil {
+		element.cachedMp4 = make([]byte, len(buf.Data()))
+		copy(element.cachedMp4, buf.Data())
+		buf.Release()
+	}
+
 	return &staticBuffer{element.cachedMp4}
 }
 
-// getFragment gets the MP4 content of a specific fragment in the segment.
+// getFragment lazily generates and returns the MP4 content of a specific fragment.
+// Returns nil if the segment's packets have already been released.
 func (element *segment) getFragment(ctx context.Context, id uint8) buffer.PooledBuffer {
 	if id >= uint8(len(element.fragments)) {
 		return nil
@@ -159,6 +180,18 @@ func (element *segment) getFragment(ctx context.Context, id uint8) buffer.Pooled
 		return nil
 	case <-frag.finished:
 	}
+
+	element.mu.Lock()
+	defer element.mu.Unlock()
+
+	if frag.cachedMp4 != nil {
+		return frag.getMp4Buffer()
+	}
+	if element.released {
+		return nil
+	}
+
+	frag.generateMp4()
 	return frag.getMp4Buffer()
 }
 

@@ -114,6 +114,20 @@ func (d *audioDecoder) Close_() { //nolint:revive // required by lifecycle.Async
 	if d.InnerAudioDecoder != nil {
 		d.InnerAudioDecoder.Close()
 	}
+	// Drain remaining packets from the channel to prevent leaks.
+	for {
+		select {
+		case pkt, ok := <-d.inpPackets:
+			if !ok {
+				goto drained
+			}
+			pkt.Release()
+		default:
+			close(d.inpPackets)
+			goto drained
+		}
+	}
+drained:
 	close(d.outPackets)
 	d.inBuf.Release()
 }

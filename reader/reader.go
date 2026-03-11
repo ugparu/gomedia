@@ -73,6 +73,8 @@ func (rdr *reader) repackPackets(src string, stopCh <-chan struct{}) {
 	for {
 		select {
 		case <-stopCh:
+			videoOffsetHandler.releaseLastPacket()
+			audioOffsetHandler.releaseLastPacket()
 			return
 		default:
 		}
@@ -102,6 +104,7 @@ func (rdr *reader) repackPackets(src string, stopCh <-chan struct{}) {
 			}
 			videoOffsetHandler.CheckTSWrap(pkt)
 			if !videoOffsetHandler.applyToPkt(pkt) {
+				pkt.Release()
 				continue
 			}
 
@@ -113,6 +116,9 @@ func (rdr *reader) repackPackets(src string, stopCh <-chan struct{}) {
 			case rdr.packets <- videoOffsetHandler.lastPacket:
 				videoOffsetHandler.lastPacket = pkt
 			case <-stopCh:
+				pkt.Release()
+				videoOffsetHandler.releaseLastPacket()
+				audioOffsetHandler.releaseLastPacket()
 				return
 			}
 		case gomedia.AudioPacket:
@@ -121,15 +127,19 @@ func (rdr *reader) repackPackets(src string, stopCh <-chan struct{}) {
 			}
 			audioOffsetHandler.CheckTSWrap(pkt)
 			if !audioOffsetHandler.applyToPkt(pkt) {
+				pkt.Release()
 				continue
 			}
 			// pkt.SetStartTime(audioOffsetHandler.lastPacket.StartTime().Add(audioOffsetHandler.lastPacket.Duration()))
 			audioOffsetHandler.lastDuration = audioOffsetHandler.lastPacket.Duration()
 
 			select {
-			case rdr.packets <- pkt:
+			case rdr.packets <- audioOffsetHandler.lastPacket:
 				audioOffsetHandler.lastPacket = pkt
 			case <-stopCh:
+				pkt.Release()
+				videoOffsetHandler.releaseLastPacket()
+				audioOffsetHandler.releaseLastPacket()
 				return
 			}
 		}
