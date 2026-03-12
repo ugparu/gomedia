@@ -180,6 +180,7 @@ type Resolution struct {
 	URL    string `json:"url"`
 	Width  int    `json:"width"`
 	Height int    `json:"height"`
+	Codec  string `json:"codec"`
 }
 
 // WebRTCPeer represents a WebRTC peer connection status.

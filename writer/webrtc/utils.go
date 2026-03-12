@@ -49,6 +49,7 @@ type resolution struct {
 	URL    string `json:"url"`    // URL associated with the resolution.
 	Width  int    `json:"width"`  // Width of the video resolution.
 	Height int    `json:"height"` // Height of the video resolution.
+	Codec  string `json:"codec"`  // Codec identifier string.
 }
 
 // resp represents a response with a token, message, and status.
