@@ -323,6 +323,7 @@ func (s *segmenter) flushSegment(stream *streamState, stopChan <-chan struct{}) 
 		Size:       int(actualSize),
 		URL:        stream.codecPar.URL,
 		Resolution: fmt.Sprintf("%dx%d", stream.codecPar.VideoCodecParameters.Width(), stream.codecPar.VideoCodecParameters.Height()),
+		Codec:      stream.codecPar.VideoCodecParameters.Type().String(),
 	}:
 	case <-stopChan:
 		return nil

@@ -221,6 +221,7 @@ type FileInfo struct {
 	Size       int       // Size in bytes
 	Resolution string    // Resolution of the source stream
 	URL        string    // URL of the source stream
+	Codec      string    // Codec of the source stream
 }
 
 type Segmenter interface {
