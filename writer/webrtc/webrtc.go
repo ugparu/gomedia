@@ -224,6 +224,7 @@ func (element *webRTCWriter) buildAvailableStreamsMessage() ([]byte, error) {
 			URL:    url,
 			Width:  int(element.streams.streams[url].codecPar.Width()),  //nolint:gosec
 			Height: int(element.streams.streams[url].codecPar.Height()), //nolint:gosec
+			Codec:  element.streams.streams[url].codecPar.VideoCodecParameters.Type().String(),
 		})
 	}
 
