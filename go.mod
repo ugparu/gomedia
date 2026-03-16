@@ -57,7 +57,6 @@ require (
 	github.com/ugorji/go/codec v1.3.1 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	go.mongodb.org/mongo-driver/v2 v2.5.0 // indirect
-	go.uber.org/mock v0.6.0 // indirect
 	golang.org/x/arch v0.24.0 // indirect
 	golang.org/x/crypto v0.48.0 // indirect
 	golang.org/x/net v0.51.0 // indirect

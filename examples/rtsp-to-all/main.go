@@ -313,10 +313,17 @@ func GetManifest(c *gin.Context) {
 func GetInit(c *gin.Context) {
 	c.Header("Content-Type", "video/mp4")
 	id := StringToInt(c.Param("id"))
+	version := StringToInt(c.DefaultQuery("v", "-1"))
 
-	logrus.Debugf("Init segment requested: id=%d", id)
+	logrus.Debugf("Init segment requested: id=%d, version=%d", id, version)
 
-	buf, err := hlsWr.GetInit(uint8(id))
+	var buf []byte
+	var err error
+	if version >= 0 {
+		buf, err = hlsWr.GetInitByVersion(uint8(id), version)
+	} else {
+		buf, err = hlsWr.GetInit(uint8(id))
+	}
 	if err != nil {
 		logrus.Errorf("Failed to get init segment: %v", err)
 		c.Status(http.StatusNotFound)

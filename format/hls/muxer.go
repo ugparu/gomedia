@@ -67,14 +67,18 @@ func (s *segments) getCurSegment() *segment {
 type muxer struct {
 	lifecycle.Manager[*muxer] // Embedding lifecycle.Manager to manage lifecycle functions.
 	*segments
-	segmentCount     uint8                       // Number of segments to keep in the playlist.
-	mediaSequence    int64                       // Media sequence number.
-	segmentDuration  time.Duration               // Target duration for each segment.
-	fragmentDuration time.Duration               // Target duration for each fragment.
-	manifest         string                      // Atomic value to store the HLS manifest.
-	indexChan        chan struct{}               // Channel for signaling index changes.
-	header           string                      // Initial part of the HLS playlist.
-	codecPars        gomedia.CodecParametersPair // Codec parameters for video and audio.
+	segmentCount          uint8                               // Number of segments to keep in the playlist.
+	mediaSequence         int64                               // Media sequence number.
+	discontinuitySequence int64                               // Discontinuity sequence number (incremented when a discontinuity segment is evicted).
+	segmentDuration       time.Duration                       // Target duration for each segment.
+	fragmentDuration      time.Duration                       // Target duration for each fragment.
+	manifest              string                              // Atomic value to store the HLS manifest.
+	indexChan             chan struct{}                       // Channel for signaling index changes.
+	header                string                              // Initial part of the HLS playlist.
+	codecPars             gomedia.CodecParametersPair         // Codec parameters for video and audio.
+	initVersion           int                                 // Current init segment version (incremented on codec change).
+	initCache             map[int]gomedia.CodecParametersPair // Cached codec params per init version.
+	initBytesCache        map[int][]byte                      // Cached generated init segment bytes per version.
 }
 
 // NewHLSMuxer creates a new HLS muxer with the specified segment duration and segment count.
@@ -95,11 +99,14 @@ func NewHLSMuxer(segmentDuration time.Duration, segmentCount uint8, partHoldBack
 		header: fmt.Sprintf(`#EXTM3U
 #EXT-X-VERSION:7
 #EXT-X-TARGETDURATION:%d
-#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,PART-HOLD-BACK=%.5f	
-#EXT-X-MAP:URI="init.mp4"
+#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,PART-HOLD-BACK=%.5f
 #EXT-X-PART-INF:PART-TARGET=%.5f
+#EXT-X-INDEPENDENT-SEGMENTS
 `, int(segmentDuration.Seconds()), partHoldBack, partTarget),
-		codecPars: gomedia.CodecParametersPair{AudioCodecParameters: nil, VideoCodecParameters: nil, URL: ""},
+		codecPars:      gomedia.CodecParametersPair{AudioCodecParameters: nil, VideoCodecParameters: nil, URL: ""},
+		initVersion:    0,
+		initCache:      make(map[int]gomedia.CodecParametersPair),
+		initBytesCache: make(map[int][]byte),
 	}
 	newHLS.Manager = lifecycle.NewDefaultManager(newHLS)
 	return newHLS
@@ -119,13 +126,104 @@ func (mxr *muxer) Mux(codecPars gomedia.CodecParametersPair) (err error) {
 		}
 
 		mxr.codecPars = codecPars
+		mxr.initVersion = 0
+		mxr.initCache[0] = codecPars
 		// Create a new segment and set it as the current segment.
 		newSeg := newSegment(0, mxr.fragmentDuration, mxr.segmentDuration, codecPars)
+		newSeg.initVersion = mxr.initVersion
 		mxr.addSegment(newSeg)
 
 		return nil
 	}
 	return mxr.Manager.Start(startFunc)
+}
+
+// UpdateCodecParameters updates codec parameters mid-stream, inserting an HLS discontinuity.
+// The current segment is force-closed and a new segment with a discontinuity tag is created,
+// signalling the player to re-fetch the init segment and reinitialize its decoder.
+func (mxr *muxer) UpdateCodecParameters(codecPars gomedia.CodecParametersPair) error {
+	curSeg := mxr.getCurSegment()
+
+	// Close the current fragment so pending waiters are unblocked.
+	curFrag := curSeg.curFragment
+	select {
+	case <-curFrag.finished:
+	default:
+		curFrag.duration = 0 // mark as empty so manifest is clean
+		close(curFrag.finished)
+	}
+
+	// Force-close the current segment (may be shorter than target duration).
+	select {
+	case <-curSeg.finished:
+	default:
+		if curSeg.duration > 0 {
+			curSeg.manifestEntry = fmt.Sprintf("%s#EXT-X-PROGRAM-DATE-TIME:%s\n#EXTINF:%.5f\nsegment/%d/cubic.m4s\n",
+				curSeg.cacheEntry, curSeg.time.Format("2006-01-02T15:04:05.000000Z"), curSeg.duration.Seconds(), curSeg.id)
+		}
+		close(curSeg.finished)
+	}
+
+	mxr.codecPars = codecPars
+	mxr.initVersion++
+	mxr.initCache[mxr.initVersion] = codecPars
+
+	newSegID := curSeg.id + 1
+	newSeg := newSegment(newSegID, mxr.fragmentDuration, mxr.segmentDuration, codecPars)
+	newSeg.discontinuity = true
+	newSeg.initVersion = mxr.initVersion
+	mxr.addSegment(newSeg)
+
+	mxr.evictOldSegments()
+
+	mxr.manifest = mxr.updateIndexM3u8()
+	return nil
+}
+
+// evictOldSegments removes the oldest segments when both conditions are met:
+//  1. segment count exceeds segmentCount (minimum number of segments to keep)
+//  2. total duration of all segments exceeds segmentCount * segmentDuration
+func (mxr *muxer) evictOldSegments() {
+	maxDuration := time.Duration(mxr.segmentCount) * mxr.segmentDuration
+	// RFC 8216: playlist duration MUST NOT fall below 3 * targetDuration.
+	minDuration := 3 * mxr.segmentDuration
+	if maxDuration < minDuration {
+		maxDuration = minDuration
+	}
+	for len(mxr.segIDs) > int(mxr.segmentCount) {
+		var totalDuration time.Duration
+		for _, id := range mxr.segIDs {
+			if seg, ok := mxr.getSegment(id); ok {
+				totalDuration += seg.duration
+			}
+		}
+		if totalDuration <= maxDuration {
+			break
+		}
+		oldestID := mxr.segIDs[0]
+		if seg, ok := mxr.getSegment(oldestID); ok && seg.discontinuity {
+			mxr.discontinuitySequence++
+		}
+		mxr.removeSegment(oldestID)
+		mxr.mediaSequence++
+	}
+	mxr.cleanupInitCache()
+}
+
+// cleanupInitCache removes init versions that are no longer referenced by any segment.
+func (mxr *muxer) cleanupInitCache() {
+	used := make(map[int]bool)
+	for _, id := range mxr.segIDs {
+		if seg, ok := mxr.getSegment(id); ok {
+			used[seg.initVersion] = true
+		}
+	}
+	for v := range mxr.initCache {
+		if !used[v] {
+			delete(mxr.initCache, v)
+			delete(mxr.initBytesCache, v)
+		}
+	}
 }
 
 // WritePacket writes a multimedia packet to the current fragment of the current segment.
@@ -145,14 +243,9 @@ func (mxr *muxer) WritePacket(inpPkt gomedia.Packet) (err error) {
 		// The current segment has finished, create a new one and update the segment list.
 		newSegID := mxr.getCurSegment().id + 1
 		newSeg := newSegment(newSegID, mxr.fragmentDuration, mxr.segmentDuration, mxr.codecPars)
+		newSeg.initVersion = mxr.initVersion
 		mxr.addSegment(newSeg)
-		// Manage the number of segments to keep.
-		segCount := len(mxr.segIDs)
-		// Use safe conversion to avoid integer overflow
-		if segCount > int(mxr.segmentCount) {
-			mxr.removeSegment(mxr.segIDs[0])
-			mxr.mediaSequence++
-		}
+		mxr.evictOldSegments()
 	default:
 	}
 
@@ -172,6 +265,11 @@ func (mxr *muxer) updateIndexM3u8() string {
 	var index strings.Builder
 	index.WriteString(mxr.header)
 	index.WriteString(fmt.Sprintf("#EXT-X-MEDIA-SEQUENCE:%d\n", mxr.mediaSequence))
+	if mxr.discontinuitySequence > 0 {
+		index.WriteString(fmt.Sprintf("#EXT-X-DISCONTINUITY-SEQUENCE:%d\n", mxr.discontinuitySequence))
+	}
+
+	curInitVersion := -1
 	for _, id := range mxr.segIDs {
 		segment, ok := mxr.getSegment(id)
 		if !ok {
@@ -182,6 +280,16 @@ func (mxr *muxer) updateIndexM3u8() string {
 		if segment.manifestEntry == "" {
 			logger.Errorf(mxr, "Manifest entry for segment %d is nil", id)
 			continue
+		}
+
+		if segment.discontinuity {
+			index.WriteString("#EXT-X-DISCONTINUITY\n")
+		}
+
+		// Emit #EXT-X-MAP when init version changes (including the first segment).
+		if segment.initVersion != curInitVersion {
+			curInitVersion = segment.initVersion
+			index.WriteString(fmt.Sprintf("#EXT-X-MAP:URI=\"init.mp4?v=%d\"\n", curInitVersion))
 		}
 
 		index.WriteString(segment.manifestEntry)
@@ -289,10 +397,23 @@ func (mxr *muxer) waitForSegmentOrPart(ctx context.Context, needSeg int64, needP
 	}
 }
 
-// GetInit returns the MP4 initialization segment.
+// GetInit returns the MP4 initialization segment for the current codec version.
 func (mxr *muxer) GetInit() ([]byte, error) {
+	return mxr.GetInitByVersion(mxr.initVersion)
+}
+
+// GetInitByVersion returns the MP4 initialization segment for a specific codec version.
+// The generated bytes are cached to avoid re-muxing on every request.
+func (mxr *muxer) GetInitByVersion(version int) ([]byte, error) {
+	if cached, ok := mxr.initBytesCache[version]; ok {
+		return cached, nil
+	}
+	codecPars, ok := mxr.initCache[version]
+	if !ok {
+		return nil, fmt.Errorf("init version %d not found", version)
+	}
 	mux := fmp4.NewMuxer()
-	if err := mux.Mux(mxr.codecPars); err != nil {
+	if err := mux.Mux(codecPars); err != nil {
 		return nil, err
 	}
 	buf := mux.GetInit()
@@ -300,7 +421,10 @@ func (mxr *muxer) GetInit() ([]byte, error) {
 	if len(buf.Data()) == 0 {
 		return nil, errors.New("empty init buffer")
 	}
-	return buf.Data(), nil
+	data := make([]byte, len(buf.Data()))
+	copy(data, buf.Data())
+	mxr.initBytesCache[version] = data
+	return data, nil
 }
 
 // GetSegment returns the MP4 content of a specific segment.
@@ -373,13 +497,13 @@ func (mxr *muxer) GetMasterEntry() (string, error) {
 		codecsStr += fmt.Sprintf(",%s", mxr.codecPars.AudioCodecParameters.Tag())
 	}
 
-	// Format the master playlist entry with proper line breaks to keep the line length manageable
 	masterEntry := fmt.Sprintf(
-		"#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d,CODECS=\"%s\"",
+		"#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d,CODECS=\"%s\",FRAME-RATE=%.3f",
 		mxr.codecPars.VideoCodecParameters.Bitrate(),
 		w,
 		h,
 		codecsStr,
+		float64(mxr.codecPars.VideoCodecParameters.FPS()),
 	)
 	return masterEntry, nil
 }

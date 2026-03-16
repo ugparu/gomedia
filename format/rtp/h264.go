@@ -223,7 +223,7 @@ func (d *h264Demuxer) CodecUpdateSPS(val []byte) (err error) {
 		return
 	}
 
-	copy(d.sps, val)
+	d.sps = append(d.sps[:0], val...)
 
 	var codec h264.CodecParameters
 	if codec, err = h264.NewCodecDataFromSPSAndPPS(d.sps, d.pps); err != nil {
@@ -240,7 +240,7 @@ func (d *h264Demuxer) CodecUpdatePPS(val []byte) (err error) {
 		return
 	}
 
-	copy(d.pps, val)
+	d.pps = append(d.pps[:0], val...)
 
 	var codec h264.CodecParameters
 	if codec, err = h264.NewCodecDataFromSPSAndPPS(d.sps, d.pps); err != nil {

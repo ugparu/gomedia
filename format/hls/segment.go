@@ -39,6 +39,8 @@ type segment struct {
 	cachedMp4          []byte                      // Lazily generated full-segment MP4.
 	mu                 sync.Mutex                  // Protects lazy MP4 generation vs packet release.
 	released           bool                        // True after packets have been released.
+	discontinuity      bool                        // True if this segment starts after a codec change.
+	initVersion        int                         // Init segment version this segment belongs to.
 }
 
 // newSegment creates a new segment with the specified parameters.

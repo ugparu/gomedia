@@ -146,9 +146,11 @@ type AudioEncoder interface {
 // HLSMuxer represents an HLS muxer for single stream.
 type HLSMuxer interface {
 	Muxer                                                                    // HLSMuxer extends Muxer.
+	UpdateCodecParameters(CodecParametersPair) error                         // UpdateCodecParameters updates codec params mid-stream with HLS discontinuity.
 	GetMasterEntry() (string, error)                                         // GetMasterEntry returns the master playlist.
 	GetIndexM3u8(ctx context.Context, msn int64, prt int8) (string, error)   // GetIndexM3u8 returns the index playlist.
-	GetInit() ([]byte, error)                                                // GetInit returns the initialization segment.
+	GetInit() ([]byte, error)                                                // GetInit returns the current initialization segment.
+	GetInitByVersion(version int) ([]byte, error)                            // GetInitByVersion returns the init segment for a specific codec version.
 	GetSegment(ctx context.Context, seg uint64) ([]byte, error)              // GetSegment returns the segment.
 	GetFragment(ctx context.Context, seg uint64, frag uint8) ([]byte, error) // GetFragment returns the fragment.
 }
@@ -158,6 +160,7 @@ type HLS interface {
 	GetMasterPlaylist() (string, error)                                                   // GetMasterEntry returns the master playlist.
 	GetIndexM3u8(ctx context.Context, index uint8, msn int64, prt int8) (string, error)   // GetIndexM3u8 returns the index playlist.
 	GetInit(index uint8) ([]byte, error)                                                  // GetInit returns the initialization segment.
+	GetInitByVersion(index uint8, version int) ([]byte, error)                            // GetInitByVersion returns the init segment for a specific codec version.
 	GetSegment(ctx context.Context, index uint8, seg uint64) ([]byte, error)              // GetSegment returns the segment.
 	GetFragment(ctx context.Context, index uint8, seg uint64, frag uint8) ([]byte, error) // GetFragment returns the fragment.
 }

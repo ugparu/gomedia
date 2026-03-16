@@ -92,14 +92,17 @@ func (hlsw *hlsWriter) checkCodPar(url string, codecPar gomedia.CodecParameters)
 		return
 	}
 
-	for url, par := range hlsw.codPars {
-		if par.VideoCodecParameters == nil {
-			continue
+	par := hlsw.codPars[url]
+	if par.VideoCodecParameters == nil {
+		return hlsw.recalcManifest()
+	}
+
+	mux, ok := hlsw.muxerURLs[url]
+	if ok {
+		if err = mux.UpdateCodecParameters(*par); err != nil {
+			return
 		}
-		mux, ok := hlsw.muxerURLs[par.URL]
-		if ok {
-			mux.Close()
-		}
+	} else {
 		mux = hls.NewHLSMuxer(hlsw.segmentDuration, hlsw.segmentCount, hlsw.partHoldBack)
 		if err = mux.Mux(*par); err != nil {
 			return
@@ -260,6 +263,17 @@ func (hlsw *hlsWriter) GetInit(index uint8) ([]byte, error) {
 		return nil, fmt.Errorf("output %d not found", index)
 	}
 	return mux.GetInit()
+}
+
+// GetInitByVersion retrieves the initialization segment for a specific codec version.
+func (hlsw *hlsWriter) GetInitByVersion(index uint8, version int) ([]byte, error) {
+	hlsw.mu.RLock()
+	defer hlsw.mu.RUnlock()
+	mux, found := hlsw.muxerIDs[index]
+	if !found {
+		return nil, fmt.Errorf("output %d not found", index)
+	}
+	return mux.GetInitByVersion(version)
 }
 
 // getSegment retrieves the media segment for a specific index and segment index using the innerHLS instance.
