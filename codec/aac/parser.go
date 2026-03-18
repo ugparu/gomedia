@@ -130,8 +130,10 @@ func ParseADTSHeader(frame []byte) (config MPEG4AudioConfig, hdrlen int, framele
 		return
 	}
 
-	// Validate channel configuration
-	if config.ChannelConfig == uint(0) || config.ChannelConfig >= uint(len(chanConfigTable)) {
+	// Validate channel configuration.
+	// config == 0 is valid per ISO 14496-3 §1.6.3: it means the channel
+	// configuration is defined in the bitstream (program_config_element).
+	if config.ChannelConfig >= uint(len(chanConfigTable)) {
 		err = fmt.Errorf("aacparser: invalid channel configuration: %d", config.ChannelConfig)
 		return
 	}
@@ -259,24 +261,33 @@ func writeObjectType(w *bits.Writer, objectType uint) (err error) {
 	return
 }
 
-func readSampleRateIndex(r *bits.Reader) (index uint, err error) {
+// readSampleRateIndex reads a 4-bit sample rate index. When the escape value
+// 0xf is found, it reads an additional 24 bits which encode the actual sample
+// rate in Hz (ISO 14496-3 §1.6.5.1). In that case extHz holds the Hz value
+// and index is set to 0xf as a sentinel.
+func readSampleRateIndex(r *bits.Reader) (index uint, extHz int, err error) {
 	if index, err = r.ReadBits(4); err != nil {
 		return
 	}
 	if index == 0xf {
-		if index, err = r.ReadBits(24); err != nil {
+		var hz uint
+		if hz, err = r.ReadBits(24); err != nil {
 			return
 		}
+		extHz = int(hz) //nolint:gosec // 24-bit value always fits in int
 	}
 	return
 }
 
-func writeSampleRateIndex(w *bits.Writer, index uint) (err error) {
+// writeSampleRateIndex writes a 4-bit sample rate index. When index >= 0xf the
+// extended form is written: escape (0xf, 4 bits) followed by sampleRate in Hz
+// as a 24-bit value (ISO 14496-3 §1.6.5.1).
+func writeSampleRateIndex(w *bits.Writer, index uint, sampleRate int) (err error) {
 	if index >= 0xf {
 		if err = w.WriteBits(0xf, 4); err != nil {
 			return
 		}
-		if err = w.WriteBits(index, 24); err != nil {
+		if err = w.WriteBits(uint(sampleRate), 24); err != nil { //nolint:gosec // sample rate fits in 24 bits
 			return
 		}
 	} else {
@@ -310,11 +321,17 @@ func ParseMPEG4AudioConfigBytes(data []byte) (config MPEG4AudioConfig, err error
 	}
 
 	// Read sample rate index (4 bits, or 4+24 if extended)
-	if config.SampleRateIndex, err = readSampleRateIndex(br); err != nil {
+	var extHz int
+	if config.SampleRateIndex, extHz, err = readSampleRateIndex(br); err != nil {
 		if err == io.EOF {
 			return config, fmt.Errorf("aacparser: insufficient data for sample rate index: %w", err)
 		}
 		return
+	}
+	if extHz != 0 {
+		// Extended form: the 24-bit value is the actual sample rate in Hz.
+		// Set it directly so Complete() does not overwrite it with a table lookup.
+		config.SampleRate = extHz
 	}
 
 	// Read channel config (4 bits)
@@ -346,7 +363,7 @@ func WriteMPEG4AudioConfig(w io.Writer, config MPEG4AudioConfig) (err error) {
 			}
 		}
 	}
-	if err = writeSampleRateIndex(bw, config.SampleRateIndex); err != nil {
+	if err = writeSampleRateIndex(bw, config.SampleRateIndex, config.SampleRate); err != nil {
 		return
 	}
 

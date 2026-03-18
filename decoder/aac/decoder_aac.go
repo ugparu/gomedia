@@ -39,7 +39,13 @@ func (d *aacDecoder) Init(param gomedia.AudioCodecParameters) error {
 		return fmt.Errorf("expected *aac.CodecParameters, got %T", param)
 	}
 
+	// Close existing decoder on re-initialization to prevent handle leak.
+	C.aacdec_close(&d.m) //nolint:gocritic
+
 	asc := aacParam.ConfigBytes
+	if len(asc) == 0 {
+		return fmt.Errorf("aac init: empty AudioSpecificConfig")
+	}
 	p := (*C.char)(unsafe.Pointer(&asc[0]))
 	pSize := C.int(len(asc))
 
@@ -52,6 +58,9 @@ func (d *aacDecoder) Init(param gomedia.AudioCodecParameters) error {
 }
 
 func (d *aacDecoder) Decode(inData []byte) (outData []byte, err error) {
+	if len(inData) == 0 {
+		return nil, nil
+	}
 	p := (*C.char)(unsafe.Pointer(&inData[0]))
 	pSize := C.int(len(inData))
 	leftSize := C.int(0)
@@ -62,21 +71,21 @@ func (d *aacDecoder) Decode(inData []byte) (outData []byte, err error) {
 		return nil, fmt.Errorf("fill aac decoder failed, code is %d", int(r))
 	}
 
-	if int(leftSize) > 0 {
-		return nil, fmt.Errorf("decoder left %v bytes", int(leftSize))
-	}
+	// leftSize > 0 means FDK-AAC's internal ring buffer was full and could not
+	// accept all input bytes (e.g. multiple AUs per RFC 3640 payload). Proceed
+	// with decoding the buffered data; losing the leftover bytes for this call
+	// is preferable to stopping the pipeline with an error.
 
 	nbPcm := int(C.aacdec_pcm_size(&d.m)) //nolint:gocritic // CGO function call
-	// Calculate a more appropriate buffer size based on typical AAC frame parameters if size is unknown
 	if nbPcm == 0 {
-		// Maximum AAC frame size (2048 samples) * max 8 channels * 4 bytes per sample (worst case)
+		// Maximum HE-AAC frame size (2048 samples) * max 8 channels * 2 bytes per
+		// sample (FDK-AAC always outputs 16-bit PCM).
 		const (
 			maxSamplesPerFrame = 2048
 			maxChannels        = 8
-			bytesPerSample     = 4
+			bytesPerSample     = 2 // FDK-AAC always outputs 16-bit samples
 			maxPossibleSize    = maxSamplesPerFrame * maxChannels * bytesPerSample
 		)
-		// Start with a reasonable default that can handle most cases
 		nbPcm = maxPossibleSize
 	}
 	pcmData := make([]byte, nbPcm)

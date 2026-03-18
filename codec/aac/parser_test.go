@@ -283,6 +283,17 @@ func TestParseADTSHeader_InvalidSampleRate(t *testing.T) {
 	}
 }
 
+func TestParseADTSHeader_ChannelConfig0_InBand(t *testing.T) {
+	t.Parallel()
+	// channelConfig == 0 means "defined in bitstream" (ISO 14496-3 §1.6.3) and must not be rejected.
+	header := createADTSHeader(AotAacLc, 4, 0, 100, 1024, false)
+	header = header[:7]
+	config, _, _, _, err := ParseADTSHeader(header)
+	require.NoError(t, err)
+	require.Equal(t, uint(0), config.ChannelConfig)
+	require.Equal(t, gomedia.ChannelLayout(0), config.ChannelLayout)
+}
+
 func TestParseADTSHeader_InvalidChannelConfig(t *testing.T) {
 	t.Parallel()
 
@@ -290,14 +301,10 @@ func TestParseADTSHeader_InvalidChannelConfig(t *testing.T) {
 		name          string
 		channelConfig uint
 	}{
-		{
-			name:          "config_0",
-			channelConfig: 0,
-		},
-		{
-			name:          "config_8",
-			channelConfig: 8,
-		},
+		// Note: ADTS channel config is only 3 bits wide (values 0–7), so values
+		// 8–14 are silently masked to 0–6 during encoding and cannot be detected
+		// as invalid by ParseADTSHeader. Only config_15 has a special bit pattern
+		// that exercises the >= len(chanConfigTable) guard.
 		{
 			name:          "config_15",
 			channelConfig: 15,
