@@ -1,5 +1,7 @@
 package decoder
 
+//go:generate mockgen -source=video_decoder.go -destination=../mocks/mock_video_decoder.go -package=mocks
+
 import (
 	"errors"
 	"fmt"

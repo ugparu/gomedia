@@ -1,7 +1,6 @@
 package cpu
 
-//#cgo LDFLAGS: -lavcodec -lswscale
-//#cgo pkg-config: libavcodec libswscale
+//#cgo pkg-config: libavcodec libavutil libswscale
 //#include "decoder_ffmpeg_cpu.h"
 import "C"
 import (
@@ -57,7 +56,7 @@ func (dcd *ffmpegCPUDecoder) Decode(pkt gomedia.VideoPacket) (image.Image, error
 		return nil, err
 	}
 
-	img := rgb.NewRGB(image.Rect(0, 0, int(pkt.CodecParameters().Width()), int(pkt.CodecParameters().Height())))
+	img := rgb.NewRGB(image.Rect(0, 0, int(dcd.dcd.rgb_frame.width), int(dcd.dcd.rgb_frame.height)))
 	ret := C.decode_cpu_packet(dcd.dcd, (*C.uint8_t)(unsafe.Pointer(&img.Pix[0])))
 	if ret != 0 {
 		if ret > 0 {

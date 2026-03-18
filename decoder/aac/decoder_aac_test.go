@@ -7,9 +7,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/ugparu/gomedia"
 	codecaac "github.com/ugparu/gomedia/codec/aac"
 	decaac "github.com/ugparu/gomedia/decoder/aac"
-	"github.com/ugparu/gomedia"
+	"github.com/ugparu/gomedia/utils/buffer"
 )
 
 const testDataDir = "../../tests/data/aac/"
@@ -190,7 +191,7 @@ func TestDecode_NilInput(t *testing.T) {
 	require.NoError(t, d.Init(cp))
 	defer d.Close()
 
-	pcm, err := d.Decode(nil)
+	pcm, _, err := d.Decode(nil, nil)
 	require.NoError(t, err)
 	require.Nil(t, pcm)
 }
@@ -202,7 +203,7 @@ func TestDecode_EmptyInput(t *testing.T) {
 	require.NoError(t, d.Init(cp))
 	defer d.Close()
 
-	pcm, err := d.Decode([]byte{})
+	pcm, _, err := d.Decode([]byte{}, nil)
 	require.NoError(t, err)
 	require.Nil(t, pcm)
 }
@@ -214,7 +215,7 @@ func TestDecode_EmptyInputBeforeInit(t *testing.T) {
 	d := decaac.NewAacDecoder()
 	// No Init called — decoder handle is NULL. The empty-input guard must fire
 	// before aacDecoder_Fill is reached.
-	pcm, err := d.Decode([]byte{})
+	pcm, _, err := d.Decode([]byte{}, nil)
 	require.NoError(t, err)
 	require.Nil(t, pcm)
 }
@@ -234,7 +235,7 @@ func TestDecode_FirstFrame(t *testing.T) {
 	require.NoError(t, d.Init(cp))
 	defer d.Close()
 
-	pcm, err := d.Decode(frames[0])
+	pcm, _, err := d.Decode(frames[0], nil)
 	require.NoError(t, err)
 	// Either PCM bytes were returned or nil (NOT_ENOUGH_BITS on first call).
 	if pcm != nil {
@@ -256,7 +257,7 @@ func TestDecode_ProducesPCM(t *testing.T) {
 	limit := min(10, len(frames))
 	var gotPCM bool
 	for i := range limit {
-		pcm, err := d.Decode(frames[i])
+		pcm, _, err := d.Decode(frames[i], nil)
 		require.NoError(t, err, "frame %d", i)
 		if len(pcm) > 0 {
 			gotPCM = true
@@ -286,7 +287,7 @@ func TestDecode_PCMSize(t *testing.T) {
 
 	limit := min(20, len(frames))
 	for i := range limit {
-		pcm, err := d.Decode(frames[i])
+		pcm, _, err := d.Decode(frames[i], nil)
 		require.NoError(t, err, "frame %d", i)
 		if len(pcm) > 0 {
 			require.Equal(t, expectedPCMBytes, len(pcm),
@@ -308,7 +309,7 @@ func TestDecode_AllFrames(t *testing.T) {
 	defer d.Close()
 
 	for i, frame := range frames {
-		_, err := d.Decode(frame)
+		_, _, err := d.Decode(frame, nil)
 		require.NoError(t, err, "frame %d returned unexpected error", i)
 	}
 }
@@ -327,7 +328,7 @@ func TestDecode_TruncatedFrame(t *testing.T) {
 	defer d.Close()
 
 	truncated := frames[0][:4]
-	pcm, err := d.Decode(truncated)
+	pcm, _, err := d.Decode(truncated, nil)
 	// NOT_ENOUGH_BITS → nil, nil  OR  parse error → nil, error.
 	// Either way the decoder must not crash.
 	if err != nil {
@@ -335,4 +336,67 @@ func TestDecode_TruncatedFrame(t *testing.T) {
 	} else {
 		require.Nil(t, pcm)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Decode — ring allocator path
+// ---------------------------------------------------------------------------
+
+// TestDecode_WithRingAlloc decodes several real AAC frames using a GrowingRingAlloc
+// and verifies that when PCM is returned the ring slot is non-nil and data is
+// non-empty. Every returned slot is released to avoid leaks.
+func TestDecode_WithRingAlloc(t *testing.T) {
+	t.Parallel()
+	cp := loadCodecParameters(t)
+	frames := loadPacketFrames(t)
+
+	d := decaac.NewAacDecoder()
+	require.NoError(t, d.Init(cp))
+	defer d.Close()
+
+	ring := buffer.NewGrowingRingAlloc(256 * 1024)
+
+	limit := min(10, len(frames))
+	var gotPCM bool
+	for i := range limit {
+		pcm, slot, err := d.Decode(frames[i], ring)
+		require.NoError(t, err, "frame %d", i)
+		if len(pcm) > 0 {
+			gotPCM = true
+			require.NotNil(t, slot, "frame %d: expected non-nil slot when PCM is returned via ring", i)
+			slot.Release()
+		}
+	}
+	require.True(t, gotPCM, "expected at least one frame to produce PCM output via ring")
+}
+
+// TestDecode_WithFullRing decodes frames with a very small initial ring (1 byte).
+// GrowingRingAlloc will expand to accommodate the allocation, so the decoder
+// still produces PCM. Any non-nil slots are released to avoid leaks.
+func TestDecode_WithFullRing(t *testing.T) {
+	t.Parallel()
+	cp := loadCodecParameters(t)
+	frames := loadPacketFrames(t)
+
+	d := decaac.NewAacDecoder()
+	require.NoError(t, d.Init(cp))
+	defer d.Close()
+
+	// A 1-byte initial ring — GrowingRingAlloc will grow on first allocation.
+	// The decoder must still produce PCM regardless of ring behaviour.
+	ring := buffer.NewGrowingRingAlloc(1)
+
+	limit := min(10, len(frames))
+	var gotPCM bool
+	for i := range limit {
+		pcm, slot, err := d.Decode(frames[i], ring)
+		require.NoError(t, err, "frame %d", i)
+		if slot != nil {
+			slot.Release()
+		}
+		if len(pcm) > 0 {
+			gotPCM = true
+		}
+	}
+	require.True(t, gotPCM, "expected at least one frame to produce PCM output even with small initial ring")
 }

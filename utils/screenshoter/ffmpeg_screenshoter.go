@@ -1,6 +1,8 @@
 // Package screenshoter provides functionality for capturing screenshots from RTSP video streams.
 package screenshoter
 
+//go:generate mockgen -source=ffmpeg_screenshoter.go -destination=../../mocks/mock_screenshoter.go -package=mocks
+
 import (
 	"bytes"
 	"errors"

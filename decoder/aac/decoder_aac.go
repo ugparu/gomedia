@@ -11,6 +11,7 @@ import (
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/codec/aac"
 	"github.com/ugparu/gomedia/decoder"
+	"github.com/ugparu/gomedia/utils/buffer"
 )
 
 const (
@@ -57,9 +58,9 @@ func (d *aacDecoder) Init(param gomedia.AudioCodecParameters) error {
 	return nil
 }
 
-func (d *aacDecoder) Decode(inData []byte) (outData []byte, err error) {
+func (d *aacDecoder) Decode(inData []byte, ring *buffer.GrowingRingAlloc) (outData []byte, slot *buffer.SlotHandle, err error) {
 	if len(inData) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	p := (*C.char)(unsafe.Pointer(&inData[0]))
 	pSize := C.int(len(inData))
@@ -68,7 +69,7 @@ func (d *aacDecoder) Decode(inData []byte) (outData []byte, err error) {
 	r := C.aacdec_fill(&d.m, p, pSize, &leftSize) //nolint:gocritic // CGO function call
 
 	if int(r) != 0 {
-		return nil, fmt.Errorf("fill aac decoder failed, code is %d", int(r))
+		return nil, nil, fmt.Errorf("fill aac decoder failed, code is %d", int(r))
 	}
 
 	// leftSize > 0 means FDK-AAC's internal ring buffer was full and could not
@@ -88,7 +89,16 @@ func (d *aacDecoder) Decode(inData []byte) (outData []byte, err error) {
 		)
 		nbPcm = maxPossibleSize
 	}
-	pcmData := make([]byte, nbPcm)
+
+	var pcmData []byte
+	if ring != nil {
+		if pcmData, slot = ring.Alloc(nbPcm); pcmData == nil {
+			// ring full — fall back to heap
+			pcmData = make([]byte, nbPcm)
+		}
+	} else {
+		pcmData = make([]byte, nbPcm)
+	}
 
 	p = (*C.char)(unsafe.Pointer(&pcmData[0]))
 	pSize = C.int(nbPcm)
@@ -97,14 +107,16 @@ func (d *aacDecoder) Decode(inData []byte) (outData []byte, err error) {
 	ret := C.aacdec_decode_frame(&d.m, p, pSize, &validSize) //nolint:gocritic // CGO function call
 
 	if int(ret) == aacDecNotEnoughBits {
-		return nil, nil
+		slot.Release()
+		return nil, nil, nil
 	}
 
 	if int(ret) != 0 {
-		return nil, fmt.Errorf("decode aac frame failed, code is %d", int(ret))
+		slot.Release()
+		return nil, nil, fmt.Errorf("decode aac frame failed, code is %d", int(ret))
 	}
 
-	return pcmData[:validSize], nil
+	return pcmData[:validSize], slot, nil
 }
 
 func (d *aacDecoder) Close() {

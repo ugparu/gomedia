@@ -3,21 +3,36 @@
 
 int init_cpu_decoder(cpuDecoder *dec, AVCodecParameters *par) {
     dec->packet = av_packet_alloc();
+    if (!dec->packet) {
+        return AVERROR(ENOMEM);
+    }
     dec->frame = av_frame_alloc();
+    if (!dec->frame) {
+        return AVERROR(ENOMEM);
+    }
 
-    dec->ctxt = avcodec_alloc_context3(avcodec_find_decoder(par->codec_id));
+    const AVCodec *codec = avcodec_find_decoder(par->codec_id);
+    if (!codec) {
+        return AVERROR_DECODER_NOT_FOUND;
+    }
+
+    dec->ctxt = avcodec_alloc_context3(codec);
+    if (!dec->ctxt) {
+        return AVERROR(ENOMEM);
+    }
+
     int ret = avcodec_parameters_to_context(dec->ctxt, par);
     if (ret < 0) {
         return ret;
     }
 
-    dec->ctxt->flags &= AV_CODEC_FLAG_LOW_DELAY;
-	dec->ctxt->flags2 &= AV_CODEC_FLAG2_FAST;
+    dec->ctxt->flags |= AV_CODEC_FLAG_LOW_DELAY;
+	dec->ctxt->flags2 |= AV_CODEC_FLAG2_FAST;
 
 	dec->ctxt->pkt_timebase.num = 1;
 	dec->ctxt->pkt_timebase.den = 1000000;
 
-	ret = avcodec_open2(dec->ctxt, dec->ctxt->codec, NULL);
+	ret = avcodec_open2(dec->ctxt, codec, NULL);
     if (ret < 0) {
         return ret;
     }
@@ -41,10 +56,16 @@ int init_cpu_decoder(cpuDecoder *dec, AVCodecParameters *par) {
 		height = scale * height;
 	}
 
-    dec->scale_ctxt = sws_getContext(par->width, par->height, par->format, width, height, 
+    dec->scale_ctxt = sws_getContext(par->width, par->height, par->format, width, height,
                                      AV_PIX_FMT_RGB24, SWS_FAST_BILINEAR, NULL, NULL, NULL);
+    if (!dec->scale_ctxt) {
+        return AVERROR(ENOMEM);
+    }
 
     dec->rgb_frame = av_frame_alloc();
+    if (!dec->rgb_frame) {
+        return AVERROR(ENOMEM);
+    }
 	dec->rgb_frame->width = width;
 	dec->rgb_frame->height = height;
 	dec->rgb_frame->format = AV_PIX_FMT_RGB24;
@@ -61,7 +82,7 @@ int decode_cpu_packet(cpuDecoder *dec, uint8_t *buffer) {
     int ret = avcodec_send_packet(dec->ctxt, dec->packet);
     av_packet_unref(dec->packet);
     if (ret < 0) {
-        if (ret == AVERROR_EOF || ret == AVERROR_INVALIDDATA) {
+        if (ret == AVERROR_EOF || ret == AVERROR_INVALIDDATA || ret == AVERROR(EAGAIN)) {
             return 1;
         }
         return ret;

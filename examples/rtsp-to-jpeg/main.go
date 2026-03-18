@@ -2,44 +2,49 @@ package main
 
 import (
 	"image/jpeg"
-	"log"
 	"os"
 
 	"github.com/sirupsen/logrus"
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/decoder"
-	"github.com/ugparu/gomedia/decoder/video/cpu"
+	"github.com/ugparu/gomedia/decoder/video/cuda"
+	examplelogger "github.com/ugparu/gomedia/examples/logger"
 	"github.com/ugparu/gomedia/format/rtsp"
 )
 
 func main() {
+	println(cuda.CheckCuda())
+	cuda.InitCuda(100)
+
+	log := examplelogger.New(logrus.TraceLevel)
+
 	logrus.SetLevel(logrus.DebugLevel)
 
 	rtspURL := os.Getenv("RTSP_URL")
 	if rtspURL == "" {
-		log.Fatal("RTSP_URL environment variable is required")
+		log.Errorf(log, "RTSP_URL environment variable is required")
 	}
 
 	dmx := rtsp.New(rtspURL)
 	par, err := dmx.Demux()
 	if err != nil {
-		log.Fatal(err)
+		log.Errorf(log, err.Error())
 	}
 
 	if par.VideoCodecParameters == nil {
-		log.Fatal("No video stream found in RTSP source")
+		log.Errorf(log, "No video stream found in RTSP source")
 	}
 
 	dcd := decoder.NewVideo(100, -1, func() decoder.InnerVideoDecoder {
-		return cpu.NewFFmpegCPUDecoder()
-	})
+		return cuda.NewFFmpegCUDADecoder()
+	}, decoder.VideoWithLogger(log))
 	dcd.Decode()
 
 main:
 	for {
 		packet, err := dmx.ReadPacket()
 		if err != nil {
-			log.Fatal(err)
+			log.Errorf(log, err.Error())
 		}
 		if packet == nil {
 			continue
@@ -51,16 +56,15 @@ main:
 			case img := <-dcd.Images():
 				f, err := os.Create("output.jpg")
 				if err != nil {
-					log.Fatal(err)
+					log.Errorf(log, err.Error())
 				}
 				defer f.Close()
 				if err := jpeg.Encode(f, img, nil); err != nil {
-					log.Fatal(err)
+					log.Errorf(log, err.Error())
 				}
-				log.Println("Successfully saved frame to output.jpg")
+				log.Infof(log, "Successfully saved frame to output.jpg")
 				break main
 			}
 		}
 	}
 }
-

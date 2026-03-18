@@ -50,7 +50,7 @@ func ParametersToFFmpeg(vPar gomedia.VideoCodecParameters, ptr unsafe.Pointer) e
 		bytes = append(bytes, pps...)
 
 		cPtr.extradata_size = C.int(len(bytes))
-		cPtr.extradata = (*C.uchar)(C.malloc(C.ulong(cPtr.extradata_size)))
+		cPtr.extradata = (*C.uchar)(C.av_malloc(C.ulong(cPtr.extradata_size)))
 		extra := unsafe.Slice((*byte)(cPtr.extradata), int(cPtr.extradata_size))
 		copy(extra, bytes)
 	case *h265.CodecParameters:
@@ -69,7 +69,7 @@ func ParametersToFFmpeg(vPar gomedia.VideoCodecParameters, ptr unsafe.Pointer) e
 		bytes = append(bytes, pps...)
 
 		cPtr.extradata_size = C.int(len(bytes))
-		cPtr.extradata = (*C.uchar)(C.malloc(C.ulong(cPtr.extradata_size)))
+		cPtr.extradata = (*C.uchar)(C.av_malloc(C.ulong(cPtr.extradata_size)))
 		extra := unsafe.Slice((*byte)(cPtr.extradata), int(cPtr.extradata_size))
 		copy(extra, bytes)
 	default:

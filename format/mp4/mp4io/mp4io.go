@@ -1,6 +1,8 @@
 // nolint: all
 package mp4io
 
+//go:generate mockgen -source=mp4io.go -destination=../../../mocks/mock_mp4io.go -package=mocks
+
 import (
 	"fmt"
 	"io"

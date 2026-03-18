@@ -20,3 +20,7 @@ func InitCuda(maxMats int) {
 		freeMatIdxs <- i
 	}
 }
+
+func CloseCuda() {
+	C.close_cuda_device()
+}

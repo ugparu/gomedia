@@ -1,7 +1,10 @@
 package decoder
 
+//go:generate mockgen -source=audio_decoder.go -destination=../mocks/mock_audio_decoder.go -package=mocks
+
 import (
 	"errors"
+	"fmt"
 
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/codec/pcm"
@@ -20,9 +23,13 @@ func AudioWithLogger(l logger.Logger) AudioDecoderParam {
 	return func(dec *audioDecoder) { dec.log = l }
 }
 
+func AudioWithRingBuffer(ring *buffer.GrowingRingAlloc) AudioDecoderParam {
+	return func(dec *audioDecoder) { dec.ring = ring }
+}
+
 type InnerAudioDecoder interface {
 	Init(params gomedia.AudioCodecParameters) error
-	Decode([]byte) ([]byte, error)
+	Decode(inData []byte, ring *buffer.GrowingRingAlloc) ([]byte, *buffer.SlotHandle, error)
 	Close()
 }
 
@@ -35,6 +42,7 @@ type audioDecoder struct {
 	codecPar   gomedia.AudioCodecParameters
 	pcmPar     *pcm.CodecParameters
 	inBuf      buffer.PooledBuffer
+	ring       *buffer.GrowingRingAlloc
 	name       string
 	log        logger.Logger
 }
@@ -97,20 +105,20 @@ func (d *audioDecoder) Step(stopCh <-chan struct{}) (err error) {
 		d.inBuf.Resize(p.Len())
 		copy(d.inBuf.Data(), p.Data())
 
-		var dPCM []byte
-		if dPCM, err = d.InnerAudioDecoder.Decode(d.inBuf.Data()); err != nil || len(dPCM) == 0 {
+		var (
+			dPCM []byte
+			slot *buffer.SlotHandle
+		)
+		if dPCM, slot, err = d.InnerAudioDecoder.Decode(d.inBuf.Data(), d.ring); err != nil || len(dPCM) == 0 {
+			slot.Release()
 			return
 		}
+		pkt := pcm.NewPacket(dPCM, p.Timestamp(), p.SourceID(), p.StartTime(), d.pcmPar, p.Duration())
+		pkt.Slot = slot
 		select {
-		case d.outPackets <- pcm.NewPacket(
-			dPCM,
-			p.Timestamp(),
-			p.SourceID(),
-			p.StartTime(),
-			d.pcmPar,
-			p.Duration(),
-		):
+		case d.outPackets <- pkt:
 		case <-stopCh:
+			slot.Release()
 			return &lifecycle.BreakError{}
 		}
 	}
@@ -152,5 +160,8 @@ drained:
 }
 
 func (d *audioDecoder) String() string {
+	if d.codecPar != nil {
+		return fmt.Sprintf("ADECODER %s", d.codecPar.Type())
+	}
 	return "ADECODER"
 }

@@ -1,5 +1,7 @@
 package rtsp
 
+//go:generate mockgen -source=muxer.go -destination=../../mocks/mock_rtsp_muxer.go -package=mocks
+
 import (
 	"errors"
 	"fmt"

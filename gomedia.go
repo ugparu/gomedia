@@ -1,5 +1,7 @@
 package gomedia
 
+//go:generate mockgen -source=gomedia.go -destination=mocks/mock_gomedia.go -package=mocks
+
 import (
 	"context"
 	"image"

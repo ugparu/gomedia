@@ -1,5 +1,5 @@
 #ifndef _DECODER_FFMPEG_CPU_H_
-#define _DECODER_FFMPEG_H_
+#define _DECODER_FFMPEG_CPU_H_
 
 #include <libavcodec/avcodec.h>
 #include <libswscale/swscale.h>

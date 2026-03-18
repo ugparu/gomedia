@@ -69,7 +69,7 @@ func (dcd *ffmpegCUDADecoder) Decode(pkt gomedia.VideoPacket) (image.Image, erro
 		return nil, err
 	}
 
-	img := rgb.NewRGB(image.Rect(0, 0, int(pkt.CodecParameters().Width()), int(pkt.CodecParameters().Height())))
+	img := rgb.NewRGB(image.Rect(0, 0, int(dcd.dcd.frame_width), int(dcd.dcd.frame_height)))
 	ret := C.decode_cuda_packet(dcd.dcd, (*C.uint8_t)(unsafe.Pointer(&img.Pix[0])))
 	if ret != 0 {
 		if ret == -999 {
@@ -86,7 +86,7 @@ func (dcd *ffmpegCUDADecoder) Decode(pkt gomedia.VideoPacket) (image.Image, erro
 func (dcd *ffmpegCUDADecoder) Close() {
 	if dcd.dcd != nil {
 		freeMatIdxs <- int(dcd.dcd.mat_index)
-		dcd.dcd.mat_index = -1
 		C.close_cuda_decoder(dcd.dcd)
+		dcd.dcd = nil
 	}
 }

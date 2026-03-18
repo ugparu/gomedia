@@ -13,6 +13,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/winlinvip/go-aresample v0.0.0-20160706092116-c1dbed835c9e
 	github.com/zaf/g711 v1.4.0
+	go.uber.org/mock v0.6.0
 	golang.org/x/image v0.36.0
 )
 

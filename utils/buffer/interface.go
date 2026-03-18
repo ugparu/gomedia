@@ -1,5 +1,7 @@
 package buffer
 
+//go:generate mockgen -source=interface.go -destination=../../mocks/mock_buffer.go -package=mocks
+
 type PooledBuffer interface {
 	Data() []byte
 

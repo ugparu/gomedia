@@ -1,5 +1,7 @@
 package logger
 
+//go:generate mockgen -source=logger.go -destination=../../mocks/mock_logger.go -package=mocks
+
 // Logger is the interface used throughout the library for structured logging.
 // Each method takes an obj parameter for component identification and a message.
 // The default implementation is a no-op; inject a real logger via WithLogger options.

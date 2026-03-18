@@ -1,5 +1,7 @@
 package lifecycle
 
+//go:generate mockgen -source=utils.go -destination=../../mocks/mock_lifecycle.go -package=mocks
+
 type Instance interface {
 	Release()
 	String() string

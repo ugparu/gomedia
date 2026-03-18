@@ -1,5 +1,7 @@
 package encoder
 
+//go:generate mockgen -source=audio_encoder.go -destination=../mocks/mock_audio_encoder.go -package=mocks
+
 import (
 	"fmt"
 	"time"
