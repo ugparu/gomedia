@@ -273,6 +273,201 @@ func TestParseSliceHeaderComplete_TooShort(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestNal2Rbsp verifies that nal2rbsp strips H.265 emulation prevention bytes (0x00 0x00 0x03).
+func TestNal2Rbsp(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input []byte
+		want  []byte
+	}{
+		{
+			name:  "no escaping needed",
+			input: []byte{0x01, 0x02, 0x03},
+			want:  []byte{0x01, 0x02, 0x03},
+		},
+		{
+			name:  "single emulation prevention byte",
+			input: []byte{0x00, 0x00, 0x03, 0x01},
+			want:  []byte{0x00, 0x00, 0x01},
+		},
+		{
+			name:  "two emulation prevention sequences",
+			input: []byte{0x00, 0x00, 0x03, 0x00, 0x00, 0x03},
+			want:  []byte{0x00, 0x00, 0x00, 0x00},
+		},
+		{
+			name:  "empty",
+			input: []byte{},
+			want:  nil, // bytes.ReplaceAll returns nil for empty input
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.want, nal2rbsp(tt.input))
+		})
+	}
+}
+
+// TestHEVCDecoderConfRecord_Len verifies that Len() returns the expected size.
+func TestHEVCDecoderConfRecord_Len(t *testing.T) {
+	t.Parallel()
+
+	rec := HEVCDecoderConfRecord{
+		VPS: [][]byte{{0x40, 0x01}},             // 2 bytes
+		SPS: [][]byte{{0x42, 0x01, 0x00}},        // 3 bytes
+		PPS: [][]byte{{0x44, 0x01}},              // 2 bytes
+	}
+	// 23 + (5+2) + (5+3) + (5+2) = 45
+	require.Equal(t, 45, rec.Len())
+}
+
+// TestHEVCDecoderConfRecord_Unmarshal_TruncatedAfterVPS verifies that a record
+// whose VPS length field points beyond the buffer returns ErrDecconfInvalid.
+func TestHEVCDecoderConfRecord_Unmarshal_TruncatedAfterVPS(t *testing.T) {
+	t.Parallel()
+
+	b := make([]byte, 30)
+	b[25] = 0x01 // vpscount = 1
+	b[26] = 0x00 // vpslen hi
+	b[27] = 0x64 // vpslen lo = 100 (far beyond 30-byte buffer)
+	var rec HEVCDecoderConfRecord
+	_, err := rec.Unmarshal(b)
+	require.ErrorIs(t, err, ErrDecconfInvalid)
+}
+
+// TestParseSliceHeaderComplete_ValidSlices verifies that valid VCL NAL packets
+// are parsed into the correct SliceType and PPSID.
+//
+// Packet layout (after 2-byte NAL header):
+//
+//	SliceAddress (exp-Golomb) | slice_type u (exp-Golomb) | PPSID (exp-Golomb)
+//
+// Encoding used: SliceAddress=0 → "1"; u values: 0→"1"(P), 1→"010"(B), 2→"011"(I); PPSID=0→"1", PPSID=1→"010".
+func TestParseSliceHeaderComplete_ValidSlices(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		payload  byte
+		wantType SliceType
+		wantPPS  uint
+	}{
+		// 0xe0 = "11100000": SliceAddr=0("1"), u=0 P("1"), PPSID=0("1")
+		{name: "P slice PPSID=0", payload: 0xe0, wantType: SliceP, wantPPS: 0},
+		// 0xb8 = "10111000": SliceAddr=0("1"), u=2 I("011"), PPSID=0("1")
+		{name: "I slice PPSID=0", payload: 0xb8, wantType: SliceI, wantPPS: 0},
+		// 0xa8 = "10101000": SliceAddr=0("1"), u=1 B("010"), PPSID=0("1")
+		{name: "B slice PPSID=0", payload: 0xa8, wantType: SliceB, wantPPS: 0},
+		// 0xd0 = "11010000": SliceAddr=0("1"), u=0 P("1"), PPSID=1("010")
+		{name: "P slice PPSID=1", payload: 0xd0, wantType: SliceP, wantPPS: 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			// NAL header: type=1 (TrailR, VCL), byte0=(1<<1)=0x02, byte1=0x01
+			packet := []byte{0x02, 0x01, tt.payload}
+			header, err := ParseSliceHeaderComplete(packet)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantType, header.SliceType)
+			require.Equal(t, tt.wantPPS, header.PPSID)
+		})
+	}
+}
+
+// TestParseSliceHeaderComplete_InvalidSliceType verifies that an out-of-range
+// slice_type value returns an error.
+func TestParseSliceHeaderComplete_InvalidSliceType(t *testing.T) {
+	t.Parallel()
+
+	// 0x8b = "10001011": SliceAddr=0("1"), u=10("0001011") — invalid slice_type.
+	packet := []byte{0x02, 0x01, 0x8b}
+	_, err := ParseSliceHeaderComplete(packet)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "slice_type=10 invalid")
+}
+
+// TestParseSliceHeaderFromNALU_Valid verifies that the helper returns only SliceType.
+func TestParseSliceHeaderFromNALU_Valid(t *testing.T) {
+	t.Parallel()
+
+	// P slice packet identical to TestParseSliceHeaderComplete_ValidSlices.
+	packet := []byte{0x02, 0x01, 0xe0}
+	sliceType, err := ParseSliceHeaderFromNALU(packet)
+	require.NoError(t, err)
+	require.Equal(t, SliceType(SliceP), sliceType)
+}
+
+// TestPPSValidator_FirstSlice verifies that the very first slice of a frame
+// always succeeds regardless of PPS ID, and sets the expected ID.
+func TestPPSValidator_FirstSlice(t *testing.T) {
+	t.Parallel()
+
+	v := NewPPSValidator()
+	h := SliceHeader{SliceType: SliceI, PPSID: 3}
+	require.NoError(t, v.ValidateSlice(h, true))
+	// Subsequent non-first-slice with same PPSID must pass.
+	require.NoError(t, v.ValidateSlice(SliceHeader{PPSID: 3}, false))
+}
+
+// TestPPSValidator_ConsistentPPS verifies that multiple slices within the same
+// frame with matching PPSID all pass validation.
+func TestPPSValidator_ConsistentPPS(t *testing.T) {
+	t.Parallel()
+
+	v := NewPPSValidator()
+	first := SliceHeader{PPSID: 2}
+	require.NoError(t, v.ValidateSlice(first, true))
+	require.NoError(t, v.ValidateSlice(SliceHeader{PPSID: 2}, false))
+	require.NoError(t, v.ValidateSlice(SliceHeader{PPSID: 2}, false))
+}
+
+// TestPPSValidator_MismatchedPPS verifies that a PPS change within the same
+// frame returns an error.
+func TestPPSValidator_MismatchedPPS(t *testing.T) {
+	t.Parallel()
+
+	v := NewPPSValidator()
+	require.NoError(t, v.ValidateSlice(SliceHeader{PPSID: 1}, true))
+	err := v.ValidateSlice(SliceHeader{PPSID: 2}, false)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "PPS changed between slices")
+}
+
+// TestPPSValidator_NewFrame verifies that MarkNewFrame resets the validator so
+// a new frame may use a different PPS ID without triggering a mismatch error.
+func TestPPSValidator_NewFrame(t *testing.T) {
+	t.Parallel()
+
+	v := NewPPSValidator()
+	// First frame uses PPSID=1.
+	require.NoError(t, v.ValidateSlice(SliceHeader{PPSID: 1}, true))
+	v.MarkNewFrame()
+
+	// New frame may start with any PPSID (isNewFrame=true acts like first slice).
+	require.NoError(t, v.ValidateSlice(SliceHeader{PPSID: 5}, false))
+	// Within the new frame, same PPSID must succeed.
+	require.NoError(t, v.ValidateSlice(SliceHeader{PPSID: 5}, false))
+	// Different PPSID in the same new frame must fail.
+	require.Error(t, v.ValidateSlice(SliceHeader{PPSID: 1}, false))
+}
+
+// TestPPSValidator_Uninitialized verifies that calling ValidateSlice on a
+// zero-value PPSValidator (isNewFrame=false, currentFramePPSID=nil) returns
+// the "not properly initialized" error.
+func TestPPSValidator_Uninitialized(t *testing.T) {
+	t.Parallel()
+
+	v := &PPSValidator{} // not via NewPPSValidator; isNewFrame=false
+	err := v.ValidateSlice(SliceHeader{PPSID: 0}, false)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not properly initialized")
+}
+
 // TestTag verifies the Tag format: "hev1.P.C.LLL.90".
 func TestTag(t *testing.T) {
 	t.Parallel()

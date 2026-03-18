@@ -302,6 +302,132 @@ func TestLoadPackets_CloneRoundtrip(t *testing.T) {
 	}
 }
 
+// TestRemoveH264EmulationBytes verifies removal of H.264 emulation prevention bytes (0x00 0x00 0x03).
+func TestRemoveH264EmulationBytes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input []byte
+		want  []byte
+	}{
+		{
+			name:  "no emulation bytes",
+			input: []byte{0x67, 0x64, 0x00, 0x1F},
+			want:  []byte{0x67, 0x64, 0x00, 0x1F},
+		},
+		{
+			name:  "single emulation prevention byte",
+			input: []byte{0x00, 0x00, 0x03, 0x01},
+			want:  []byte{0x00, 0x00, 0x01},
+		},
+		{
+			name:  "two emulation prevention sequences",
+			input: []byte{0x00, 0x00, 0x03, 0x02, 0x00, 0x00, 0x03, 0x03},
+			want:  []byte{0x00, 0x00, 0x02, 0x00, 0x00, 0x03},
+		},
+		{
+			name:  "emulation prevention byte at end",
+			input: []byte{0x01, 0x00, 0x00, 0x03},
+			want:  []byte{0x01, 0x00, 0x00},
+		},
+		{
+			name:  "empty input",
+			input: []byte{},
+			want:  []byte{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.want, removeH264EmulationBytes(tt.input))
+		})
+	}
+}
+
+// TestAVCDecoderConfRecord_Len verifies Len() returns the correct serialized size.
+func TestAVCDecoderConfRecord_Len(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty", func(t *testing.T) {
+		t.Parallel()
+		var rec AVCDecoderConfRecord
+		require.Equal(t, 7, rec.Len())
+	})
+
+	t.Run("one SPS one PPS", func(t *testing.T) {
+		t.Parallel()
+		rec := AVCDecoderConfRecord{
+			SPS: [][]byte{{0x67, 0x64, 0x00, 0x1f, 0xac}}, // 5 bytes
+			PPS: [][]byte{{0x68, 0xee, 0x3c, 0x80}},        // 4 bytes
+		}
+		// 7 + (2+5) + (2+4) = 20
+		require.Equal(t, 20, rec.Len())
+	})
+}
+
+// TestAVCDecoderConfRecord_MultiSPSPPS verifies marshal/unmarshal round-trip
+// for records containing more than one SPS and PPS entry.
+func TestAVCDecoderConfRecord_MultiSPSPPS(t *testing.T) {
+	t.Parallel()
+
+	orig := AVCDecoderConfRecord{
+		AVCProfileIndication: 0x64,
+		ProfileCompatibility: 0x00,
+		AVCLevelIndication:   0x1f,
+		LengthSizeMinusOne:   3,
+		SPS: [][]byte{
+			{0x67, 0x64, 0x00, 0x1f},
+			{0x67, 0x42, 0x00, 0x0a},
+		},
+		PPS: [][]byte{
+			{0x68, 0xee, 0x3c, 0x80},
+			{0x68, 0xde, 0x09, 0x60},
+		},
+	}
+
+	buf := make([]byte, orig.Len())
+	orig.Marshal(buf)
+
+	var decoded AVCDecoderConfRecord
+	n, err := decoded.Unmarshal(buf)
+	require.NoError(t, err)
+	require.Equal(t, len(buf), n)
+	require.Equal(t, orig.AVCProfileIndication, decoded.AVCProfileIndication)
+	require.Equal(t, orig.AVCLevelIndication, decoded.AVCLevelIndication)
+	require.Len(t, decoded.SPS, 2)
+	require.Len(t, decoded.PPS, 2)
+	require.Equal(t, orig.SPS[0], decoded.SPS[0])
+	require.Equal(t, orig.SPS[1], decoded.SPS[1])
+	require.Equal(t, orig.PPS[0], decoded.PPS[0])
+	require.Equal(t, orig.PPS[1], decoded.PPS[1])
+}
+
+// TestAVCDecoderConfRecord_Unmarshal_TruncatedMidSPS verifies that a record
+// truncated before SPS length can be read returns ErrDecconfInvalid.
+func TestAVCDecoderConfRecord_Unmarshal_TruncatedMidSPS(t *testing.T) {
+	t.Parallel()
+
+	// spscount=1 (b[5] & 0x1f = 1) but only 7 bytes total; need 8 to read spslen.
+	b := []byte{0x01, 0x64, 0x00, 0x1f, 0xff, 0xe1, 0x00}
+	var rec AVCDecoderConfRecord
+	_, err := rec.Unmarshal(b)
+	require.ErrorIs(t, err, ErrDecconfInvalid)
+}
+
+// TestAVCDecoderConfRecord_Unmarshal_TruncatedAtPPS verifies that a record
+// truncated before PPS data returns ErrDecconfInvalid.
+func TestAVCDecoderConfRecord_Unmarshal_TruncatedAtPPS(t *testing.T) {
+	t.Parallel()
+
+	// spscount=0 (b[5] & 0x1f = 0), ppscount=1 (b[6]=1) but no PPS length bytes.
+	b := []byte{0x01, 0x64, 0x00, 0x1f, 0xff, 0xe0, 0x01}
+	var rec AVCDecoderConfRecord
+	_, err := rec.Unmarshal(b)
+	require.ErrorIs(t, err, ErrDecconfInvalid)
+}
+
 // TestTag verifies the Tag format for known SPS data.
 func TestTag(t *testing.T) {
 	t.Parallel()
