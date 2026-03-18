@@ -134,6 +134,7 @@ void close_cpu_decoder(cpuDecoder *dec) {
     }
     if (dec->scale_ctxt) {
         sws_freeContext(dec->scale_ctxt);
+        dec->scale_ctxt = NULL;
     }
     if (dec->rgb_frame) {
         av_frame_free(&dec->rgb_frame);
