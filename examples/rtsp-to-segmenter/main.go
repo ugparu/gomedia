@@ -9,6 +9,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/ugparu/gomedia"
+	examplelogger "github.com/ugparu/gomedia/examples/logger"
 	"github.com/ugparu/gomedia/format/rtsp"
 	"github.com/ugparu/gomedia/reader"
 	"github.com/ugparu/gomedia/writer/segmenter"
@@ -45,7 +46,7 @@ func main() {
 	logrus.Infof("Segmenter initialized: destination=./recordings/, segment_duration=%v, record_mode=Always", segmentDuration)
 
 	// Initialize RTSP reader
-	rdr := reader.NewRTSP(channelSize, rtsp.WithRingBuffer(1024))
+	rdr := reader.NewRTSP(channelSize, reader.WithLogger(examplelogger.New(logrus.InfoLevel)), reader.WithRTSPParams(rtsp.WithRingBuffer(1024)))
 	rdr.Read()
 
 	// Add all RTSP URLs to both the segmenter and reader

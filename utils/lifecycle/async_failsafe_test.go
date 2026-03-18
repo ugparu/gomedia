@@ -5,14 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
+	"github.com/ugparu/gomedia/utils/logger"
 )
-
-func TestMain(m *testing.M) {
-	logrus.SetLevel(logrus.FatalLevel)
-	m.Run()
-}
 
 type Arr struct{}
 
@@ -44,7 +39,7 @@ func TestFailsafeAsyncStart(t *testing.T) {
 	t.Parallel()
 
 	inst := &Arr{}
-	manager := NewFailSafeAsyncManager[*Arr](inst)
+	manager := NewFailSafeAsyncManager[*Arr](inst, logger.Default)
 	err := manager.Start(func(f *Arr) error { return nil })
 	require.NoError(t, err)
 }
@@ -53,7 +48,7 @@ func TestFailsafeAsyncErrorStart(t *testing.T) {
 	t.Parallel()
 
 	inst := &Arr{}
-	manager := NewFailSafeAsyncManager[*Arr](inst)
+	manager := NewFailSafeAsyncManager[*Arr](inst, logger.Default)
 	err := manager.Start(func(f *Arr) error { return errors.New("") })
 	require.NoError(t, err)
 	select {
@@ -67,7 +62,7 @@ func TestFailsafeAsyncStartAfterStart(t *testing.T) {
 	t.Parallel()
 
 	inst := &Arr{}
-	manager := NewFailSafeAsyncManager[*Arr](inst)
+	manager := NewFailSafeAsyncManager[*Arr](inst, logger.Default)
 	err := manager.Start(func(f *Arr) error { return nil })
 	require.NoError(t, err)
 	err = manager.Start(func(f *Arr) error { return nil })
@@ -78,7 +73,7 @@ func TestFailsafeAsyncClose(t *testing.T) {
 	t.Parallel()
 
 	inst := &Arr{}
-	manager := NewFailSafeAsyncManager[*Arr](inst)
+	manager := NewFailSafeAsyncManager[*Arr](inst, logger.Default)
 	err := manager.Start(func(f *Arr) error { return nil })
 	require.NoError(t, err)
 	manager.Close()
@@ -87,7 +82,7 @@ func TestFailsafeAsyncClose(t *testing.T) {
 func TestFailsafeAsyncCloseBeforeStart(t *testing.T) {
 	t.Parallel()
 	inst := &Arr{}
-	manager := NewFailSafeAsyncManager[*Arr](inst)
+	manager := NewFailSafeAsyncManager[*Arr](inst, logger.Default)
 	manager.Close()
 }
 
@@ -95,7 +90,7 @@ func TestFailsafeAsyncStartAfterClose(t *testing.T) {
 	t.Parallel()
 
 	inst := &Arr{}
-	manager := NewFailSafeAsyncManager[*Arr](inst)
+	manager := NewFailSafeAsyncManager[*Arr](inst, logger.Default)
 	manager.Close()
 	err := manager.Start(func(f *Arr) error { return nil })
 	require.NoError(t, err)
@@ -107,7 +102,7 @@ func TestFailsafeAsyncStep(t *testing.T) {
 	inst := &ErrBar{
 		Bar: Bar{},
 	}
-	manager := NewFailSafeAsyncManager[*ErrBar](inst)
+	manager := NewFailSafeAsyncManager[*ErrBar](inst, logger.Default)
 	err := manager.Start(func(f *ErrBar) error { return nil })
 	require.NoError(t, err)
 	select {

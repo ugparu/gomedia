@@ -21,6 +21,7 @@ type stream struct {
 
 // sortedStreams is a map of sorted stream URLs based on their sizes.
 type sortedStreams struct {
+	log            logger.Logger
 	sortedURLs     []string            // Sorted list of stream URLs based on their sizes.
 	streams        map[string]*stream  // Map of streams indexed by their URLs.
 	pendingPeers   map[*peerTrack]bool // Peers waiting for a stream (when last stream was removed)
@@ -47,7 +48,7 @@ func (ss *sortedStreams) Update(newURL string, newCodecPar gomedia.CodecParamete
 		if stream.codecPar.VideoCodecParameters == par {
 			return nil, false
 		}
-		logger.Infof(ss, "Updating stream %s with new codec parameters: %dx%d to %dx%d",
+		ss.log.Infof(ss, "Updating stream %s with new codec parameters: %dx%d to %dx%d",
 			newURL, stream.codecPar.VideoCodecParameters.Width(), stream.codecPar.VideoCodecParameters.Height(),
 			par.Width(), par.Height())
 		stream.codecPar.VideoCodecParameters = par
@@ -61,7 +62,7 @@ func (ss *sortedStreams) Update(newURL string, newCodecPar gomedia.CodecParamete
 			select {
 			case peer.vflush <- struct{}{}:
 			case <-time.After(flushDuration):
-				logger.Errorf(ss, "Failed to flush peer %v", peer)
+				ss.log.Errorf(ss, "Failed to flush peer %v", peer)
 			}
 		}
 	case gomedia.AudioCodecParameters:
@@ -119,6 +120,7 @@ func (ss *sortedStreams) Add(url string, newCodecPar gomedia.CodecParameters) []
 		tracks: map[*peerTrack]bool{},
 		toAdd:  map[*peerTrack]*peerURL{},
 		buffer: &Buffer{
+			log:            ss.log,
 			gops:           nil,
 			duration:       0,
 			targetDuration: ss.targetDuration,
@@ -145,7 +147,7 @@ func (ss *sortedStreams) Add(url string, newCodecPar gomedia.CodecParameters) []
 				case peer.aflush <- struct{}{}:
 					aFlushed = true
 				case <-timer:
-					logger.Errorf(ss, "Failed to flush peer %v when moving from pending", peer)
+					ss.log.Errorf(ss, "Failed to flush peer %v when moving from pending", peer)
 					vFlushed = true
 					aFlushed = true
 				}
@@ -200,7 +202,7 @@ func (ss *sortedStreams) Remove(removeURL string) {
 				Token:     "",
 				URL:       changeURL,
 			}); err != nil {
-				logger.Error(ss, err.Error())
+				ss.log.Error(ss, err.Error())
 			}
 		}
 	}
@@ -257,7 +259,7 @@ func (ss *sortedStreams) validatePacket(pkt gomedia.Packet) (*stream, error) {
 
 	str, found := ss.streams[pkt.SourceID()]
 	if !found {
-		logger.Debugf(ss, "unknown url %s", pkt.SourceID())
+		ss.log.Debugf(ss, "unknown url %s", pkt.SourceID())
 		return nil, ErrStreamNotFound
 	}
 
@@ -352,13 +354,13 @@ func (ss *sortedStreams) moveTrackToStream(str *stream, pu *peerURL, peerBuf []g
 	select {
 	case pu.vflush <- struct{}{}:
 	case <-time.After(flushDuration):
-		logger.Errorf(ss, "Failed to flush peer %v", pu.peerTrack)
+		ss.log.Errorf(ss, "Failed to flush peer %v", pu.peerTrack)
 	}
 
 	select {
 	case pu.aflush <- struct{}{}:
 	case <-time.After(flushDuration):
-		logger.Errorf(ss, "Failed to flush peer %v", pu.peerTrack)
+		ss.log.Errorf(ss, "Failed to flush peer %v", pu.peerTrack)
 	}
 
 	const sendTimeout = time.Millisecond * 100
@@ -378,14 +380,14 @@ func (ss *sortedStreams) moveTrackToStream(str *stream, pu *peerURL, peerBuf []g
 			case pu.peerTrack.vChan <- clonePkt:
 			case <-time.After(sendTimeout):
 				clonePkt.Release()
-				logger.Errorf(ss, "Timeout sending video packet to peer during stream move")
+				ss.log.Errorf(ss, "Timeout sending video packet to peer during stream move")
 			}
 		case gomedia.AudioPacket:
 			select {
 			case pu.peerTrack.aChan <- clonePkt:
 			case <-time.After(sendTimeout):
 				clonePkt.Release()
-				logger.Errorf(ss, "Timeout sending audio packet to peer during stream move")
+				ss.log.Errorf(ss, "Timeout sending audio packet to peer during stream move")
 			}
 		}
 	}
@@ -413,7 +415,7 @@ func (ss *sortedStreams) moveTrackToStream(str *stream, pu *peerURL, peerBuf []g
 			bytes, err = json.Marshal(respMsg)
 		}
 		if err != nil {
-			logger.Errorf(ss, "Failed to marshal setStreamUrl notification: %v", err)
+			ss.log.Errorf(ss, "Failed to marshal setStreamUrl notification: %v", err)
 			return
 		}
 
@@ -423,9 +425,9 @@ func (ss *sortedStreams) moveTrackToStream(str *stream, pu *peerURL, peerBuf []g
 			// Peer already closed
 			return
 		default:
-			logger.Infof(ss, "Sending setStreamUrl message %s", bytes)
+			ss.log.Infof(ss, "Sending setStreamUrl message %s", bytes)
 			if err = pu.peerTrack.DataChannel.Send(bytes); err != nil {
-				logger.Errorf(ss, "Failed to send setStreamUrl notification: %v", err)
+				ss.log.Errorf(ss, "Failed to send setStreamUrl notification: %v", err)
 			}
 		}
 	}
@@ -502,7 +504,7 @@ func (ss *sortedStreams) seedTrack(str *stream, peer *peerTrack) error {
 		return err
 	}
 
-	logger.Infof(ss, "Sending message %s after seeding %d packets", string(bytes), len(seedBuf))
+	ss.log.Infof(ss, "Sending message %s after seeding %d packets", string(bytes), len(seedBuf))
 
 	if err = peer.DataChannel.Send(bytes); err != nil {
 		return err

@@ -62,6 +62,7 @@ type resp struct {
 // peerTrack represents a combination of a WebRTC peer connection, a track, and a data channel.
 type peerTrack struct {
 	*webrtc.PeerConnection // WebRTC peer connection.
+	log                    logger.Logger
 	vt                     *webrtc.TrackLocalStaticSample
 	at                     *webrtc.TrackLocalStaticSample
 	targetURL              string
@@ -129,7 +130,7 @@ func writeVideoPacketsToPeer(pt *peerTrack,
 		}
 
 		if err := vt.WriteSample(sample); err != nil {
-			logger.Errorf(pt.done, "Error writing video sample: %v", err)
+			pt.log.Errorf(pt, "Error writing video sample: %v", err)
 		}
 
 		sleep := pkt.Duration() - time.Since(last)
@@ -198,7 +199,7 @@ func writeAudioPacketsToPeer(pt *peerTrack, aflush chan struct{}, aChan chan gom
 
 		err := at.WriteSample(sample)
 		if err != nil {
-			logger.Errorf(pt.done, "Error writing audio sample: %v", err)
+			pt.log.Errorf(pt, "Error writing audio sample: %v", err)
 		}
 
 		sleep := pkt.Duration() - time.Since(last)

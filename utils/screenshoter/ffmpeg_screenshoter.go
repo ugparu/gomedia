@@ -25,19 +25,20 @@ type Screenshoter interface {
 	Screenshot(url string) ([]byte, error)
 }
 
-// NewScreenshoter creates a new instance of the Screenshoter interface using ffmpegScreenshoter.
-func NewScreenshoter() Screenshoter {
-	return &ffmpegScreenshoter{}
-}
-
 // ffmpegScreenshoter is an implementation of the Screenshoter interface.
 type ffmpegScreenshoter struct {
+	log logger.Logger
+}
+
+// NewScreenshoter creates a new instance of the Screenshoter interface using ffmpegScreenshoter.
+func NewScreenshoter() Screenshoter {
+	return &ffmpegScreenshoter{log: logger.Default}
 }
 
 // Screenshot captures a screenshot from the provided RTSP video stream URL.
 func (screenshoter *ffmpegScreenshoter) Screenshot(url string) ([]byte, error) {
 	// Create a new RTSP reader with a buffer size.
-	screenshotReader := reader.NewRTSP(bufSize)
+	screenshotReader := reader.NewRTSP(bufSize, nil)
 	defer screenshotReader.Close()
 
 	// Set a timer for a maximum waiting time (30 seconds).
@@ -93,7 +94,7 @@ func (screenshoter *ffmpegScreenshoter) Screenshot(url string) ([]byte, error) {
 			}
 
 			// Log successful extraction of the screenshot.
-			logger.Debugf(screenshoter, "Screenshot extracted successfully from %s", url)
+			screenshoter.log.Debugf(screenshoter, "Screenshot extracted successfully from %s", url)
 
 			// Return the PNG-encoded image bytes.
 			return buff.Bytes(), nil

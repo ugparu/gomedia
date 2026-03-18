@@ -6,6 +6,7 @@ import (
 
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/codec/h265"
+	"github.com/ugparu/gomedia/utils/logger"
 	"github.com/ugparu/gomedia/utils/nal"
 	"github.com/ugparu/gomedia/utils/sdp"
 )
@@ -20,8 +21,8 @@ type h265Muxer struct {
 }
 
 // NewH265Muxer constructs an RTP muxer for H265 video.
-func NewH265Muxer(w io.Writer, media sdp.Media, channel uint8, codec *h265.CodecParameters, mtu int) *h265Muxer {
-	base := newBaseMuxer(w, media, channel, 0)
+func NewH265Muxer(w io.Writer, media sdp.Media, channel uint8, codec *h265.CodecParameters, mtu int, log logger.Logger) *h265Muxer {
+	base := newBaseMuxer(w, media, channel, 0, log)
 	m := &h265Muxer{
 		hxxxMuxer: newHxxxMuxer(base, mtu),
 		codec:     codec,

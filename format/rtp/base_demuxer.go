@@ -7,6 +7,7 @@ import (
 
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/utils/buffer"
+	"github.com/ugparu/gomedia/utils/logger"
 	"github.com/ugparu/gomedia/utils/sdp"
 )
 
@@ -39,6 +40,7 @@ type baseDemuxer struct {
 
 	timestamp uint32
 	index     uint8
+	log       logger.Logger
 
 	// ring is non-nil when WithRingBuffer or WithCalculatedRingBuffer is used.
 	// Packet data is carved directly from the current slab; when the slab is
@@ -48,6 +50,11 @@ type baseDemuxer struct {
 }
 
 type DemuxerOption func(*baseDemuxer)
+
+// WithLogger sets the logger for the demuxer.
+func WithLogger(l logger.Logger) DemuxerOption {
+	return func(d *baseDemuxer) { d.log = l }
+}
 
 // WithRingBuffer enables the growing ring allocator with the given initial byte
 // capacity. The ring grows automatically when full; the initial size is a hint,
@@ -64,6 +71,7 @@ func newBaseDemuxer(rdr io.Reader, sdp sdp.Media, index uint8, opts ...DemuxerOp
 		sdp:     sdp,
 		payload: buffer.Get(rtspHeaderSize),
 		index:   index,
+		log:     logger.Default,
 	}
 	for _, opt := range opts {
 		opt(bd)

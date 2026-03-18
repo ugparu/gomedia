@@ -8,13 +8,15 @@ import (
 
 type defaultLifecycleManager[T Instance] struct {
 	instance             T
+	log                  logger.Logger
 	startOnce, closeOnce *sync.Once
 	closeChan            chan struct{}
 }
 
-func NewDefaultManager[T Instance](instance T) Manager[T] {
+func NewDefaultManager[T Instance](instance T, log logger.Logger) Manager[T] {
 	return &defaultLifecycleManager[T]{
 		instance:  instance,
+		log:       log,
 		closeChan: make(chan struct{}),
 		startOnce: &sync.Once{},
 		closeOnce: &sync.Once{},
@@ -29,7 +31,7 @@ func (ssc *defaultLifecycleManager[T]) Start(startFunc func(T) error) (err error
 		err = &StartedAlreadyError{}
 	}
 	ssc.startOnce.Do(func() {
-		logger.Debugf(ssc.instance, "Starting default")
+		ssc.log.Debugf(ssc.instance, "Starting default")
 		if err = startFunc(ssc.instance); err != nil {
 			return
 		}

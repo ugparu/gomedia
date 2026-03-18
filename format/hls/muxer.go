@@ -66,6 +66,7 @@ func (s *segments) getCurSegment() *segment {
 // muxer is an implementation of the HLS interface.
 type muxer struct {
 	lifecycle.Manager[*muxer] // Embedding lifecycle.Manager to manage lifecycle functions.
+	log logger.Logger
 	*segments
 	segmentCount          uint8                               // Number of segments to keep in the playlist.
 	mediaSequence         int64                               // Media sequence number.
@@ -82,9 +83,10 @@ type muxer struct {
 }
 
 // NewHLSMuxer creates a new HLS muxer with the specified segment duration and segment count.
-func NewHLSMuxer(segmentDuration time.Duration, segmentCount uint8, partHoldBack float64) gomedia.HLSMuxer {
+func NewHLSMuxer(segmentDuration time.Duration, segmentCount uint8, partHoldBack float64, log logger.Logger) gomedia.HLSMuxer {
 	newHLS := &muxer{
 		Manager: nil,
+		log:     log,
 		segments: &segments{
 			segments: make(map[uint64]*segment),
 			segIDs:   []uint64{},
@@ -108,7 +110,7 @@ func NewHLSMuxer(segmentDuration time.Duration, segmentCount uint8, partHoldBack
 		initCache:      make(map[int]gomedia.CodecParametersPair),
 		initBytesCache: make(map[int][]byte),
 	}
-	newHLS.Manager = lifecycle.NewDefaultManager(newHLS)
+	newHLS.Manager = lifecycle.NewDefaultManager(newHLS, log)
 	return newHLS
 }
 
@@ -120,7 +122,7 @@ func (mxr *muxer) Mux(codecPars gomedia.CodecParametersPair) (err error) {
 			return &utils.NoCodecDataError{}
 		}
 
-		mux := fmp4.NewMuxer()
+		mux := fmp4.NewMuxer(mxr.log)
 		if err = mux.Mux(codecPars); err != nil {
 			return err
 		}
@@ -129,7 +131,7 @@ func (mxr *muxer) Mux(codecPars gomedia.CodecParametersPair) (err error) {
 		mxr.initVersion = 0
 		mxr.initCache[0] = codecPars
 		// Create a new segment and set it as the current segment.
-		newSeg := newSegment(0, mxr.fragmentDuration, mxr.segmentDuration, codecPars)
+		newSeg := newSegment(0, mxr.fragmentDuration, mxr.segmentDuration, codecPars, mxr.log)
 		newSeg.initVersion = mxr.initVersion
 		mxr.addSegment(newSeg)
 
@@ -169,7 +171,7 @@ func (mxr *muxer) UpdateCodecParameters(codecPars gomedia.CodecParametersPair) e
 	mxr.initCache[mxr.initVersion] = codecPars
 
 	newSegID := curSeg.id + 1
-	newSeg := newSegment(newSegID, mxr.fragmentDuration, mxr.segmentDuration, codecPars)
+	newSeg := newSegment(newSegID, mxr.fragmentDuration, mxr.segmentDuration, codecPars, mxr.log)
 	newSeg.discontinuity = true
 	newSeg.initVersion = mxr.initVersion
 	mxr.addSegment(newSeg)
@@ -242,7 +244,7 @@ func (mxr *muxer) WritePacket(inpPkt gomedia.Packet) (err error) {
 	case <-mxr.getCurSegment().finished:
 		// The current segment has finished, create a new one and update the segment list.
 		newSegID := mxr.getCurSegment().id + 1
-		newSeg := newSegment(newSegID, mxr.fragmentDuration, mxr.segmentDuration, mxr.codecPars)
+		newSeg := newSegment(newSegID, mxr.fragmentDuration, mxr.segmentDuration, mxr.codecPars, mxr.log)
 		newSeg.initVersion = mxr.initVersion
 		mxr.addSegment(newSeg)
 		mxr.evictOldSegments()
@@ -273,12 +275,12 @@ func (mxr *muxer) updateIndexM3u8() string {
 	for _, id := range mxr.segIDs {
 		segment, ok := mxr.getSegment(id)
 		if !ok {
-			logger.Errorf(mxr, "Segment %d not found in map", id)
+			mxr.log.Errorf(mxr,"Segment %d not found in map", id)
 			continue
 		}
 
 		if segment.manifestEntry == "" {
-			logger.Errorf(mxr, "Manifest entry for segment %d is nil", id)
+			mxr.log.Errorf(mxr,"Manifest entry for segment %d is nil", id)
 			continue
 		}
 
@@ -328,7 +330,7 @@ func (mxr *muxer) GetIndexM3u8(ctx context.Context, needSeg int64, needPart int8
 func (mxr *muxer) waitForSegmentOrPart(ctx context.Context, needSeg int64, needPart int8) error {
 	// Check for potential overflow before conversion
 	if needSeg < 0 {
-		logger.Errorf(mxr, "Segment index %d is negative", needSeg)
+		mxr.log.Errorf(mxr,"Segment index %d is negative", needSeg)
 		return errors.New("segment index cannot be negative")
 	}
 
@@ -412,7 +414,7 @@ func (mxr *muxer) GetInitByVersion(version int) ([]byte, error) {
 	if !ok {
 		return nil, fmt.Errorf("init version %d not found", version)
 	}
-	mux := fmp4.NewMuxer()
+	mux := fmp4.NewMuxer(mxr.log)
 	if err := mux.Mux(codecPars); err != nil {
 		return nil, err
 	}

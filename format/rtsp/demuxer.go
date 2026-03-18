@@ -36,9 +36,15 @@ type innerRTSPDemuxer struct {
 	noVideo, noAudio  bool
 	readBuffer        buffer.PooledBuffer
 	rtpRingBufferSize int
+	log               logger.Logger
 }
 
 type DemuxerOption func(d *innerRTSPDemuxer)
+
+// WithLogger sets the logger for the RTSP demuxer.
+func WithLogger(l logger.Logger) DemuxerOption {
+	return func(d *innerRTSPDemuxer) { d.log = l }
+}
 
 func NoVideo() DemuxerOption {
 	return func(d *innerRTSPDemuxer) {
@@ -76,10 +82,12 @@ func New(url string, opts ...DemuxerOption) gomedia.Demuxer {
 		noAudio:           false,
 		readBuffer:        buffer.Get(0),
 		rtpRingBufferSize: 0,
+		log:               logger.Default,
 	}
 	for _, opt := range opts {
 		opt(d)
 	}
+	d.client.log = d.log
 	return d
 }
 
@@ -175,7 +183,7 @@ func (dmx *innerRTSPDemuxer) findStreams() (params gomedia.CodecParametersPair, 
 				}
 				params.VideoCodecParameters = mjpegPair.VideoCodecParameters
 			default:
-				logger.Debugf(dmx, "SDP video codec type %v not supported", i2.Type)
+				dmx.log.Debugf(dmx,"SDP video codec type %v not supported", i2.Type)
 			}
 		case audio:
 			dmx.audioIdx = int8(idx) //nolint:gosec
@@ -202,7 +210,7 @@ func (dmx *innerRTSPDemuxer) findStreams() (params gomedia.CodecParametersPair, 
 				}
 				params.AudioCodecParameters = opusPair.AudioCodecParameters
 			default:
-				logger.Debugf(dmx, "SDP audio codec type %v not supported", i2.Type)
+				dmx.log.Debugf(dmx,"SDP audio codec type %v not supported", i2.Type)
 			}
 		}
 
@@ -250,7 +258,7 @@ func (dmx *innerRTSPDemuxer) ReadPacket() (packet gomedia.Packet, err error) {
 		header[0] = dmx.readBuffer.Data()[0]
 		if header[0] != rtspPacket && header[0] != rtpPacket {
 			if !desync {
-				logger.Warningf(dmx, "RTSP packet reading desync: first symbol is %s. Trying to recover", string(header[0]))
+				dmx.log.Warningf(dmx,"RTSP packet reading desync: first symbol is %s. Trying to recover", string(header[0]))
 				desync = true
 			}
 			continue
@@ -280,12 +288,12 @@ func (dmx *innerRTSPDemuxer) ReadPacket() (packet gomedia.Packet, err error) {
 		case dmx.audioIdx:
 			targetDmx = dmx.audioDemuxer
 		default:
-			logger.Warningf(dmx, "Unknown stream index %d. Possible desync", header[1])
+			dmx.log.Warningf(dmx,"Unknown stream index %d. Possible desync", header[1])
 		}
 
 		length := int32(binary.BigEndian.Uint16(header[2:]))
 		if length > 65535 || length < 12 {
-			logger.Warningf(dmx, "RTSP client incorrect packet size %v. Possible desync", length)
+			dmx.log.Warningf(dmx,"RTSP client incorrect packet size %v. Possible desync", length)
 			return
 		}
 
@@ -337,7 +345,7 @@ func (dmx *innerRTSPDemuxer) ReadPacket() (packet gomedia.Packet, err error) {
 
 func (dmx *innerRTSPDemuxer) processRTSPPacket(header [headerSize]byte) (err error) {
 	if string(header[:]) != "RTSP" {
-		logger.Warningf(dmx, "rtsp packet reading desync: first symbols are %s. Trying to recover", string(header[:]))
+		dmx.log.Warningf(dmx,"rtsp packet reading desync: first symbols are %s. Trying to recover", string(header[:]))
 		return
 	}
 
@@ -359,7 +367,7 @@ func (dmx *innerRTSPDemuxer) processRTSPPacket(header [headerSize]byte) (err err
 
 		if idx > headerSize &&
 			bytes.Equal(dummyBuffer[idx-headerSize:idx], []byte("\r\n\r\n")) {
-			logger.Debug(dmx, "consumed rtsp message")
+			dmx.log.Debug(dmx, "consumed rtsp message")
 
 			if !strings.Contains(string(dummyBuffer[:idx]), "Content-Length:") {
 				break

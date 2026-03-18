@@ -7,7 +7,18 @@ import (
 	"github.com/ugparu/gomedia/codec/pcm"
 	"github.com/ugparu/gomedia/utils/buffer"
 	"github.com/ugparu/gomedia/utils/lifecycle"
+	"github.com/ugparu/gomedia/utils/logger"
 )
+
+type AudioDecoderParam func(*audioDecoder)
+
+func AudioWithName(name string) AudioDecoderParam {
+	return func(dec *audioDecoder) { dec.name = name }
+}
+
+func AudioWithLogger(l logger.Logger) AudioDecoderParam {
+	return func(dec *audioDecoder) { dec.log = l }
+}
 
 type InnerAudioDecoder interface {
 	Init(params gomedia.AudioCodecParameters) error
@@ -24,9 +35,11 @@ type audioDecoder struct {
 	codecPar   gomedia.AudioCodecParameters
 	pcmPar     *pcm.CodecParameters
 	inBuf      buffer.PooledBuffer
+	name       string
+	log        logger.Logger
 }
 
-func NewAudioDecoder(chanSize int, factory map[gomedia.CodecType]func() InnerAudioDecoder) gomedia.AudioDecoder {
+func NewAudioDecoder(chanSize int, factory map[gomedia.CodecType]func() InnerAudioDecoder, params ...AudioDecoderParam) gomedia.AudioDecoder {
 	d := &audioDecoder{
 		AsyncManager:      nil,
 		InnerAudioDecoder: nil,
@@ -36,9 +49,15 @@ func NewAudioDecoder(chanSize int, factory map[gomedia.CodecType]func() InnerAud
 		codecPar:          nil,
 		pcmPar:            nil,
 		inBuf:             buffer.Get(0),
+		name:              "AUDIO_DECODER",
+		log:               logger.Default,
 	}
 
-	d.AsyncManager = lifecycle.NewFailSafeAsyncManager(d)
+	for _, param := range params {
+		param(d)
+	}
+
+	d.AsyncManager = lifecycle.NewFailSafeAsyncManager(d, d.log)
 	return d
 }
 

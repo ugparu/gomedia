@@ -23,6 +23,7 @@ import (
 	"github.com/ugparu/gomedia/encoder"
 	"github.com/ugparu/gomedia/encoder/aac"
 	pcmEnc "github.com/ugparu/gomedia/encoder/pcm"
+	examplelogger "github.com/ugparu/gomedia/examples/logger"
 	"github.com/ugparu/gomedia/format/rtsp"
 	"github.com/ugparu/gomedia/reader"
 	"github.com/ugparu/gomedia/utils/logger"
@@ -55,13 +56,14 @@ type SDPResponse struct {
 	Err string `json:"err"`
 }
 
+var log logger.Logger
+
 func main() {
-	logrus.Info("Starting unified RTSP streaming server...")
-	logrus.SetLevel(logrus.InfoLevel)
+	log = examplelogger.New(logrus.InfoLevel)
 
 	// Initialize HLS writer
 	hlsWr.Write()
-	logrus.Info("HLS writer initialized with: segments per playlist=1, fragment count=3, segment size=", segSize)
+	log.Infof(log, "HLS writer initialized with: segments per playlist=1, fragment count=3, segment size=%v", segSize)
 
 	// Initialize WebRTC
 	webrtc.Init(2000, 2100, []string{"10.10.0.7"}, []pion.ICEServer{
@@ -69,14 +71,14 @@ func main() {
 	})
 	webrtcWr = webrtc.New(100, time.Second*12)
 	webrtcWr.Write()
-	logrus.Info("WebRTC writer initialized")
+	log.Infof(log, "WebRTC writer initialized")
 
 	os.RemoveAll("./recordings/")
 
 	// Initialize Segmenter for MP4 recording
 	seg = segmenter.New("./recordings/", time.Second*10, gomedia.Always, 100)
 	seg.Write()
-	logrus.Info("Segmenter initialized for MP4 recording")
+	log.Infof(log, "Segmenter initialized for MP4 recording")
 
 	// Setup signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -84,13 +86,13 @@ func main() {
 
 	// Start the HTTP server
 	go func() {
-		logrus.Info("Starting server on port 8080")
+		log.Infof(log, "Starting server on port 8080")
 		GetServer().Start()
 	}()
 
 	// Initialize RTSP reader
-	logrus.Info("Connecting to RTSP streams: ", rtspURLs)
-	rdr := reader.NewRTSP(100, rtsp.WithRingBuffer(1024))
+	log.Infof(log, "Connecting to RTSP streams: %v", rtspURLs)
+	rdr := reader.NewRTSP(100, reader.WithLogger(examplelogger.New(logrus.InfoLevel)), reader.WithRTSPParams(rtsp.WithRingBuffer(1024)))
 	rdr.Read()
 	for _, rtspURL := range rtspURLs {
 		webrtcWr.AddSource() <- rtspURL
@@ -116,14 +118,14 @@ func main() {
 	// Log recorded segments
 	go func() {
 		for fileInfo := range seg.Files() {
-			logrus.Infof("Recorded segment: %s (size: %d bytes, duration: %v)",
+			log.Infof(log, "Recorded segment: %s (size: %d bytes, duration: %v)",
 				fileInfo.Name, fileInfo.Size, fileInfo.Stop.Sub(fileInfo.Start))
 		}
 	}()
 
 	// Process packets
 	go func() {
-		logrus.Info("Starting packet processing")
+		log.Infof(log, "Starting packet processing")
 		packetCount := 0
 		lastLog := time.Now()
 
@@ -149,7 +151,7 @@ func main() {
 
 				// Log packet statistics periodically
 				if time.Since(lastLog) > 5*time.Second {
-					logrus.Infof("Processed %d packets in the last 5 seconds", packetCount)
+					log.Infof(log, "Processed %d packets in the last 5 seconds", packetCount)
 					packetCount = 0
 					lastLog = time.Now()
 				}
@@ -160,7 +162,7 @@ func main() {
 
 	// Wait for termination signal
 	<-sigChan
-	logrus.Info("Shutdown signal received")
+	log.Infof(log, "Shutdown signal received")
 
 	// Graceful shutdown
 	rdr.Close()
@@ -168,7 +170,7 @@ func main() {
 	webrtcWr.Close()
 	seg.Close()
 	GetServer().Close()
-	logrus.Info("Server shutdown complete")
+	log.Infof(log, "Server shutdown complete")
 }
 
 // HTTP Server
@@ -185,20 +187,20 @@ func (s *Server) Start() {
 	s.startOnce.Do(func() {
 		defer close(s.deadChan)
 
-		logger.Info(s, "Starting listening")
+		log.Infof(log, "Starting listening")
 		if err = s.server.ListenAndServe(); err != nil {
-			logger.Warning(s, err.Error())
+			log.Warningf(log, err.Error())
 			err = nil
 		}
 	})
 	if err != nil {
-		logger.Error(s, err.Error())
+		log.Errorf(log, err.Error())
 	}
 }
 
 func (s *Server) Close() {
 	s.closeOnce.Do(func() {
-		logger.Warning(s, "Stopping and closing")
+		log.Warningf(log, "Stopping and closing")
 		s.server.Close()
 	})
 }
@@ -253,7 +255,7 @@ func GetServer() *Server {
 			startOnce: &sync.Once{},
 			closeOnce: &sync.Once{},
 		}
-		logger.Debug(instance, "Initialized and set up")
+		log.Debugf(log, "Initialized and set up")
 	})
 	return instance
 }
@@ -268,20 +270,20 @@ func StringToInt(val string) int {
 
 // HLS Handlers
 func GetMaster(c *gin.Context) {
-	logger.Debug(GetServer(), "Manifest request")
+	log.Debugf(log, "Manifest request")
 	logrus.Debug("Low-Latency master playlist requested")
 
 	index, err := hlsWr.GetMasterPlaylist()
 	if err != nil {
-		logrus.Errorf("Failed to get master playlist: %v", err)
+		log.Errorf(log, "Failed to get master playlist: %v", err)
 		c.Status(http.StatusNotFound)
 		return
 	}
 
-	logrus.Debug("Serving master playlist")
+	log.Debugf(log, "Serving master playlist")
 	_, err = c.Writer.Write([]byte(index))
 	if err != nil {
-		logrus.Errorf("Failed to write master playlist: %v", err)
+		log.Errorf(log, "Failed to write master playlist: %v", err)
 		c.Status(http.StatusInternalServerError)
 		return
 	}
@@ -292,19 +294,19 @@ func GetManifest(c *gin.Context) {
 	msn := StringToInt(c.DefaultQuery("_HLS_msn", "-1"))
 	part := StringToInt(c.DefaultQuery("_HLS_part", "-1"))
 
-	logrus.Debugf("Low-Latency manifest requested: id=%d, msn=%d, part=%d", id, msn, part)
+	log.Debugf(log, "Low-Latency manifest requested: id=%d, msn=%d, part=%d", id, msn, part)
 
 	index, err := hlsWr.GetIndexM3u8(c, uint8(id), int64(msn), int8(part))
 	if err != nil {
-		logrus.Errorf("Failed to get manifest: %v", err)
+		log.Errorf(log, "Failed to get manifest: %v", err)
 		c.String(http.StatusNotFound, err.Error())
 		return
 	}
 
-	logrus.Debug("Serving manifest")
+	log.Debugf(log, "Serving manifest")
 	_, err = c.Writer.Write([]byte(index))
 	if err != nil {
-		logrus.Errorf("Failed to write manifest: %v", err)
+		log.Errorf(log, "Failed to write manifest: %v", err)
 		c.Status(http.StatusInternalServerError)
 		return
 	}
@@ -315,7 +317,7 @@ func GetInit(c *gin.Context) {
 	id := StringToInt(c.Param("id"))
 	version := StringToInt(c.DefaultQuery("v", "-1"))
 
-	logrus.Debugf("Init segment requested: id=%d, version=%d", id, version)
+	log.Debugf(log, "Init segment requested: id=%d, version=%d", id, version)
 
 	var buf []byte
 	var err error
@@ -325,15 +327,15 @@ func GetInit(c *gin.Context) {
 		buf, err = hlsWr.GetInit(uint8(id))
 	}
 	if err != nil {
-		logrus.Errorf("Failed to get init segment: %v", err)
+		log.Errorf(log, "Failed to get init segment: %v", err)
 		c.Status(http.StatusNotFound)
 		return
 	}
 
-	logrus.Debugf("Serving init segment: size=%d bytes", len(buf))
+	log.Debugf(log, "Serving init segment: size=%d bytes", len(buf))
 	_, err = c.Writer.Write(buf)
 	if err != nil {
-		logrus.Errorf("Failed to write init segment: %v", err)
+		log.Errorf(log, "Failed to write init segment: %v", err)
 		c.Status(http.StatusInternalServerError)
 		return
 	}
@@ -344,19 +346,19 @@ func GetSegment(c *gin.Context) {
 	id := StringToInt(c.Param("id"))
 	segment := StringToInt(c.Param("segment"))
 
-	logrus.Debugf("Segment requested: id=%d, segment=%d", id, segment)
+	log.Debugf(log, "Segment requested: id=%d, segment=%d", id, segment)
 
 	buf, err := hlsWr.GetSegment(c, uint8(id), uint64(segment))
 	if err != nil {
-		logrus.Errorf("Failed to get segment: %v", err)
+		log.Errorf(log, "Failed to get segment: %v", err)
 		c.Status(http.StatusNotFound)
 		return
 	}
 
-	logrus.Debugf("Serving segment: id=%d, segment=%d, size=%d bytes", id, segment, len(buf))
+	log.Debugf(log, "Serving segment: id=%d, segment=%d, size=%d bytes", id, segment, len(buf))
 	_, err = c.Writer.Write(buf)
 	if err != nil {
-		logrus.Errorf("Failed to write segment: %v", err)
+		log.Errorf(log, "Failed to write segment: %v", err)
 		c.Status(http.StatusInternalServerError)
 		return
 	}
@@ -368,19 +370,19 @@ func GetFragment(c *gin.Context) {
 	segment := StringToInt(c.Param("segment"))
 	fragment := StringToInt(c.Param("fragment"))
 
-	logrus.Debugf("Fragment requested: id=%d, segment=%d, fragment=%d", id, segment, fragment)
+	log.Debugf(log, "Fragment requested: id=%d, segment=%d, fragment=%d", id, segment, fragment)
 
 	buf, err := hlsWr.GetFragment(c, uint8(id), uint64(segment), uint8(fragment))
 	if err != nil {
-		logrus.Errorf("Failed to get fragment: %v", err)
+		log.Errorf(log, "Failed to get fragment: %v", err)
 		c.Status(http.StatusNotFound)
 		return
 	}
 
-	logrus.Debugf("Serving fragment: id=%d, segment=%d, fragment=%d, size=%d bytes", id, segment, fragment, len(buf))
+	log.Debugf(log, "Serving fragment: id=%d, segment=%d, fragment=%d, size=%d bytes", id, segment, fragment, len(buf))
 	_, err = c.Writer.Write(buf)
 	if err != nil {
-		logrus.Errorf("Failed to write fragment: %v", err)
+		log.Errorf(log, "Failed to write fragment: %v", err)
 		c.Status(http.StatusInternalServerError)
 		return
 	}
@@ -428,7 +430,7 @@ func HandleSDP(c *gin.Context) {
 			Err: "",
 		})
 	case <-time.After(time.Second * 10):
-		logger.Errorf(nil, "Timeout adding peer")
+		log.Errorf(log, "Timeout adding peer")
 		c.JSON(http.StatusInternalServerError, SDPResponse{
 			SDP: "",
 			Err: "Timeout adding peer",
@@ -443,7 +445,7 @@ func GetCodecInfo(c *gin.Context) {
 
 // Static pages
 func GetIndexHTML(c *gin.Context) {
-	logrus.Debug("Index HTML page requested")
+	log.Debugf(log, "Index HTML page requested")
 	c.File("index.html")
 }
 

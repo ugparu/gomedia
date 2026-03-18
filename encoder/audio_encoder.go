@@ -7,6 +7,7 @@ import (
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/codec/pcm"
 	"github.com/ugparu/gomedia/utils/lifecycle"
+	"github.com/ugparu/gomedia/utils/logger"
 )
 
 type InnerAudioEncoder interface {
@@ -37,7 +38,7 @@ func NewAudioEncoder(chanSize int, newEncoderFn func() InnerAudioEncoder) gomedi
 		inpCodecPar:       nil,
 		codecPar:          nil,
 	}
-	e.AsyncManager = lifecycle.NewFailSafeAsyncManager(e)
+	e.AsyncManager = lifecycle.NewFailSafeAsyncManager(e, logger.Default)
 
 	return e
 }

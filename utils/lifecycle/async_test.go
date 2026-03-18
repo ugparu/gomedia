@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/ugparu/gomedia/utils/logger"
 )
 
 type Bar struct{}
@@ -38,7 +39,7 @@ func TestAsyncStart(t *testing.T) {
 	t.Parallel()
 
 	inst := &Bar{}
-	manager := NewAsyncManager[*Bar](inst)
+	manager := NewAsyncManager[*Bar](inst, logger.Default)
 	err := manager.Start(func(f *Bar) error { return nil })
 	require.NoError(t, err)
 }
@@ -47,7 +48,7 @@ func TestAsyncErrorStart(t *testing.T) {
 	t.Parallel()
 
 	inst := &Bar{}
-	manager := NewAsyncManager[*Bar](inst)
+	manager := NewAsyncManager[*Bar](inst, logger.Default)
 	err := manager.Start(func(f *Bar) error { return errors.New("") })
 	require.Error(t, err)
 	select {
@@ -61,7 +62,7 @@ func TestAsyncStartAfterStart(t *testing.T) {
 	t.Parallel()
 
 	inst := &Bar{}
-	manager := NewAsyncManager[*Bar](inst)
+	manager := NewAsyncManager[*Bar](inst, logger.Default)
 	err := manager.Start(func(f *Bar) error { return nil })
 	require.NoError(t, err)
 	err = manager.Start(func(f *Bar) error { return nil })
@@ -73,7 +74,7 @@ func TestAsyncClose(t *testing.T) {
 	t.Parallel()
 
 	inst := &Bar{}
-	manager := NewAsyncManager[*Bar](inst)
+	manager := NewAsyncManager[*Bar](inst, logger.Default)
 	err := manager.Start(func(f *Bar) error { return nil })
 	require.NoError(t, err)
 	manager.Close()
@@ -82,7 +83,7 @@ func TestAsyncClose(t *testing.T) {
 func TestAsyncCloseBeforeStart(t *testing.T) {
 	t.Parallel()
 	inst := &Bar{}
-	manager := NewAsyncManager[*Bar](inst)
+	manager := NewAsyncManager[*Bar](inst, logger.Default)
 	manager.Close()
 }
 
@@ -90,7 +91,7 @@ func TestAsyncStartAfterClose(t *testing.T) {
 	t.Parallel()
 
 	inst := &Bar{}
-	manager := NewAsyncManager[*Bar](inst)
+	manager := NewAsyncManager[*Bar](inst, logger.Default)
 	manager.Close()
 	err := manager.Start(func(f *Bar) error { return nil })
 	targetError := &StartedAfterCloseError{}
@@ -103,7 +104,7 @@ func TestAsyncStep(t *testing.T) {
 	inst := &ErrBar{
 		Bar: Bar{},
 	}
-	manager := NewAsyncManager[*ErrBar](inst)
+	manager := NewAsyncManager[*ErrBar](inst, logger.Default)
 	err := manager.Start(func(f *ErrBar) error { return nil })
 	require.NoError(t, err)
 	select {

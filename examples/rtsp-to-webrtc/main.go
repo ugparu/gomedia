@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -10,6 +9,7 @@ import (
 	pion "github.com/pion/webrtc/v4"
 	"github.com/sirupsen/logrus"
 	"github.com/ugparu/gomedia"
+	examplelogger "github.com/ugparu/gomedia/examples/logger"
 	"github.com/ugparu/gomedia/format/rtsp"
 	"github.com/ugparu/gomedia/reader"
 	"github.com/ugparu/gomedia/utils/logger"
@@ -40,19 +40,20 @@ var (
 	urlMutex    sync.Mutex
 	currentURLs []string
 	webrtcWrt   gomedia.WebRTCStreamer
+	log         logger.Logger
 )
 
 func main() {
-	logrus.SetLevel(logrus.InfoLevel)
+	log = examplelogger.New(logrus.InfoLevel)
 	// Initialize reader once at startup
-	rdr = reader.NewRTSP(100, rtsp.WithRingBuffer(1024*1024))
+	rdr = reader.NewRTSP(100, reader.WithLogger(examplelogger.New(logrus.InfoLevel)), reader.WithRTSPParams(rtsp.WithRingBuffer(1024*1024)))
 	rdr.Read()
 	defer rdr.Close()
 
 	if err := webrtc.Init(2000, 2100, []string{"10.0.112.138"}, []pion.ICEServer{
 		{},
 	}); err != nil {
-		log.Fatalf("Failed to initialize WebRTC: %v", err)
+		log.Errorf(log, "Failed to initialize WebRTC: %v", err)
 	}
 
 	webrtcWrt = webrtc.New(100, time.Second*12)
@@ -97,7 +98,7 @@ func main() {
 		// Remove URLs that are no longer needed
 		for _, url := range currentURLs {
 			if url != "" && !newURLsMap[url] {
-				logger.Infof(nil, "Removing URL: %s", url)
+				log.Infof(log, "Removing URL: %s", url)
 				rdr.RemoveURL() <- url
 				webrtcWrt.RemoveSource() <- url
 			}
@@ -116,7 +117,7 @@ func main() {
 			if url != "" && !currentURLsMap[url] {
 				webrtcWrt.AddSource() <- url
 				rdr.AddURL() <- url
-				logger.Infof(nil, "Added URL: %s", url)
+				log.Infof(log, "Added URL: %s", url)
 			}
 		}
 
@@ -178,7 +179,7 @@ func main() {
 		select {
 		case <-peer.Done:
 			if peer.Err != nil {
-				logger.Errorf(nil, "Error adding peer: %v", peer.Err)
+				log.Errorf(log, "Error adding peer: %v", peer.Err)
 				c.JSON(http.StatusInternalServerError, SDPResponse{
 					SDP: "",
 					Err: peer.Err.Error(),
@@ -192,7 +193,7 @@ func main() {
 		}
 	})
 
-	log.Println("Starting HTTP server on :8080")
+	log.Infof(log, "Starting HTTP server on :8080")
 	if err := r.Run(":8080"); err != nil {
 		return
 	}

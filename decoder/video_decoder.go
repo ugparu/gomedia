@@ -36,14 +36,17 @@ type videoDecoder struct {
 	running       bool                         // Flag indicating whether the decoder is running.
 	hasKey        bool
 	name          string
+	log           logger.Logger
 }
 
 type VideoDecoderParam func(*videoDecoder)
 
-func WithName(name string) VideoDecoderParam {
-	return func(dec *videoDecoder) {
-		dec.name = name
-	}
+func VideoWithName(name string) VideoDecoderParam {
+	return func(dec *videoDecoder) { dec.name = name }
+}
+
+func VideoWithLogger(l logger.Logger) VideoDecoderParam {
+	return func(dec *videoDecoder) { dec.log = l }
 }
 
 func NewVideo(chanSize int, fps int, newDecoderFn func() InnerVideoDecoder, params ...VideoDecoderParam) gomedia.VideoDecoder {
@@ -59,13 +62,13 @@ func NewVideo(chanSize int, fps int, newDecoderFn func() InnerVideoDecoder, para
 		frameDuration:     DurationFromFPS(fps),
 		running:           false,
 		hasKey:            false,
+		log:               logger.Default,
 	}
-	dec.AsyncManager = lifecycle.NewFailSafeAsyncManager(dec)
-	runtime.SetFinalizer(dec, func(dcd *videoDecoder) { dcd.Close() })
-
 	for _, param := range params {
 		param(dec)
 	}
+	dec.AsyncManager = lifecycle.NewFailSafeAsyncManager(dec, dec.log)
+	runtime.SetFinalizer(dec, func(dcd *videoDecoder) { dcd.Close() })
 	return dec
 }
 
@@ -73,14 +76,14 @@ func NewVideo(chanSize int, fps int, newDecoderFn func() InnerVideoDecoder, para
 // It sends the packet for decoding, processes the resulting frames,
 // and sends the decoded frames to the output channel.
 func (dec *videoDecoder) processPacket(inpPkt gomedia.VideoPacket, stopCh <-chan struct{}) (err error) {
-	logger.Tracef(dec, "Processing packet %v", inpPkt)
+	dec.log.Tracef(dec, "Processing packet %v", inpPkt)
 
 	if inpPkt.CodecParameters() != dec.codecPar {
 		if inpPkt.CodecParameters().Type().String() == "UNKNOWN" {
 			return errors.New("unknown codec type")
 		}
 
-		logger.Infof(dec, "Changing codec parameters from %v to %v", dec.codecPar, inpPkt.CodecParameters())
+		dec.log.Infof(dec, "Changing codec parameters from %v to %v", dec.codecPar, inpPkt.CodecParameters())
 
 		dec.codecPar = inpPkt.CodecParameters()
 		dec.stopDecoder()
@@ -95,14 +98,14 @@ func (dec *videoDecoder) processPacket(inpPkt gomedia.VideoPacket, stopCh <-chan
 	}
 
 	if !dec.hasKey && !inpPkt.IsKeyFrame() {
-		logger.Tracef(dec, "Skipping non-key frame %v", inpPkt)
+		dec.log.Tracef(dec, "Skipping non-key frame %v", inpPkt)
 		return
 	}
 	dec.hasKey = true
 
 	const delta = time.Millisecond * 10
 	if dec.frameDuration > 0 && time.Since(dec.lastFrameTime) < dec.frameDuration-delta {
-		logger.Tracef(dec, "Skipping frame due to fps limit %v", inpPkt)
+		dec.log.Tracef(dec, "Skipping frame due to fps limit %v", inpPkt)
 		return dec.InnerVideoDecoder.Feed(inpPkt)
 	}
 
@@ -120,7 +123,7 @@ func (dec *videoDecoder) processPacket(inpPkt gomedia.VideoPacket, stopCh <-chan
 	case <-stopCh:
 		return &lifecycle.BreakError{}
 	case dec.outFrmCh <- img:
-		logger.Tracef(dec, "Sent frame %v", inpPkt)
+		dec.log.Tracef(dec, "Sent frame %v", inpPkt)
 		return
 	}
 }
@@ -129,7 +132,7 @@ func (dec *videoDecoder) processPacket(inpPkt gomedia.VideoPacket, stopCh <-chan
 // It sends the packet for decoding, processes the resulting frames,
 // and sends the decoded frames to the output channel.
 func (dec *videoDecoder) startDecoder() (err error) {
-	logger.Debugf(dec, "Starting decoder with codec parameters %v", dec.codecPar)
+	dec.log.Debugf(dec, "Starting decoder with codec parameters %v", dec.codecPar)
 	if dec.codecPar == nil {
 		return errors.New("can not start with empty video codec parameters")
 	}
@@ -147,7 +150,7 @@ func (dec *videoDecoder) startDecoder() (err error) {
 
 // stopDecoder stops the inner decoder.
 func (dec *videoDecoder) stopDecoder() {
-	logger.Debugf(dec, "Stopping decoder")
+	dec.log.Debugf(dec, "Stopping decoder")
 	dec.running = false
 	if dec.InnerVideoDecoder == nil {
 		return
@@ -169,7 +172,7 @@ func (dec *videoDecoder) Decode() {
 func (dec *videoDecoder) Step(stopCh <-chan struct{}) (err error) {
 	select {
 	case <-stopCh:
-		logger.Debug(dec, "Close signal detected. Breaking decoding...")
+		dec.log.Debug(dec, "Close signal detected. Breaking decoding...")
 		return &lifecycle.BreakError{}
 	case fps := <-dec.fpsChan:
 		if fps == dec.targetFPS {
@@ -186,7 +189,7 @@ func (dec *videoDecoder) Step(stopCh <-chan struct{}) (err error) {
 				case <-stopCh:
 					return &lifecycle.BreakError{}
 				case drainPkt := <-dec.inpPktCh:
-				drainPkt.Release()
+					drainPkt.Release()
 				default:
 					return
 				}

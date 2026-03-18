@@ -9,7 +9,6 @@ import (
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/codec/h264"
 	"github.com/ugparu/gomedia/utils/buffer"
-	"github.com/ugparu/gomedia/utils/logger"
 	"github.com/ugparu/gomedia/utils/nal"
 	"github.com/ugparu/gomedia/utils/sdp"
 )
@@ -67,7 +66,7 @@ func (d *h264Demuxer) processNALUnit(nalU []byte) error {
 	case naluType == nalPPS:
 		return d.CodecUpdatePPS(nalU)
 	case naluType <= nalReserved:
-		logger.Tracef(d, "Unimplemented non-VCL nal type %d", naluType)
+		d.baseDemuxer.log.Tracef(d, "Unimplemented non-VCL nal type %d", naluType)
 	case naluType == nalSTAPA:
 		return d.processSTAPA(nalU)
 	case naluType == nalLFUA:
@@ -75,7 +74,7 @@ func (d *h264Demuxer) processNALUnit(nalU []byte) error {
 	case naluType == nalUnitDel:
 		// No operation needed
 	default:
-		logger.Debugf(d, "Currently unsupported NAL type %v", naluType)
+		d.baseDemuxer.log.Debugf(d, "Currently unsupported NAL type %v", naluType)
 	}
 	return nil
 }

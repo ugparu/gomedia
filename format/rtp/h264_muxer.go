@@ -6,6 +6,7 @@ import (
 
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/codec/h264"
+	"github.com/ugparu/gomedia/utils/logger"
 	"github.com/ugparu/gomedia/utils/nal"
 	"github.com/ugparu/gomedia/utils/sdp"
 )
@@ -19,8 +20,8 @@ type h264Muxer struct {
 }
 
 // NewH264Muxer constructs an RTP muxer for H264 video.
-func NewH264Muxer(w io.Writer, media sdp.Media, channel uint8, codec *h264.CodecParameters, mtu int) *h264Muxer {
-	base := newBaseMuxer(w, media, channel, 0)
+func NewH264Muxer(w io.Writer, media sdp.Media, channel uint8, codec *h264.CodecParameters, mtu int, log logger.Logger) *h264Muxer {
+	base := newBaseMuxer(w, media, channel, 0, log)
 	m := &h264Muxer{
 		hxxxMuxer: newHxxxMuxer(base, mtu),
 		codec:     codec,

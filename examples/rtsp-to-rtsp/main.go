@@ -1,14 +1,18 @@
 package main
 
 import (
-	"log"
 	"os"
 
 	"github.com/sirupsen/logrus"
 	"github.com/ugparu/gomedia"
+	examplelogger "github.com/ugparu/gomedia/examples/logger"
+	"github.com/ugparu/gomedia/format/rtsp"
 	"github.com/ugparu/gomedia/reader"
+	"github.com/ugparu/gomedia/utils/logger"
 	writerRtsp "github.com/ugparu/gomedia/writer/rtsp"
 )
+
+var log logger.Logger
 
 // This example demonstrates how to:
 //   - read packets from an RTSP source using the high-level gomedia.Reader
@@ -24,17 +28,17 @@ import (
 //	SRC_RTSP_URL and DST_RTSP_URL env vars or
 //	    rtsp://localhost:8554/src and rtsp://localhost:8554/dst by default.
 func main() {
-	logrus.SetLevel(logrus.DebugLevel)
+	log = examplelogger.New(logrus.InfoLevel)
 
 	srcURL, dstURL := resolveArgs()
 
-	log.Printf("Using source RTSP URL: %s", srcURL)
-	log.Printf("Publishing to destination RTSP URL: %s", dstURL)
+	log.Infof(log, "Using source RTSP URL: %s", srcURL)
+	log.Infof(log, "Publishing to destination RTSP URL: %s", dstURL)
 
 	// 1. Create RTSP reader and writer.
 	const chanSize = 1024
 
-	rdr := reader.NewRTSP(chanSize)
+	rdr := reader.NewRTSP(chanSize, reader.WithLogger(examplelogger.New(logrus.InfoLevel)), reader.WithRTSPParams(rtsp.WithLogger(examplelogger.New(logrus.InfoLevel))))
 	wr := writerRtsp.New(srcURL, dstURL, chanSize)
 
 	// Start reader and writer.
@@ -48,7 +52,7 @@ func main() {
 	rdr.AddURL() <- srcURL
 	wr.AddSource() <- srcURL
 
-	log.Println("RTSP relay established, starting to forward packets via reader/writer...")
+	log.Infof(log, "RTSP relay established, starting to forward packets via reader/writer...")
 
 	// 2. Forward all packets from reader to writer until the writer is done.
 	packetsCh := rdr.Packets()
@@ -68,8 +72,8 @@ func main() {
 			// non-video packets if they are not supported.
 			writerPacketsCh <- videoPkt
 		case <-wr.Done():
-			log.Println("RTSP writer signaled completion, stopping relay")
-			log.Println("rtsp-to-rtsp example finished")
+			log.Infof(log, "RTSP writer signaled completion, stopping relay")
+			log.Infof(log, "rtsp-to-rtsp example finished")
 			return
 		}
 	}
@@ -94,11 +98,11 @@ func resolveArgs() (srcURL, dstURL string) {
 
 	if srcURL == "" {
 		srcURL = "rtsp://localhost:8554/src"
-		log.Printf("SRC_RTSP_URL not set and no source RTSP URL argument provided, using default %q", srcURL)
+		log.Infof(log, "SRC_RTSP_URL not set and no source RTSP URL argument provided, using default %q", srcURL)
 	}
 	if dstURL == "" {
 		dstURL = "rtsp://localhost:8554/dst"
-		log.Printf("DST_RTSP_URL not set and no destination RTSP URL argument provided, using default %q", dstURL)
+		log.Infof(log, "DST_RTSP_URL not set and no destination RTSP URL argument provided, using default %q", dstURL)
 	}
 
 	return srcURL, dstURL

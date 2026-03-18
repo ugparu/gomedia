@@ -10,6 +10,14 @@ import (
 	"github.com/ugparu/gomedia/utils/logger"
 )
 
+// Option is a functional option for configuring an rtspWriter.
+type Option func(*rtspWriter)
+
+// WithLogger sets the logger for the RTSP writer.
+func WithLogger(l logger.Logger) Option {
+	return func(w *rtspWriter) { w.log = l }
+}
+
 // rtspWriter is a Writer implementation that publishes a single video stream
 // to a remote RTSP server using format/rtsp.Muxer.
 //
@@ -18,6 +26,7 @@ import (
 // interface as other writers (HLS, WebRTC, Segmenter).
 type rtspWriter struct {
 	lifecycle.AsyncManager[*rtspWriter]
+	log logger.Logger
 
 	srcURL   string
 	dstURL   string
@@ -33,8 +42,9 @@ type rtspWriter struct {
 
 // New creates a new RTSP writer that will publish packets from srcURL to dstURL.
 // chanSize controls the size of internal channels.
-func New(srcURL, dstURL string, chanSize int) gomedia.Writer {
+func New(srcURL, dstURL string, chanSize int, opts ...Option) gomedia.Writer {
 	w := &rtspWriter{
+		log:      logger.Default,
 		srcURL:   srcURL,
 		dstURL:   dstURL,
 		muxer:    nil,
@@ -47,7 +57,11 @@ func New(srcURL, dstURL string, chanSize int) gomedia.Writer {
 		started: false,
 	}
 
-	w.AsyncManager = lifecycle.NewFailSafeAsyncManager(w)
+	for _, o := range opts {
+		o(w)
+	}
+
+	w.AsyncManager = lifecycle.NewFailSafeAsyncManager(w, w.log)
 	return w
 }
 
@@ -68,13 +82,13 @@ func (w *rtspWriter) Step(stopCh <-chan struct{}) (err error) {
 	case url := <-w.addSrcCh:
 		// Configure or reconfigure the source URL.
 		if w.srcURL != "" && w.srcURL != url {
-			logger.Warningf(w, "RTSP writer already has source %s, replacing with %s", w.srcURL, url)
+			w.log.Warningf(w, "RTSP writer already has source %s, replacing with %s", w.srcURL, url)
 		}
 		w.srcURL = url
 		w.resetMuxer()
 	case url := <-w.rmSrcCh:
 		if url == w.srcURL {
-			logger.Infof(w, "Removing RTSP source %s", url)
+			w.log.Infof(w, "Removing RTSP source %s", url)
 			w.resetMuxer()
 		}
 
@@ -136,9 +150,9 @@ func (w *rtspWriter) initMuxerFromVideoPacket(vp gomedia.VideoPacket) error {
 		VideoCodecParameters: vp.CodecParameters(),
 	}
 
-	logger.Infof(w, "Initializing RTSP muxer for dst=%s src=%s", w.dstURL, w.srcURL)
+	w.log.Infof(w, "Initializing RTSP muxer for dst=%s src=%s", w.dstURL, w.srcURL)
 
-	mx := formatrtsp.NewMuxer(w.dstURL)
+	mx := formatrtsp.NewMuxer(w.dstURL, w.log)
 	if err := mx.Mux(w.codecPar); err != nil {
 		return err
 	}

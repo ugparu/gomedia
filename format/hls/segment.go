@@ -41,6 +41,7 @@ type segment struct {
 	released           bool                        // True after packets have been released.
 	discontinuity      bool                        // True if this segment starts after a codec change.
 	initVersion        int                         // Init segment version this segment belongs to.
+	log                logger.Logger
 }
 
 // newSegment creates a new segment with the specified parameters.
@@ -49,13 +50,14 @@ func newSegment(
 	targetFragmentDuration,
 	targetDuration time.Duration,
 	codecPars gomedia.CodecParametersPair,
+	log logger.Logger,
 ) *segment {
 	seg := &segment{
 		id:                 id,
 		codecPars:          codecPars,
 		targetDuration:     targetDuration,
 		targetFragDuration: targetFragmentDuration,
-		fragments:          []*fragment{newFragment(0, id, targetFragmentDuration, codecPars)},
+		fragments:          []*fragment{newFragment(0, id, targetFragmentDuration, codecPars, log)},
 		finished:           make(chan struct{}),
 		duration:           0,
 		time:               time.Now(),
@@ -63,6 +65,7 @@ func newSegment(
 		curFragment:        nil,
 		manifestEntry:      "",
 		cachedMp4:          nil,
+		log:                log,
 	}
 	seg.manifestEntry = seg.fragments[0].manifestEntry
 	seg.curFragment = seg.fragments[0]
@@ -86,7 +89,7 @@ func (element *segment) writePacket(packet gomedia.Packet) (err error) {
 			return element.close()
 		} else {
 			newFragID := curFrag.id + 1
-			newFragment := newFragment(newFragID, element.id, element.targetFragDuration, element.codecPars)
+			newFragment := newFragment(newFragID, element.id, element.targetFragDuration, element.codecPars, element.log)
 			element.fragments = append(element.fragments, newFragment)
 			element.curFragment = element.fragments[newFragID]
 
@@ -107,7 +110,7 @@ func (element *segment) writePacket(packet gomedia.Packet) (err error) {
 // Packets are NOT released here — they stay alive for lazy generation and are
 // released in release() when the segment is evicted from the playlist.
 func (element *segment) close() (err error) {
-	logger.Tracef(element, "Finishing segment")
+	element.log.Tracef(element, "Finishing segment")
 	close(element.finished)
 	return nil
 }
@@ -144,15 +147,15 @@ func (element *segment) getMp4Buffer() buffer.PooledBuffer {
 		return nil
 	}
 
-	mux := fmp4.NewMuxer()
+	mux := fmp4.NewMuxer(element.log)
 	if muxErr := mux.Mux(element.codecPars); muxErr != nil {
-		logger.Errorf(element, "segment cache: mux error: %v", muxErr)
+		element.log.Errorf(element,"segment cache: mux error: %v", muxErr)
 		return nil
 	}
 	for _, frag := range element.fragments {
 		for _, pkt := range frag.packets {
 			if wErr := mux.WritePacket(pkt); wErr != nil {
-				logger.Errorf(element, "segment cache: WritePacket error: %v", wErr)
+				element.log.Errorf(element,"segment cache: WritePacket error: %v", wErr)
 			}
 		}
 	}

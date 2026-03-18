@@ -28,6 +28,7 @@ type Muxer struct {
 	client     *client
 	medias     []sdp.Media
 	videoMuxer rtpVideoMuxer
+	log        logger.Logger
 }
 
 // rtpVideoMuxer is the subset of methods required from an RTP video muxer.
@@ -36,14 +37,16 @@ type rtpVideoMuxer interface {
 }
 
 // NewMuxer creates a new RTSP muxer for the given URL.
-func NewMuxer(url string) gomedia.Muxer {
-	return &Muxer{url: url, client: newClient(), medias: nil}
+func NewMuxer(url string, log logger.Logger) gomedia.Muxer {
+	c := newClient()
+	c.log = log
+	return &Muxer{url: url, client: c, medias: nil, log: log}
 }
 
 // Mux initializes the muxer with stream parameters and performs the publish workflow:
 // OPTIONS (via establishConnection) -> ANNOUNCE -> SETUP (per track) -> RECORD.
 func (m *Muxer) Mux(streams gomedia.CodecParametersPair) (err error) {
-	logger.Debugf(m, "Muxing streams: %+v", streams)
+	m.log.Debugf(m,"Muxing streams: %+v", streams)
 
 	if err = m.client.establishConnection(m.url); err != nil {
 		return err
@@ -53,21 +56,21 @@ func (m *Muxer) Mux(streams gomedia.CodecParametersPair) (err error) {
 		return errors.New("rtsp: server does not support ANNOUNCE and RECORD (publishing)")
 	}
 
-	logger.Debugf(m, "Converting codec parameters to SDP medias")
+	m.log.Debugf(m,"Converting codec parameters to SDP medias")
 	m.medias, err = codecParamsToSDPMedias(streams)
 	if err != nil {
 		return err
 	}
 
-	logger.Debugf(m, "SDP medias: %+v", m.medias)
+	m.log.Debugf(m,"SDP medias: %+v", m.medias)
 
 	if len(m.medias) == 0 {
 		return errors.New("rtsp: no video or audio streams to publish")
 	}
 
-	logger.Debugf(m, "Creating SDP session")
+	m.log.Debugf(m,"Creating SDP session")
 	sess := sdp.Session{URI: m.client.control}
-	logger.Debugf(m, "Announcing streams")
+	m.log.Debugf(m,"Announcing streams")
 	if err = m.client.announce(sess, m.medias); err != nil {
 		return err
 	}
@@ -84,20 +87,20 @@ func (m *Muxer) Mux(streams gomedia.CodecParametersPair) (err error) {
 		if media.AVType == video && streams.VideoCodecParameters != nil {
 			switch v := streams.VideoCodecParameters.(type) {
 			case *h264.CodecParameters:
-				logger.Debugf(m, "Creating H264 RTP muxer on channel %d", ch)
-				m.videoMuxer = rtp.NewH264Muxer(m.client.conn, media, uint8(ch), v, 0) //nolint:gosec
+				m.log.Debugf(m,"Creating H264 RTP muxer on channel %d", ch)
+				m.videoMuxer = rtp.NewH264Muxer(m.client.conn, media, uint8(ch), v, 0, m.log) //nolint:gosec
 			case *h265.CodecParameters:
-				logger.Debugf(m, "Creating H265 RTP muxer on channel %d", ch)
-				m.videoMuxer = rtp.NewH265Muxer(m.client.conn, media, uint8(ch), v, 0) //nolint:gosec
+				m.log.Debugf(m,"Creating H265 RTP muxer on channel %d", ch)
+				m.videoMuxer = rtp.NewH265Muxer(m.client.conn, media, uint8(ch), v, 0, m.log) //nolint:gosec
 			default:
-				logger.Debugf(m, "RTP muxer for codec %T not implemented yet", streams.VideoCodecParameters)
+				m.log.Debugf(m,"RTP muxer for codec %T not implemented yet", streams.VideoCodecParameters)
 			}
 		}
 
 		chTMP += 2
 	}
 
-	logger.Debugf(m, "Recording streams")
+	m.log.Debugf(m,"Recording streams")
 	if err = m.client.record(); err != nil {
 		return err
 	}

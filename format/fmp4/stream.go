@@ -21,6 +21,7 @@ const (
 
 type Stream struct {
 	gomedia.CodecParameters
+	log             logger.Logger
 	packets         []gomedia.Packet
 	bufSize         int
 	firstPacketTime time.Duration
@@ -41,7 +42,7 @@ func (s *Stream) safeInt16Conversion(val uint, name string) int16 {
 		return int16(val)
 	}
 	// Default to max int16 value if overflow would occur
-	logger.Errorf(s, "%s value %d is too large for int16, capping at %d", name, val, maxInt16Value)
+	s.log.Errorf(s,"%s value %d is too large for int16, capping at %d", name, val, maxInt16Value)
 	return maxInt16Value
 }
 
@@ -53,7 +54,7 @@ func (s *Stream) safeInt32Conversion(val int64, name string) int32 {
 		return int32(val)
 	}
 	// Default to max int32 value if overflow would occur
-	logger.Errorf(s, "%s value %d is too large for int32, capping at %d", name, val, maxSafeInt32)
+	s.log.Errorf(s,"%s value %d is too large for int32, capping at %d", name, val, maxSafeInt32)
 	return int32(maxSafeInt32)
 }
 
@@ -143,7 +144,7 @@ func (s *Stream) fillTrackAtom() {
 			channelsInt16 = int16(channelCount)
 		} else {
 			channelsInt16 = maxInt16Value
-			logger.Errorf(s, "channel count %d is too large for int16, capping at %d", channelCount, channelsInt16)
+			s.log.Errorf(s,"channel count %d is too large for int16, capping at %d", channelCount, channelsInt16)
 		}
 
 		var sampleSizeInt16 int16
@@ -152,7 +153,7 @@ func (s *Stream) fillTrackAtom() {
 			sampleSizeInt16 = int16(bytesPerSample)
 		} else {
 			sampleSizeInt16 = maxInt16Value
-			logger.Errorf(s, "sample size %d is too large for int16, capping at %d", bytesPerSample, sampleSizeInt16)
+			s.log.Errorf(s,"sample size %d is too large for int16, capping at %d", bytesPerSample, sampleSizeInt16)
 		}
 
 		s.sample.SampleDesc.MP4ADesc = &mp4io.MP4ADesc{
@@ -194,7 +195,7 @@ func (s *Stream) fillTrackAtom() {
 		}
 		s.trackAtom.Media.Info.Sound = new(mp4io.SoundMediaInfo)
 	default:
-		logger.Errorf(s, "unsupported codec type %T", codecPar)
+		s.log.Errorf(s,"unsupported codec type %T", codecPar)
 	}
 }
 

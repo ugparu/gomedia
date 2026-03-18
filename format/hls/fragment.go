@@ -22,10 +22,11 @@ type fragment struct {
 	packets        []gomedia.Packet
 	codecPars      gomedia.CodecParametersPair // Codec parameters for the fragment.
 	cachedMp4      []byte                      // Lazily generated MP4 data; populated on first HTTP request.
+	log            logger.Logger
 }
 
 // newFragment creates a new fragment with the specified parameters.
-func newFragment(id uint8, segID uint64, targetDuration time.Duration, codecPars gomedia.CodecParametersPair) *fragment {
+func newFragment(id uint8, segID uint64, targetDuration time.Duration, codecPars gomedia.CodecParametersPair, log logger.Logger) *fragment {
 	frag := &fragment{
 		id:             id,
 		segID:          segID,
@@ -37,6 +38,7 @@ func newFragment(id uint8, segID uint64, targetDuration time.Duration, codecPars
 		packets:        make([]gomedia.Packet, 0),
 		codecPars:      codecPars,
 		cachedMp4:      nil,
+		log:            log,
 	}
 	// Initialize the manifest entry with a preload hint.
 	frag.manifestEntry = fmt.Sprintf("#EXT-X-PRELOAD-HINT:TYPE=PART,URI=\"fragment/%d/%d/cubic.m4s\"\n", segID, id)
@@ -47,7 +49,7 @@ func newFragment(id uint8, segID uint64, targetDuration time.Duration, codecPars
 // Clone(false) retains the ring-buffer slot so the backing memory stays valid
 // until segment.release() is called when the segment is evicted.
 func (fr *fragment) writePacket(packet gomedia.Packet) error {
-	logger.Tracef(fr, "Writing packet %v", packet)
+	fr.log.Tracef(fr, "Writing packet %v", packet)
 
 	fr.packets = append(fr.packets, packet.Clone(false))
 
@@ -71,7 +73,7 @@ func (fr *fragment) writePacket(packet gomedia.Packet) error {
 // MP4 data is NOT generated here — it is produced lazily on first HTTP request
 // via generateMp4(), called under the owning segment's mutex.
 func (fr *fragment) close() error {
-	logger.Tracef(fr, "Finishing fragment")
+	fr.log.Tracef(fr, "Finishing fragment")
 
 	// Update the manifest entry based on whether the fragment is independent.
 	if fr.independent {
@@ -100,14 +102,14 @@ func (fr *fragment) generateMp4() {
 	if fr.cachedMp4 != nil || len(fr.packets) == 0 {
 		return
 	}
-	mux := fmp4.NewMuxer()
+	mux := fmp4.NewMuxer(fr.log)
 	if err := mux.Mux(fr.codecPars); err != nil {
-		logger.Errorf(fr, "fragment cache: mux error: %v", err)
+		fr.log.Errorf(fr,"fragment cache: mux error: %v", err)
 		return
 	}
 	for _, pkt := range fr.packets {
 		if err := mux.WritePacket(pkt); err != nil {
-			logger.Errorf(fr, "fragment cache: WritePacket error: %v", err)
+			fr.log.Errorf(fr,"fragment cache: WritePacket error: %v", err)
 		}
 	}
 	if buf := mux.GetMP4Fragment(int(fr.id)); buf != nil {

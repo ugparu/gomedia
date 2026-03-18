@@ -10,13 +10,15 @@ import (
 
 type asyncLifecycleManager[T AsyncInstance] struct {
 	instance             T
+	log                  logger.Logger
 	stopChan, doneChan   chan struct{}
 	startOnce, closeOnce *sync.Once
 }
 
-func NewAsyncManager[T AsyncInstance](instance T) AsyncManager[T] {
+func NewAsyncManager[T AsyncInstance](instance T, log logger.Logger) AsyncManager[T] {
 	return &asyncLifecycleManager[T]{
 		instance:  instance,
+		log:       log,
 		stopChan:  make(chan struct{}),
 		doneChan:  make(chan struct{}),
 		startOnce: &sync.Once{},
@@ -32,7 +34,7 @@ func (ssc *asyncLifecycleManager[T]) Start(startFunc func(T) error) (err error) 
 		err = &StartedAlreadyError{}
 	}
 	ssc.startOnce.Do(func() {
-		logger.Debugf(ssc.instance, "Starting async")
+		ssc.log.Debugf(ssc.instance, "Starting async")
 		if err = startFunc(ssc.instance); err != nil {
 			close(ssc.doneChan)
 			return
@@ -43,7 +45,7 @@ func (ssc *asyncLifecycleManager[T]) Start(startFunc func(T) error) (err error) 
 }
 
 func (ssc *asyncLifecycleManager[T]) process() {
-	logger.Debug(ssc.instance, "Entering main loop")
+	ssc.log.Debug(ssc.instance, "Entering main loop")
 
 	defer close(ssc.doneChan)
 	running := true
@@ -51,14 +53,14 @@ func (ssc *asyncLifecycleManager[T]) process() {
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
-					logger.Errorf(ssc.instance, "Panic detected! Recovering from: %v", r)
-					logger.Errorf(ssc.instance, "%s", debug.Stack())
+					ssc.log.Errorf(ssc.instance, "Panic detected! Recovering from: %v", r)
+					ssc.log.Errorf(ssc.instance, "%s", debug.Stack())
 					running = false
 				}
 			}()
 			if err := ssc.instance.Step(ssc.stopChan); err != nil {
 				if ok := errors.As(err, &errBreak); !ok {
-					logger.Warningf(ssc.instance, "Detected error: %s", err.Error())
+					ssc.log.Warningf(ssc.instance, "Detected error: %s", err.Error())
 				}
 				running = false
 			}

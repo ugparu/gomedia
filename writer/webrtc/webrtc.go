@@ -17,8 +17,17 @@ import (
 	"github.com/ugparu/gomedia/utils/logger"
 )
 
+// Option is a functional option for configuring a webRTCWriter.
+type Option func(*webRTCWriter)
+
+// WithLogger sets the logger for the WebRTC writer.
+func WithLogger(l logger.Logger) Option {
+	return func(w *webRTCWriter) { w.log = l }
+}
+
 type webRTCWriter struct {
 	lifecycle.AsyncManager[*webRTCWriter]
+	log              logger.Logger
 	streams          *sortedStreams
 	sources          []string
 	peersChan        chan *gomedia.WebRTCPeer
@@ -33,10 +42,12 @@ type webRTCWriter struct {
 
 // New creates a new Streamer with the given channel size.
 // It initializes an innerWriter and embeds it into an outerWebRTC, providing synchronization and lifecycle management.
-func New(chanSize int, targetDuration time.Duration) gomedia.WebRTCStreamer {
+func New(chanSize int, targetDuration time.Duration, opts ...Option) gomedia.WebRTCStreamer {
 	wr := &webRTCWriter{
 		AsyncManager: nil,
+		log:          logger.Default,
 		streams: &sortedStreams{
+			log:            logger.Default,
 			sortedURLs:     []string{},
 			streams:        map[string]*stream{},
 			pendingPeers:   map[*peerTrack]bool{},
@@ -52,7 +63,11 @@ func New(chanSize int, targetDuration time.Duration) gomedia.WebRTCStreamer {
 		addSrcCh:         make(chan string, chanSize),
 		name:             "WEBRTC_WRITER",
 	}
-	wr.AsyncManager = lifecycle.NewFailSafeAsyncManager(wr)
+	for _, o := range opts {
+		o(wr)
+	}
+	wr.streams.log = wr.log
+	wr.AsyncManager = lifecycle.NewFailSafeAsyncManager(wr, wr.log)
 	return wr
 }
 
@@ -103,7 +118,7 @@ func (element *webRTCWriter) Step(stopCh <-chan struct{}) (err error) {
 		}
 	case rmURL := <-element.rmSrcCh:
 		element.removeSource(rmURL)
-		logger.Infof(element, "Sending setAvailableStreams after removing source %s", rmURL)
+		element.log.Infof(element, "Sending setAvailableStreams after removing source %s", rmURL)
 		element.sendAvailableStreams()
 	case addURL := <-element.addSrcCh:
 		element.addSource(addURL)
@@ -142,12 +157,12 @@ func (element *webRTCWriter) hasSource(addr string) bool {
 // The stream will be created when codec parameters are received.
 func (element *webRTCWriter) addSource(addr string) {
 	if element.hasSource(addr) {
-		logger.Infof(element, "Source %s already exists, skipping", addr)
+		element.log.Infof(element, "Source %s already exists, skipping", addr)
 		return
 	}
 
 	element.sources = append(element.sources, addr)
-	logger.Infof(element, "Added new source %s", addr)
+	element.log.Infof(element, "Added new source %s", addr)
 
 	parsedURL, err := url.Parse(addr)
 	if err == nil {
@@ -240,13 +255,13 @@ func (element *webRTCWriter) sendAvailableStreamsToPeer(peer *peerTrack) {
 
 	bytes, err := element.buildAvailableStreamsMessage()
 	if err != nil {
-		logger.Errorf(element, "Failed to marshal setAvailableStreams: %v", err)
+		element.log.Errorf(element, "Failed to marshal setAvailableStreams: %v", err)
 		return
 	}
 
-	logger.Infof(element, "Sending message to new peer %s", bytes)
+	element.log.Infof(element, "Sending message to new peer %s", bytes)
 	if err = peer.DataChannel.Send(bytes); err != nil {
-		logger.Errorf(element, "Failed to send setAvailableStreams to new peer: %v", err)
+		element.log.Errorf(element, "Failed to send setAvailableStreams to new peer: %v", err)
 	}
 }
 
@@ -255,16 +270,16 @@ func (element *webRTCWriter) sendAvailableStreamsToPeer(peer *peerTrack) {
 func (element *webRTCWriter) sendAvailableStreams() {
 	bytes, err := element.buildAvailableStreamsMessage()
 	if err != nil {
-		logger.Errorf(element, "Failed to marshal setAvailableStreams: %v", err)
+		element.log.Errorf(element, "Failed to marshal setAvailableStreams: %v", err)
 		return
 	}
 
 	for _, stream := range element.streams.streams {
 		for peer := range stream.tracks {
-			logger.Infof(element, "Sending message %s", bytes)
+			element.log.Infof(element, "Sending message %s", bytes)
 			if peer.DataChannel != nil {
 				if err = peer.DataChannel.Send(bytes); err != nil {
-					logger.Errorf(element, "Failed to send setAvailableStreams: %v", err)
+					element.log.Errorf(element, "Failed to send setAvailableStreams: %v", err)
 				}
 			}
 		}
@@ -272,10 +287,10 @@ func (element *webRTCWriter) sendAvailableStreams() {
 
 	// Also notify pending peers if any
 	for peer := range element.streams.pendingPeers {
-		logger.Infof(element, "Sending message to pending peer %s", bytes)
+		element.log.Infof(element, "Sending message to pending peer %s", bytes)
 		if peer.DataChannel != nil {
 			if err = peer.DataChannel.Send(bytes); err != nil {
-				logger.Errorf(element, "Failed to send setAvailableStreams to pending peer: %v", err)
+				element.log.Errorf(element, "Failed to send setAvailableStreams to pending peer: %v", err)
 			}
 		}
 	}
@@ -358,6 +373,7 @@ func (element *webRTCWriter) addConnection(inpPeer *gomedia.WebRTCPeer, targetUR
 
 	pt := new(peerTrack)
 	pt.PeerConnection = peer
+	pt.log = element.log
 	pt.targetURL = targetURL
 	pt.delay = max(time.Second/2, time.Second*time.Duration(inpPeer.Delay))
 	pt.vflush = make(chan struct{})
@@ -369,7 +385,7 @@ func (element *webRTCWriter) addConnection(inpPeer *gomedia.WebRTCPeer, targetUR
 
 	var once sync.Once
 	peer.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
-		logger.Infof(element, "Connection state has changed to %s", connectionState.String())
+		element.log.Infof(element, "Connection state has changed to %s", connectionState.String())
 
 		if connectionState == webrtc.ICEConnectionStateDisconnected ||
 			connectionState == webrtc.ICEConnectionStateClosed || connectionState == webrtc.ICEConnectionStateFailed {
@@ -382,13 +398,13 @@ func (element *webRTCWriter) addConnection(inpPeer *gomedia.WebRTCPeer, targetUR
 	peer.OnDataChannel(func(d *webrtc.DataChannel) {
 		d.OnOpen(func() {
 			pt.DataChannel = d
-			logger.Infof(element, "Data channel '%s'-'%d' opened", d.Label(), d.ID())
+			element.log.Infof(element, "Data channel '%s'-'%d' opened", d.Label(), d.ID())
 
 			element.connectPeersChan <- pt
 		})
 
 		d.OnMessage(func(msg webrtc.DataChannelMessage) {
-			logger.Infof(element, "Message from data channel '%s': '%s'", d.Label(), string(msg.Data))
+			element.log.Infof(element, "Message from data channel '%s': '%s'", d.Label(), string(msg.Data))
 
 			req := &dataChanReq{
 				Token:   "",
@@ -397,7 +413,7 @@ func (element *webRTCWriter) addConnection(inpPeer *gomedia.WebRTCPeer, targetUR
 			}
 
 			if err = json.Unmarshal(msg.Data, req); err != nil {
-				logger.Errorf(element, "Can not process data channel msg: %v", err)
+				element.log.Errorf(element, "Can not process data channel msg: %v", err)
 			}
 
 			newPeerURL := &peerURL{
@@ -419,13 +435,13 @@ func (element *webRTCWriter) addConnection(inpPeer *gomedia.WebRTCPeer, targetUR
 			var respBytes []byte
 			respBytes, err = json.Marshal(respMsg)
 			if err != nil {
-				logger.Errorf(element, "Can not send response to data channel: %v", err)
+				element.log.Errorf(element, "Can not send response to data channel: %v", err)
 				return
 			}
 
 			if newPeerURL.DataChannel != nil {
 				if err = newPeerURL.DataChannel.Send(respBytes); err != nil {
-					logger.Errorf(element, "Can not send response to data channel: %v", err)
+					element.log.Errorf(element, "Can not send response to data channel: %v", err)
 					return
 				}
 			}
@@ -520,7 +536,7 @@ func (element *webRTCWriter) removePeer(peer *peerTrack) (err error) {
 	}
 
 	for _, peers := range element.streams.streams {
-		logger.Debug(element, "Removing peer track from stream")
+		element.log.Debug(element, "Removing peer track from stream")
 		delete(peers.tracks, peer)
 		delete(peers.toAdd, peer)
 	}
@@ -529,18 +545,18 @@ func (element *webRTCWriter) removePeer(peer *peerTrack) (err error) {
 	delete(element.streams.pendingPeers, peer)
 
 	senders := peer.PeerConnection.GetSenders()
-	logger.Debug(element, "Removing peer track from senders")
+	element.log.Debug(element, "Removing peer track from senders")
 	for _, stream := range senders {
 		_ = peer.RemoveTrack(stream)
 	}
 	if peer.DataChannel != nil {
-		logger.Debug(element, "Closing data channel")
+		element.log.Debug(element, "Closing data channel")
 		_ = peer.DataChannel.Close()
 	}
-	logger.Debug(element, "Closing peer connection")
+	element.log.Debug(element, "Closing peer connection")
 	_ = peer.PeerConnection.Close()
 
-	logger.Debug(element, "Closing done channel")
+	element.log.Debug(element, "Closing done channel")
 	close(peer.done)
 
 	// Drain remaining packets from channels to avoid leaking cloned packets
@@ -568,13 +584,13 @@ func (element *webRTCWriter) Close_() { //nolint: revive
 	for _, peers := range element.streams.streams {
 		for peer := range peers.tracks {
 			if err := element.removePeer(peer); err != nil {
-				logger.Errorf(element, "%v", err)
+				element.log.Errorf(element, "%v", err)
 			}
 		}
 	}
 	for peer := range element.streams.pendingPeers {
 		if err := element.removePeer(peer); err != nil {
-			logger.Errorf(element, "%v", err)
+			element.log.Errorf(element, "%v", err)
 		}
 	}
 	// Close stream buffers to release remaining packets

@@ -24,12 +24,14 @@ import (
 type ffmpegRKMPPDecoder struct {
 	dcd         *C.NativeRkmppDecoder
 	headersSent bool
+	log         logger.Logger
 }
 
 func NewFFmpegRKMPPDecoder() decoder.InnerVideoDecoder {
 	return &ffmpegRKMPPDecoder{
 		dcd:         new(C.NativeRkmppDecoder),
 		headersSent: false,
+		log:         logger.Default,
 	}
 }
 
@@ -50,7 +52,7 @@ func (dcd *ffmpegRKMPPDecoder) Init(codecPar gomedia.VideoCodecParameters) (err 
 		return video.NewFFmpegError("unsupported codec parameters type", -1)
 	}
 
-	logger.Debugf(dcd, "Initializing native rkmpp decoder with codec ID %d, width %d, height %d", codecID, width, height)
+	dcd.log.Debugf(dcd, "Initializing native rkmpp decoder with codec ID %d, width %d, height %d", codecID, width, height)
 
 	dcd.dcd = new(C.NativeRkmppDecoder)
 	if ret := C.init_rkmpp_decoder_native(dcd.dcd, codecID, width, height); ret < 0 {
@@ -67,7 +69,7 @@ func (dcd *ffmpegRKMPPDecoder) sendCodecHeaders(vpar gomedia.VideoCodecParameter
 		return nil
 	}
 
-	logger.Debugf(dcd, "Sending codec headers for video codec parameters %+v", vpar)
+	dcd.log.Debugf(dcd, "Sending codec headers for video codec parameters %+v", vpar)
 
 	var nalUnits [][]byte
 
@@ -237,7 +239,7 @@ func (dcd *ffmpegRKMPPDecoder) Decode(pkt gomedia.VideoPacket) (image.Image, err
 		return nil, err
 	}
 
-	logger.Debugf(dcd, "Decoding packet with data length %d, ptsMs %d", len(data), ptsMs)
+	dcd.log.Debugf(dcd, "Decoding packet with data length %d, ptsMs %d", len(data), ptsMs)
 
 	if len(data) != 0 {
 		// Split length-prefixed packet into individual NAL units

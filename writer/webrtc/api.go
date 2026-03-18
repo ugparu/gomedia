@@ -79,7 +79,7 @@ func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer
 		},
 	} {
 		if err := m.RegisterCodec(codec, webrtc.RTPCodecTypeAudio); err != nil {
-			logger.Fatal("WEBRTC", err.Error())
+			panic(err)
 		}
 	}
 
@@ -422,22 +422,22 @@ func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer
 		},
 	} {
 		if err := m.RegisterCodec(codec, webrtc.RTPCodecTypeVideo); err != nil {
-			logger.Fatal("WEBRTC", err.Error())
+			panic(err)
 		}
 	}
 
 	if err := m.RegisterCodec(webrtc.RTPCodecParameters{}, webrtc.RTPCodecTypeVideo); err != nil {
-		logger.Fatal("WEBRTC", err.Error())
+		panic(err)
 	}
 
 	if err := m.RegisterCodec(webrtc.RTPCodecParameters{}, webrtc.RTPCodecTypeVideo); err != nil {
-		logger.Fatal("WEBRTC", err.Error())
+		panic(err)
 	}
 
 	// Create a new interceptor.Registry
 	i := &interceptor.Registry{}
 	if err := webrtc.RegisterDefaultInterceptors(m, i); err != nil {
-		logger.Fatal("WEBRTC", err.Error())
+		panic(err)
 	}
 
 	// Create a new SettingEngine
@@ -446,15 +446,15 @@ func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer
 	s.SetICEUDPMux(udpMux)
 
 	// if minPort > 0 && maxPort > 0 && maxPort > minPort {
-	// 	logger.Infof("WEBRTC", "Setting port range from %d to %d", minPort, maxPort)
+	// 	logger.Default.Infof("WEBRTC", "Setting port range from %d to %d", minPort, maxPort)
 	// 	if err := s.SetEphemeralUDPPortRange(minPort+1, maxPort); err != nil {
-	// 		logger.Fatal("WEBRTC", err.Error())
+	// 		panic(err)
 	// 	}
 	// }
 
 	// Set host candidates if provided
 	if len(hosts) > 0 {
-		logger.Infof("WEBRTC", "Setting host candidates to %v", hosts)
+		logger.Default.Infof("WEBRTC", "Setting host candidates to %v", hosts)
 		s.SetNAT1To1IPs(hosts, webrtc.ICECandidateTypeHost)
 	}
 

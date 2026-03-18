@@ -16,6 +16,7 @@ import (
 // (muxing) direction.
 type baseMuxer struct {
 	w           io.Writer
+	log         logger.Logger
 	payloadType uint8
 	clockRate   uint32
 	ssrc        uint32
@@ -26,9 +27,10 @@ type baseMuxer struct {
 
 // newBaseMuxer constructs a baseMuxer for a given SDP media description and
 // RTSP interleaved channel.
-func newBaseMuxer(w io.Writer, media sdp.Media, channel uint8, streamIndex uint8) *baseMuxer {
+func newBaseMuxer(w io.Writer, media sdp.Media, channel uint8, streamIndex uint8, log logger.Logger) *baseMuxer {
 	m := &baseMuxer{
 		w:           w,
+		log:         log,
 		payloadType: uint8(media.PayloadType),
 		clockRate:   uint32(media.TimeScale),
 		channel:     channel,
@@ -83,7 +85,7 @@ func (m *baseMuxer) writeRTP(payload []byte, ts time.Duration, marker bool) erro
 		return fmt.Errorf("rtp: write failed for stream %d: %w", m.streamIndex, err)
 	}
 	if n != len(buf) {
-		logger.Warningf(m, "short RTP write: wrote %d of %d bytes", n, len(buf))
+		m.log.Warningf(m, "short RTP write: wrote %d of %d bytes", n, len(buf))
 	}
 
 	m.sequence++

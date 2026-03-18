@@ -1,6 +1,7 @@
 package buffer
 
 import (
+	"fmt"
 	"sync/atomic"
 
 	"github.com/ugparu/gomedia/utils/logger"
@@ -12,6 +13,11 @@ func WithLogName(name string) RingAllocOption {
 	return func(r *RingAlloc) {
 		r.logName = name
 	}
+}
+
+// WithLogger sets the logger for the ring allocator.
+func WithLogger(l logger.Logger) RingAllocOption {
+	return func(r *RingAlloc) { r.log = l }
 }
 
 // ringSlotCount is the maximum number of in-flight allocations tracked at once.
@@ -45,6 +51,14 @@ type RingAlloc struct {
 	tail  atomic.Uint64 // next slot index; written by producer, read by consumers
 
 	logName string
+	log     logger.Logger
+}
+
+func (r *RingAlloc) String() string {
+	if r.logName != "" {
+		return fmt.Sprintf("RingAlloc(%s)", r.logName)
+	}
+	return "RingAlloc"
 }
 
 type ringSlot struct {
@@ -67,6 +81,7 @@ func NewRingAlloc(size int, opts ...RingAllocOption) *RingAlloc {
 	r := &RingAlloc{
 		buf:  make([]byte, size),
 		bcap: size,
+		log:  logger.Default,
 	}
 
 	for _, opt := range opts {
@@ -113,9 +128,9 @@ func (g *GrowingRingAlloc) Alloc(n int) ([]byte, *SlotHandle) {
 
 	newSize := max(g.current.bcap*grov/10, n*2)
 	if newSize > danderRingSize {
-		logger.Warningf(g.current.logName, "Growing ring alloc to %dkb is too large", newSize/1024)
+		g.current.log.Warningf(g.current, "Growing ring alloc to %dkb is too large", newSize/1024)
 	} else {
-		logger.Infof(g.current.logName, "Growing ring alloc to %dkb", newSize/1024)
+		g.current.log.Infof(g.current, "Growing ring alloc to %dkb", newSize/1024)
 	}
 	g.current = NewRingAlloc(newSize, g.opts...)
 	return g.current.Alloc(n)

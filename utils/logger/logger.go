@@ -1,184 +1,34 @@
 package logger
 
-import (
-	"bytes"
-	"fmt"
-	"reflect"
-
-	"github.com/sirupsen/logrus"
-)
-
-type stringer interface {
-	String() string
+// Logger is the interface used throughout the library for structured logging.
+// Each method takes an obj parameter for component identification and a message.
+// The default implementation is a no-op; inject a real logger via WithLogger options.
+type Logger interface {
+	Trace(obj any, msg string)
+	Tracef(obj any, msg string, args ...any)
+	Debug(obj any, msg string)
+	Debugf(obj any, msg string, args ...any)
+	Info(obj any, msg string)
+	Infof(obj any, msg string, args ...any)
+	Warning(obj any, msg string)
+	Warningf(obj any, msg string, args ...any)
+	Error(obj any, msg string)
+	Errorf(obj any, msg string, args ...any)
 }
 
-type logPair struct {
-	logFn func(...any)
-	obj   string
-	msg   string
-}
+type nopLogger struct{}
 
-const logSize = 1000
+func (nopLogger) Trace(any, string)            {}
+func (nopLogger) Tracef(any, string, ...any)   {}
+func (nopLogger) Debug(any, string)            {}
+func (nopLogger) Debugf(any, string, ...any)   {}
+func (nopLogger) Info(any, string)             {}
+func (nopLogger) Infof(any, string, ...any)    {}
+func (nopLogger) Warning(any, string)          {}
+func (nopLogger) Warningf(any, string, ...any) {}
+func (nopLogger) Error(any, string)            {}
+func (nopLogger) Errorf(any, string, ...any)   {}
 
-var logCh = make(chan logPair, logSize)
-
-func objToString(obj any) (objStr string) {
-	if obj == nil {
-		objStr = "NIL"
-	} else if stringerObj, ok := obj.(stringer); ok {
-		objStr = stringerObj.String()
-	} else if objStr, ok = obj.(string); ok {
-	} else {
-		objStr = reflect.TypeOf(obj).Name()
-	}
-	return
-}
-
-func init() {
-	lvl := logrus.InfoLevel
-	logrus.SetLevel(lvl)
-	logrus.SetFormatter(&logrus.TextFormatter{
-		ForceColors:     true,
-		FullTimestamp:   true,
-		PadLevelText:    true,
-		TimestampFormat: "2006/02/01 15:04:05",
-	})
-
-	go func() {
-		sb := new(bytes.Buffer)
-		for logPair := range logCh {
-			if len(logPair.obj) > 25 {
-				logPair.obj = logPair.obj[:25]
-			}
-			sb.WriteString(fmt.Sprintf("|%25s|%-100s", logPair.obj, logPair.msg))
-			logPair.logFn(sb.String())
-			sb.Reset()
-		}
-	}()
-}
-
-func Trace(object any, message string) {
-	if logrus.GetLevel() < logrus.TraceLevel {
-		return
-	}
-	logCh <- logPair{
-		logFn: logrus.Trace,
-		obj:   objToString(object),
-		msg:   message,
-	}
-}
-
-func Tracef(object any, message string, args ...any) {
-	if logrus.GetLevel() < logrus.TraceLevel {
-		return
-	}
-	logCh <- logPair{
-		logFn: logrus.Trace,
-		obj:   objToString(object),
-		msg:   fmt.Sprintf(message, args...),
-	}
-}
-
-func Debug(object interface{}, message string) {
-	if logrus.GetLevel() < logrus.DebugLevel {
-		return
-	}
-	logCh <- logPair{
-		logFn: logrus.Debug,
-		obj:   objToString(object),
-		msg:   message,
-	}
-}
-
-func Debugf(object interface{}, message string, args ...any) {
-	if logrus.GetLevel() < logrus.DebugLevel {
-		return
-	}
-	logCh <- logPair{
-		logFn: logrus.Debug,
-		obj:   objToString(object),
-		msg:   fmt.Sprintf(message, args...),
-	}
-}
-
-func Info(object interface{}, message string) {
-	if logrus.GetLevel() < logrus.InfoLevel {
-		return
-	}
-	logCh <- logPair{
-		logFn: logrus.Info,
-		obj:   objToString(object),
-		msg:   message,
-	}
-}
-
-func Infof(object interface{}, message string, args ...any) {
-	if logrus.GetLevel() < logrus.InfoLevel {
-		return
-	}
-	logCh <- logPair{
-		logFn: logrus.Info,
-		obj:   objToString(object),
-		msg:   fmt.Sprintf(message, args...),
-	}
-}
-
-func Warning(object interface{}, message string) {
-	if logrus.GetLevel() < logrus.WarnLevel {
-		return
-	}
-	logCh <- logPair{
-		logFn: logrus.Warning,
-		obj:   objToString(object),
-		msg:   message,
-	}
-}
-
-func Warningf(object interface{}, message string, args ...any) {
-	if logrus.GetLevel() < logrus.WarnLevel {
-		return
-	}
-	logCh <- logPair{
-		logFn: logrus.Warning,
-		obj:   objToString(object),
-		msg:   fmt.Sprintf(message, args...),
-	}
-}
-
-func Error(object interface{}, message string) {
-	if logrus.GetLevel() < logrus.ErrorLevel {
-		return
-	}
-	logCh <- logPair{
-		logFn: logrus.Error,
-		obj:   objToString(object),
-		msg:   message,
-	}
-}
-
-func Errorf(object interface{}, message string, args ...any) {
-	if logrus.GetLevel() < logrus.ErrorLevel {
-		return
-	}
-	logCh <- logPair{
-		logFn: logrus.Error,
-		obj:   objToString(object),
-		msg:   fmt.Sprintf(message, args...),
-	}
-}
-
-func Fatal(object interface{}, message string) {
-	objStr := objToString(object)
-	if len(objStr) > 20 {
-		objStr = objStr[:20]
-	}
-	logrus.Fatalf("|%20s|%-100s", objStr, message)
-}
-
-func Fatalf(object interface{}, message string, args ...any) {
-	objStr := objToString(object)
-	if len(objStr) > 20 {
-		objStr = objStr[:20]
-	}
-	logrus.Fatalf("|%20s|%-100s", objStr, fmt.Sprintf(message, args...))
-}
+// Default is the fallback logger used when no logger is injected via WithLogger.
+// Library users can set this to a real implementation or supply per-component loggers.
+var Default Logger = nopLogger{}

@@ -22,9 +22,9 @@ import (
 	"github.com/ugparu/gomedia/decoder/pcm"
 	"github.com/ugparu/gomedia/encoder"
 	"github.com/ugparu/gomedia/encoder/aac"
+	examplelogger "github.com/ugparu/gomedia/examples/logger"
 	"github.com/ugparu/gomedia/format/rtsp"
 	"github.com/ugparu/gomedia/reader"
-	"github.com/ugparu/gomedia/utils/logger"
 	"github.com/ugparu/gomedia/writer/hls"
 )
 
@@ -32,8 +32,8 @@ var rtspURLs = strings.Split(os.Getenv("RTSP_URLS"), ",")
 
 const segSize = 4 * time.Second
 
-// Debug HLS writer
-var hlsWr = hls.New(1, 3, segSize, 100, 5.)
+var log = examplelogger.New(logrus.InfoLevel)
+var hlsWr = hls.New(1, 3, segSize, 100, 5., hls.WithLogger(log))
 
 func main() {
 	fmt.Println("Starting HLS debug server...")
@@ -41,10 +41,6 @@ func main() {
 	// Initialize the HLS writer
 	hlsWr.Write()
 	logrus.Info("HLS writer initialized with: segments per playlist=1, fragment count=3, segment size=", segSize)
-
-	// Set log level to debug for more detailed output
-	logrus.SetLevel(logrus.InfoLevel)
-	logrus.Info("Log level set to DEBUG")
 
 	// Setup signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -58,7 +54,7 @@ func main() {
 
 	// Initialize RTSP reader
 	logrus.Info("Connecting to RTSP streams: ", rtspURLs)
-	rdr := reader.NewRTSP(100, rtsp.WithRingBuffer(1024*1024))
+	rdr := reader.NewRTSP(100, reader.WithLogger(examplelogger.New(logrus.InfoLevel)), reader.WithRTSPParams(rtsp.WithRingBuffer(1024*1024)))
 	rdr.Read()
 	for _, rtspURL := range rtspURLs {
 		rdr.AddURL() <- rtspURL
@@ -136,20 +132,20 @@ func (s *Server) Start() {
 	s.startOnce.Do(func() {
 		defer close(s.deadChan)
 
-		logger.Info(s, "Starting listening")
+		logrus.Info("Starting listening")
 		if err = s.server.ListenAndServe(); err != nil {
-			logger.Warning(s, err.Error())
+			logrus.Warning(err.Error())
 			err = nil
 		}
 	})
 	if err != nil {
-		logger.Error(s, err.Error())
+		logrus.Error(err.Error())
 	}
 }
 
 func (s *Server) Close() {
 	s.closeOnce.Do(func() {
-		logger.Warning(s, "Stopping and closing")
+		logrus.Warning("Stopping and closing")
 		s.server.Close()
 	})
 }
@@ -197,7 +193,7 @@ func GetServer() *Server {
 			startOnce: &sync.Once{},
 			closeOnce: &sync.Once{},
 		}
-		logger.Debug(instance, "Initialized and set up")
+		logrus.Debug("Initialized and set up")
 	})
 	return instance
 }
@@ -211,7 +207,6 @@ func StringToInt(val string) int {
 }
 
 func GetMaster(c *gin.Context) {
-	logger.Debug(GetServer(), "Manifest request")
 	logrus.Debug("Low-Latency master playlist requested")
 
 	index, err := hlsWr.GetMasterPlaylist()

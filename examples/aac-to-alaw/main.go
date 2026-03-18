@@ -3,16 +3,19 @@ package main
 import (
 	"os"
 
+	"github.com/sirupsen/logrus"
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/decoder"
 	"github.com/ugparu/gomedia/decoder/aac"
 	"github.com/ugparu/gomedia/encoder"
 	"github.com/ugparu/gomedia/encoder/pcm"
+	examplelogger "github.com/ugparu/gomedia/examples/logger"
+	"github.com/ugparu/gomedia/format/rtsp"
 	"github.com/ugparu/gomedia/reader"
 )
 
 func main() {
-	rdr := reader.NewRTSP(100)
+	rdr := reader.NewRTSP(100, reader.WithLogger(examplelogger.New(logrus.InfoLevel)), reader.WithRTSPParams(rtsp.WithLogger(examplelogger.New(logrus.InfoLevel))))
 	rdr.Read()
 	defer rdr.Close()
 	rdr.AddURL() <- os.Getenv("RTSP_URL")

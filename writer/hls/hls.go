@@ -16,9 +16,18 @@ import (
 	"github.com/ugparu/gomedia/utils/logger"
 )
 
+// Option is a functional option for configuring an hlsWriter.
+type Option func(*hlsWriter)
+
+// WithLogger sets the logger for the HLS writer.
+func WithLogger(l logger.Logger) Option {
+	return func(h *hlsWriter) { h.log = l }
+}
+
 // hlsWriter is a struct representing an HLS (HTTP Live Streaming) writer.
 type hlsWriter struct {
 	lifecycle.AsyncManager[*hlsWriter]
+	log             logger.Logger
 	segmentCount    uint8
 	segmentDuration time.Duration
 	id              uint64
@@ -36,9 +45,10 @@ type hlsWriter struct {
 	partHoldBack float64
 }
 
-func New(id uint64, segCnt uint8, segDur time.Duration, chanSize int, partHoldBack float64) gomedia.HLSStreamer {
+func New(id uint64, segCnt uint8, segDur time.Duration, chanSize int, partHoldBack float64, opts ...Option) gomedia.HLSStreamer {
 	hwr := &hlsWriter{
 		AsyncManager:    nil,
+		log:             logger.Default,
 		segmentCount:    segCnt,
 		segmentDuration: segDur,
 		id:              id,
@@ -55,9 +65,13 @@ func New(id uint64, segCnt uint8, segDur time.Duration, chanSize int, partHoldBa
 		master:       "",
 		partHoldBack: partHoldBack,
 	}
-	logger.Infof(hwr, "Initialized HLS writer with %d segments, %.2f seconds per segment, part hold back %.2f", segCnt, segDur.Seconds(), partHoldBack)
 
-	hwr.AsyncManager = lifecycle.NewFailSafeAsyncManager(hwr)
+	for _, o := range opts {
+		o(hwr)
+	}
+
+	hwr.log.Infof(hwr, "Initialized HLS writer with %d segments, %.2f seconds per segment, part hold back %.2f", segCnt, segDur.Seconds(), partHoldBack)
+	hwr.AsyncManager = lifecycle.NewFailSafeAsyncManager(hwr, hwr.log)
 	return hwr
 }
 
@@ -80,13 +94,13 @@ func (hlsw *hlsWriter) checkCodPar(url string, codecPar gomedia.CodecParameters)
 		if hlsw.codPars[url].VideoCodecParameters == par {
 			return
 		}
-		logger.Infof(hlsw, "Setting new video codec parameters for url %s", url)
+		hlsw.log.Infof(hlsw, "Setting new video codec parameters for url %s", url)
 		hlsw.codPars[url].VideoCodecParameters = par
 	case gomedia.AudioCodecParameters:
 		if hlsw.codPars[url].AudioCodecParameters == par {
 			return
 		}
-		logger.Infof(hlsw, "Setting new audio codec parameters for url %s", url)
+		hlsw.log.Infof(hlsw, "Setting new audio codec parameters for url %s", url)
 		hlsw.codPars[url].AudioCodecParameters = par
 	default:
 		return
@@ -103,7 +117,7 @@ func (hlsw *hlsWriter) checkCodPar(url string, codecPar gomedia.CodecParameters)
 			return
 		}
 	} else {
-		mux = hls.NewHLSMuxer(hlsw.segmentDuration, hlsw.segmentCount, hlsw.partHoldBack)
+		mux = hls.NewHLSMuxer(hlsw.segmentDuration, hlsw.segmentCount, hlsw.partHoldBack, hlsw.log)
 		if err = mux.Mux(*par); err != nil {
 			return
 		}
@@ -114,7 +128,7 @@ func (hlsw *hlsWriter) checkCodPar(url string, codecPar gomedia.CodecParameters)
 }
 
 func (hlsw *hlsWriter) removeSrc(url string) error {
-	logger.Infof(hlsw, "Removing source %s", url)
+	hlsw.log.Infof(hlsw, "Removing source %s", url)
 
 	if mux, ok := hlsw.muxerURLs[url]; ok {
 		mux.Close()
@@ -202,7 +216,7 @@ func (hlsw *hlsWriter) Step(stopCh <-chan struct{}) (err error) {
 	case url := <-hlsw.rmSrcCh:
 		return hlsw.removeSrc(url)
 	case inpPkt := <-hlsw.inpPktCh:
-		logger.Tracef(hlsw, "Received packet %v", inpPkt)
+		hlsw.log.Tracef(hlsw, "Received packet %v", inpPkt)
 
 		if inpPkt == nil {
 			return &utils.NilPacketError{}

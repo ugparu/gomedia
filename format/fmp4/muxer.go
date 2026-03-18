@@ -21,9 +21,10 @@ const (
 type Muxer struct {
 	strs   []*Stream
 	params gomedia.CodecParametersPair
+	log    logger.Logger
 }
 
-func NewMuxer() *Muxer {
+func NewMuxer(log logger.Logger) *Muxer {
 	return &Muxer{
 		strs: []*Stream{},
 		params: gomedia.CodecParametersPair{
@@ -31,6 +32,7 @@ func NewMuxer() *Muxer {
 			AudioCodecParameters: nil,
 			VideoCodecParameters: nil,
 		},
+		log: log,
 	}
 }
 
@@ -41,14 +43,14 @@ func (m *Muxer) safeInt32Conversion(val int64, name string) int32 {
 		return int32(val)
 	}
 	// Default to max int32 value if overflow would occur
-	logger.Errorf(m, "%s value %d is too large for int32, capping at %d", name, val, maxInt32Value)
+	m.log.Errorf(m,"%s value %d is too large for int32, capping at %d", name, val, maxInt32Value)
 	return int32(maxInt32Value)
 }
 
 // safeUint32Conversion safely converts an int value to uint32
 func (m *Muxer) safeUint32Conversion(val int, name string) uint32 {
 	if val < 0 || val > int(^uint32(0)) {
-		logger.Errorf(m, "%s value %d is outside uint32 range, using 0", name, val)
+		m.log.Errorf(m,"%s value %d is outside uint32 range, using 0", name, val)
 		return 0
 	}
 	return uint32(val)
@@ -62,6 +64,7 @@ func (m *Muxer) newStream(codec gomedia.CodecParameters) (err error) {
 		return
 	}
 	stream := new(Stream)
+	stream.log = m.log
 	stream.timeScale = 90000
 	if codec.Type() == gomedia.AAC {
 		// Safely convert sample rate to int64 to avoid overflow
@@ -269,13 +272,13 @@ func (m *Muxer) processMuxer() {
 
 	if m.params.VideoCodecParameters != nil {
 		if err := m.newStream(m.params.VideoCodecParameters); err != nil {
-			logger.Errorf(m, "newStream error: %v", err)
+			m.log.Errorf(m,"newStream error: %v", err)
 		}
 	}
 
 	if m.params.AudioCodecParameters != nil {
 		if err := m.newStream(m.params.AudioCodecParameters); err != nil {
-			logger.Errorf(m, "newStream error: %v", err)
+			m.log.Errorf(m,"newStream error: %v", err)
 		}
 	}
 }
@@ -289,7 +292,7 @@ func (m *Muxer) processTrackHeader(track *mp4io.TrackFrag, s *Stream) {
 	// Safe conversion with validation for DefaultDuration
 	durationTS := s.timeToTS(s.packets[0].Duration())
 	if durationTS < 0 || durationTS > int64(^uint32(0)) {
-		logger.Errorf(m, "Duration time value %d is outside uint32 range", durationTS)
+		m.log.Errorf(m,"Duration time value %d is outside uint32 range", durationTS)
 		track.Header.DefaultDuration = 0
 	} else {
 		track.Header.DefaultDuration = uint32(durationTS)
@@ -298,7 +301,7 @@ func (m *Muxer) processTrackHeader(track *mp4io.TrackFrag, s *Stream) {
 	// Safe conversion with validation for DefaultSize
 	pktSize := s.packets[0].Len()
 	if pktSize < 0 || pktSize > int(^uint32(0)) {
-		logger.Errorf(m, "Packet size %d is outside uint32 range", pktSize)
+		m.log.Errorf(m,"Packet size %d is outside uint32 range", pktSize)
 		track.Header.DefaultSize = 0
 	} else {
 		track.Header.DefaultSize = uint32(pktSize)
@@ -332,7 +335,7 @@ func (m *Muxer) processPackets(track *mp4io.TrackFrag, s *Stream) {
 		// Safe conversion with validation
 		pktDurationTS := s.timeToTS(pkt.Duration())
 		if pktDurationTS < 0 || pktDurationTS > int64(^uint32(0)) {
-			logger.Errorf(m, "Packet duration %d is outside uint32 range", pktDurationTS)
+			m.log.Errorf(m,"Packet duration %d is outside uint32 range", pktDurationTS)
 		} else if uint32(pktDurationTS) != track.Header.DefaultDuration {
 			track.Run.Flags |= mp4io.TRUNSampleDuration
 		}
@@ -350,7 +353,7 @@ func (m *Muxer) processPackets(track *mp4io.TrackFrag, s *Stream) {
 		// Safe conversions with validation
 		var entryDuration uint32
 		if pktDurationTS < 0 || pktDurationTS > int64(^uint32(0)) {
-			logger.Errorf(m, "Packet duration %d is outside uint32 range, using 0", pktDurationTS)
+			m.log.Errorf(m,"Packet duration %d is outside uint32 range, using 0", pktDurationTS)
 			entryDuration = 0
 		} else {
 			entryDuration = uint32(pktDurationTS)
@@ -359,7 +362,7 @@ func (m *Muxer) processPackets(track *mp4io.TrackFrag, s *Stream) {
 		var entrySize uint32
 		pktDataSize := pkt.Len()
 		if pktDataSize < 0 || pktDataSize > int(^uint32(0)) {
-			logger.Errorf(m, "Packet data size %d is outside uint32 range, using 0", pktDataSize)
+			m.log.Errorf(m,"Packet data size %d is outside uint32 range, using 0", pktDataSize)
 			entrySize = 0
 		} else {
 			entrySize = uint32(pktDataSize)
@@ -486,7 +489,7 @@ func (m *Muxer) GetMP4Fragment(idx int) buffer.PooledBuffer {
 				Time: func() uint64 {
 					timeValue := int64(s.firstPacketTime) * s.timeScale / int64(time.Second)
 					if timeValue < 0 {
-						logger.Errorf(m, "Negative time value %d, using 0", timeValue)
+						m.log.Errorf(m,"Negative time value %d, using 0", timeValue)
 						return 0
 					}
 					return uint64(timeValue)

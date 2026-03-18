@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	examplelogger "github.com/ugparu/gomedia/examples/logger"
 	"github.com/ugparu/gomedia/format/mp4"
 	"github.com/ugparu/gomedia/format/rtsp"
 )
@@ -45,7 +46,7 @@ func main() {
 	defer dmx.Close()
 
 	// 2. Initialize RTSP muxer and perform publish handshake.
-	mx := rtsp.NewMuxer(rtspURL)
+	mx := rtsp.NewMuxer(rtspURL, examplelogger.New(logrus.InfoLevel))
 	if err := mx.Mux(params); err != nil {
 		log.Fatalf("failed to initialize RTSP muxer for %q: %v", rtspURL, err)
 	}

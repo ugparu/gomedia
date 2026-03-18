@@ -10,6 +10,8 @@ import (
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/decoder"
 	"github.com/ugparu/gomedia/decoder/video/rkmpp"
+	examplelogger "github.com/ugparu/gomedia/examples/logger"
+	"github.com/ugparu/gomedia/format/rtsp"
 	"github.com/ugparu/gomedia/reader"
 )
 
@@ -33,7 +35,7 @@ func main() {
 		log.Fatal("RTSP URL is required (use -url flag or RTSP_URL environment variable)")
 	}
 
-	reader := reader.NewRTSP(100)
+	reader := reader.NewRTSP(100, reader.WithLogger(examplelogger.New(logrus.InfoLevel)), reader.WithRTSPParams(rtsp.WithLogger(examplelogger.New(logrus.InfoLevel))))
 	reader.Read()
 	reader.AddURL() <- rtspURL
 

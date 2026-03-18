@@ -104,8 +104,17 @@ type streamState struct {
 	codecPar     gomedia.CodecParametersPair // codec parameters for this URL
 }
 
+// Option is a functional option for configuring a segmenter.
+type Option func(*segmenter)
+
+// WithLogger sets the logger for the segmenter.
+func WithLogger(l logger.Logger) Option {
+	return func(s *segmenter) { s.log = l }
+}
+
 type segmenter struct {
 	lifecycle.AsyncManager[*segmenter]
+	log               logger.Logger
 	recordMode        gomedia.RecordMode
 	targetDuration    time.Duration
 	recordModeCh      chan gomedia.RecordMode
@@ -150,12 +159,12 @@ func (s *segmenter) getSourceIndex(url string) int {
 // The stream will be created when first packet with codec parameters arrives
 func (s *segmenter) addSource(url string) {
 	if s.hasSource(url) {
-		logger.Infof(s, "Source %s already exists, skipping", url)
+		s.log.Infof(s, "Source %s already exists, skipping", url)
 		return
 	}
 
 	s.sources = append(s.sources, url)
-	logger.Infof(s, "Added new source %s", url)
+	s.log.Infof(s, "Added new source %s", url)
 }
 
 // removeSource removes a source URL from the sources slice and cleans up resources
@@ -173,16 +182,17 @@ func (s *segmenter) removeSource(url string) {
 	for i, src := range s.sources {
 		if src == url {
 			s.sources = append(s.sources[:i], s.sources[i+1:]...)
-			logger.Infof(s, "Removed source %s", url)
+			s.log.Infof(s, "Removed source %s", url)
 			break
 		}
 	}
 }
 
 // New creates a new instance of the archiver with the specified parameters.
-func New(dest string, segSize time.Duration, recordMode gomedia.RecordMode, chanSize int) gomedia.Segmenter {
+func New(dest string, segSize time.Duration, recordMode gomedia.RecordMode, chanSize int, opts ...Option) gomedia.Segmenter {
 	newArch := &segmenter{
 		AsyncManager:      nil,
+		log:               logger.Default,
 		recordMode:        recordMode,
 		targetDuration:    segSize,
 		recordModeCh:      make(chan gomedia.RecordMode, chanSize),
@@ -200,7 +210,10 @@ func New(dest string, segSize time.Duration, recordMode gomedia.RecordMode, chan
 		streams:           make(map[string]*streamState),
 		streamsMu:         sync.RWMutex{},
 	}
-	newArch.AsyncManager = lifecycle.NewFailSafeAsyncManager[*segmenter](newArch)
+	for _, o := range opts {
+		o(newArch)
+	}
+	newArch.AsyncManager = lifecycle.NewFailSafeAsyncManager(newArch, newArch.log)
 	return newArch
 }
 

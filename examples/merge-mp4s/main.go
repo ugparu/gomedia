@@ -2,17 +2,19 @@ package main
 
 import (
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	"github.com/ugparu/gomedia"
+	examplelogger "github.com/ugparu/gomedia/examples/logger"
 	"github.com/ugparu/gomedia/format/mp4"
-	"github.com/ugparu/gomedia/utils/logger"
 )
 
 func main() {
+	log := examplelogger.New(logrus.InfoLevel)
+
 	srcDir := os.Getenv("SRC_DIR")
 	if srcDir == "" {
 		srcDir = "./src"
@@ -20,7 +22,8 @@ func main() {
 
 	files, err := os.ReadDir(srcDir)
 	if err != nil {
-		log.Fatal(err)
+		log.Errorf(log, "read dir error: %v", err)
+		return
 	}
 
 	if len(files) == 0 {
@@ -30,19 +33,22 @@ func main() {
 	mpDmx := mp4.NewDemuxer(filepath.Join(srcDir, files[0].Name()))
 	pair, err := mpDmx.Demux()
 	if err != nil {
-		log.Fatal(err)
+		log.Errorf(log, "demux error: %v", err)
+		return
 	}
 
 	mp4Path := "./merged.mp4"
 	f, err := os.Create(mp4Path)
 	if err != nil {
-		log.Fatal(err)
+		log.Errorf(log, "create file error: %v", err)
+		return
 	}
 	defer f.Close()
 
 	mp4wr := mp4.NewMuxer(f)
 	if err = mp4wr.Mux(pair); err != nil {
-		logger.Errorf(mpDmx, "mux error: %v", err)
+		log.Errorf(log, "mux error: %v", err)
+		return
 	}
 
 	var lastTimestamp time.Duration
@@ -53,13 +59,13 @@ func main() {
 			if err.Error() == io.EOF.Error() {
 				break
 			}
-			logger.Errorf(mpDmx, "read packet error: %v", err)
+			log.Errorf(log, "read packet error: %v", err)
 			break
 		}
 		if pkt != nil {
 			lastTimestamp = pkt.Timestamp()
 			if err = mp4wr.WritePacket(pkt); err != nil {
-				logger.Errorf(mpDmx, "write packet error: %v", err)
+				log.Errorf(log, "write packet error: %v", err)
 				break
 			}
 		}
@@ -70,7 +76,7 @@ func main() {
 		mpDmx = mp4.NewDemuxer(filepath.Join(srcDir, file.Name()))
 		_, err = mpDmx.Demux()
 		if err != nil {
-			logger.Errorf(mpDmx, "demux error: %v", err)
+			log.Errorf(log, "demux error: %v", err)
 			break
 		}
 
@@ -85,7 +91,7 @@ func main() {
 				if err.Error() == io.EOF.Error() {
 					break
 				}
-				logger.Errorf(mpDmx, "read packet error: %v", err)
+				log.Errorf(log, "read packet error: %v", err)
 				break
 			}
 
@@ -104,7 +110,7 @@ func main() {
 				lastTimestamp = adjustedTimestamp
 
 				if err = mp4wr.WritePacket(pkt); err != nil {
-					logger.Errorf(mpDmx, "write packet error: %v", err)
+					log.Errorf(log, "write packet error: %v", err)
 					break
 				}
 			}
@@ -113,6 +119,6 @@ func main() {
 	}
 
 	if err = mp4wr.WriteTrailer(); err != nil {
-		logger.Errorf(mpDmx, "write trailer error: %v", err)
+		log.Errorf(log, "write trailer error: %v", err)
 	}
 }
