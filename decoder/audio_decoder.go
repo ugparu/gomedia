@@ -86,7 +86,7 @@ func (d *audioDecoder) Step(stopCh <-chan struct{}) (err error) {
 		case d.outPackets <- pcm.NewPacket(
 			dPCM,
 			p.Timestamp(),
-			p.URL(),
+			p.SourceID(),
 			p.StartTime(),
 			d.pcmPar,
 			p.Duration(),

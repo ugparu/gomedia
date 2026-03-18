@@ -110,12 +110,12 @@ func (element *webRTCWriter) Step(stopCh <-chan struct{}) (err error) {
 	case inpPkt := <-element.inpPktCh:
 		switch pkt := inpPkt.(type) {
 		case gomedia.VideoPacket:
-			if err = element.checkCodecParameters(inpPkt.URL(), pkt.CodecParameters()); err != nil {
+			if err = element.checkCodecParameters(inpPkt.SourceID(), pkt.CodecParameters()); err != nil {
 				inpPkt.Release()
 				return
 			}
 		case gomedia.AudioPacket:
-			if err = element.checkCodecParameters(inpPkt.URL(), pkt.CodecParameters()); err != nil {
+			if err = element.checkCodecParameters(inpPkt.SourceID(), pkt.CodecParameters()); err != nil {
 				inpPkt.Release()
 				return
 			}

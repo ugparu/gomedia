@@ -84,7 +84,7 @@ func (w *rtspWriter) Step(stopCh <-chan struct{}) (err error) {
 		}
 
 		// If source URL is set, drop packets from other sources.
-		if w.srcURL != "" && pkt.URL() != w.srcURL {
+		if w.srcURL != "" && pkt.SourceID() != w.srcURL {
 			pkt.Release()
 			return nil
 		}
@@ -131,7 +131,7 @@ func (w *rtspWriter) initMuxerFromVideoPacket(vp gomedia.VideoPacket) error {
 
 	// Prepare codec parameters pair with only video for now.
 	w.codecPar = gomedia.CodecParametersPair{
-		URL:                  w.srcURL,
+		SourceID:             w.srcURL,
 		AudioCodecParameters: nil,
 		VideoCodecParameters: vp.CodecParameters(),
 	}

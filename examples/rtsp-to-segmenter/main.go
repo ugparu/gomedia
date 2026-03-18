@@ -87,7 +87,7 @@ func main() {
 			}
 
 			packetCount++
-			urlPacketCounts[pkt.URL()]++
+			urlPacketCounts[pkt.SourceID()]++
 
 			// Send packet to segmenter
 			seg.Packets() <- pkt.Clone(false)

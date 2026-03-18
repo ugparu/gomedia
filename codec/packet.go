@@ -12,7 +12,7 @@ type BasePacket[T gomedia.CodecParameters] struct {
 	Idx          uint8
 	RelativeTime time.Duration
 	Dur          time.Duration
-	InpURL       string
+	InpSourceID  string
 	Buf          []byte // Returns the packet data.
 	AbsoluteTime time.Time
 	CodecPar     T
@@ -26,7 +26,7 @@ func NewBasePacket[T gomedia.CodecParameters](
 	idx uint8,
 	relativeTime time.Duration,
 	dur time.Duration,
-	url string,
+	sourceID string,
 	buf []byte,
 	absTime time.Time,
 	codecPar T,
@@ -35,7 +35,7 @@ func NewBasePacket[T gomedia.CodecParameters](
 		Idx:          idx,
 		RelativeTime: relativeTime,
 		Dur:          dur,
-		InpURL:       url,
+		InpSourceID:  sourceID,
 		Buf:          buf,
 		AbsoluteTime: absTime,
 		CodecPar:     codecPar,
@@ -50,7 +50,7 @@ func (pkt *BasePacket[T]) Clone(copyData bool) BasePacket[T] {
 		Idx:          pkt.Idx,
 		RelativeTime: pkt.RelativeTime,
 		Dur:          pkt.Dur,
-		InpURL:       pkt.InpURL,
+		InpSourceID:  pkt.InpSourceID,
 		Buf:          pkt.Buf,
 		AbsoluteTime: pkt.AbsoluteTime,
 		CodecPar:     pkt.CodecPar,
@@ -81,12 +81,12 @@ func (pkt *BasePacket[T]) Data() []byte {
 	return pkt.Buf
 }
 
-func (pkt *BasePacket[T]) URL() string {
-	return pkt.InpURL
+func (pkt *BasePacket[T]) SourceID() string {
+	return pkt.InpSourceID
 }
 
-func (pkt *BasePacket[T]) SetURL(url string) {
-	pkt.InpURL = url
+func (pkt *BasePacket[T]) SetSourceID(sourceID string) {
+	pkt.InpSourceID = sourceID
 }
 
 func (pkt *BasePacket[T]) StreamIndex() uint8 {

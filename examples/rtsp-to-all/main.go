@@ -451,7 +451,7 @@ func GetIndexHTML(c *gin.Context) {
 
 func processInputAudioPacket(packet gomedia.AudioPacket, audioDecoder gomedia.AudioDecoder, hlsWr gomedia.HLSStreamer, webrtcWr gomedia.WebRTCStreamer, seg gomedia.Segmenter) {
 	// Only process audio from the first stream if there are multiple URLs
-	if len(rtspURLs) > 1 && packet.URL() != rtspURLs[0] {
+	if len(rtspURLs) > 1 && packet.SourceID() != rtspURLs[0] {
 		return
 	}
 
@@ -466,12 +466,12 @@ func processInputAudioPacket(packet gomedia.AudioPacket, audioDecoder gomedia.Au
 		// Send AAC directly to HLS for all URLs
 		for _, url := range rtspURLs {
 			clonePkt := packet.Clone(false)
-			clonePkt.SetURL(url)
+			clonePkt.SetSourceID(url)
 			hlsWr.Packets() <- clonePkt
 		}
 		// Send to segmenter for recording
 		aPacket := packet.Clone(false)
-		aPacket.SetURL(rtspURLs[0]) // Use first URL for recording
+		aPacket.SetSourceID(rtspURLs[0]) // Use first URL for recording
 		seg.Packets() <- aPacket
 	case gomedia.PCMAlaw:
 		// Send PCMAlaw directly to WebRTC
@@ -494,7 +494,7 @@ func processEncodedAudioPacket(packet gomedia.Packet, wr gomedia.Writer) {
 	// Distribute encoded packets to all URLs
 	for _, url := range rtspURLs {
 		pkt := packet.Clone(false)
-		pkt.SetURL(url)
+		pkt.SetSourceID(url)
 		wr.Packets() <- pkt
 	}
 }

@@ -85,7 +85,7 @@ func New(url string, opts ...DemuxerOption) gomedia.Demuxer {
 
 func (dmx *innerRTSPDemuxer) Demux() (params gomedia.CodecParametersPair, err error) {
 	defer func() {
-		params.URL = dmx.url
+		params.SourceID = dmx.url
 	}()
 
 	if err = dmx.client.establishConnection(dmx.url); err != nil {
@@ -112,7 +112,7 @@ func (dmx *innerRTSPDemuxer) Demux() (params gomedia.CodecParametersPair, err er
 //
 //nolint:unparam //audio currently unused but presented in api
 func (dmx *innerRTSPDemuxer) findStreams() (params gomedia.CodecParametersPair, err error) {
-	params.URL = dmx.url
+	params.SourceID = dmx.url
 
 	sort.Slice(dmx.mediaSDP, func(i, j int) bool {
 		getPriority := func(avType string) int {
@@ -220,7 +220,7 @@ func (dmx *innerRTSPDemuxer) controlTrack(track string) string {
 func (dmx *innerRTSPDemuxer) ReadPacket() (packet gomedia.Packet, err error) {
 	defer func() {
 		if packet != nil {
-			packet.SetURL(dmx.url)
+			packet.SetSourceID(dmx.url)
 		}
 	}()
 

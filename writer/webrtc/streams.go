@@ -110,7 +110,7 @@ func (ss *sortedStreams) Add(url string, newCodecPar gomedia.CodecParameters) []
 	}
 
 	pair := gomedia.CodecParametersPair{
-		URL:                  url,
+		SourceID:             url,
 		VideoCodecParameters: videoPar,
 		AudioCodecParameters: nil,
 	}
@@ -255,9 +255,9 @@ func (ss *sortedStreams) validatePacket(pkt gomedia.Packet) (*stream, error) {
 		return nil, ErrPacketTooSmall
 	}
 
-	str, found := ss.streams[pkt.URL()]
+	str, found := ss.streams[pkt.SourceID()]
 	if !found {
-		logger.Debugf(ss, "unknown url %s", pkt.URL())
+		logger.Debugf(ss, "unknown url %s", pkt.SourceID())
 		return nil, ErrStreamNotFound
 	}
 

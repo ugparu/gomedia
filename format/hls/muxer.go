@@ -103,7 +103,7 @@ func NewHLSMuxer(segmentDuration time.Duration, segmentCount uint8, partHoldBack
 #EXT-X-PART-INF:PART-TARGET=%.5f
 #EXT-X-INDEPENDENT-SEGMENTS
 `, int(segmentDuration.Seconds()), partHoldBack, partTarget),
-		codecPars:      gomedia.CodecParametersPair{AudioCodecParameters: nil, VideoCodecParameters: nil, URL: ""},
+		codecPars:      gomedia.CodecParametersPair{AudioCodecParameters: nil, VideoCodecParameters: nil, SourceID: ""},
 		initVersion:    0,
 		initCache:      make(map[int]gomedia.CodecParametersPair),
 		initBytesCache: make(map[int][]byte),

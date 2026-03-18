@@ -91,7 +91,7 @@ func (e *alawEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err e
 		} else {
 			copy(outData, encoded)
 		}
-		p := pcm.NewPacket(outData, 0, pkt.URL(), pkt.StartTime(), e.codecPar, e.frameDuration)
+		p := pcm.NewPacket(outData, 0, pkt.SourceID(), pkt.StartTime(), e.codecPar, e.frameDuration)
 		p.Slot = handle
 		resp = append(resp, p)
 	}

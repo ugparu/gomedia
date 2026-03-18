@@ -130,7 +130,7 @@ func (v *aacEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err er
 		if valid == 0 {
 			err = v.Flush()
 			if err == nil {
-				resp = append(resp, aac.NewPacket(v.aacBuf.Data(), 0, pkt.URL(), pkt.StartTime(), v.param, v.frameDuration))
+				resp = append(resp, aac.NewPacket(v.aacBuf.Data(), 0, pkt.SourceID(), pkt.StartTime(), v.param, v.frameDuration))
 			}
 			break
 		}
@@ -144,7 +144,7 @@ func (v *aacEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err er
 			outData = make([]byte, valid)
 		}
 		copy(outData, v.aacBuf.Data()[:valid])
-		p := aac.NewPacket(outData, pkt.Timestamp(), pkt.URL(), pkt.StartTime(), v.param, v.frameDuration)
+		p := aac.NewPacket(outData, pkt.Timestamp(), pkt.SourceID(), pkt.StartTime(), v.param, v.frameDuration)
 		p.Slot = handle
 		resp = append(resp, p)
 	}

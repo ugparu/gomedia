@@ -151,7 +151,7 @@ func writeVideoPacketsToPeer(pt *peerTrack,
 			for {
 				select {
 				case pkt := <-vChan:
-					pktURL := pkt.URL()
+					pktURL := pkt.SourceID()
 					if url == "" {
 						url = pktURL
 					}
@@ -167,7 +167,7 @@ func writeVideoPacketsToPeer(pt *peerTrack,
 				}
 			}
 		case pkt := <-vChan:
-			pktURL := pkt.URL()
+			pktURL := pkt.SourceID()
 			if url == "" {
 				url = pktURL
 			} else if pktURL != url {
@@ -221,7 +221,7 @@ func writeAudioPacketsToPeer(pt *peerTrack, aflush chan struct{}, aChan chan gom
 			for {
 				select {
 				case pkt := <-aChan:
-					pktURL := pkt.URL()
+					pktURL := pkt.SourceID()
 					if url == "" {
 						url = pktURL
 					}
@@ -237,7 +237,7 @@ func writeAudioPacketsToPeer(pt *peerTrack, aflush chan struct{}, aChan chan gom
 				}
 			}
 		case pkt := <-aChan:
-			pktURL := pkt.URL()
+			pktURL := pkt.SourceID()
 			if pktURL != url {
 				url = pktURL
 			}

@@ -68,7 +68,7 @@ func (hlsw *hlsWriter) checkCodPar(url string, codecPar gomedia.CodecParameters)
 
 	if _, ok := hlsw.codPars[url]; !ok {
 		hlsw.codPars[url] = &gomedia.CodecParametersPair{
-			URL:                  url,
+			SourceID:             url,
 			AudioCodecParameters: nil,
 			VideoCodecParameters: nil,
 		}
@@ -210,18 +210,18 @@ func (hlsw *hlsWriter) Step(stopCh <-chan struct{}) (err error) {
 
 		switch pkt := inpPkt.(type) {
 		case gomedia.VideoPacket:
-			if err = hlsw.checkCodPar(inpPkt.URL(), pkt.CodecParameters()); err != nil {
+			if err = hlsw.checkCodPar(inpPkt.SourceID(), pkt.CodecParameters()); err != nil {
 				inpPkt.Release()
 				return
 			}
 		case gomedia.AudioPacket:
-			if err = hlsw.checkCodPar(inpPkt.URL(), pkt.CodecParameters()); err != nil {
+			if err = hlsw.checkCodPar(inpPkt.SourceID(), pkt.CodecParameters()); err != nil {
 				inpPkt.Release()
 				return
 			}
 		}
 
-		mux, ok := hlsw.muxerURLs[inpPkt.URL()]
+		mux, ok := hlsw.muxerURLs[inpPkt.SourceID()]
 		if !ok {
 			inpPkt.Release()
 			return

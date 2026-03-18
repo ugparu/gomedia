@@ -34,7 +34,7 @@ type AudioCodecParameters interface {
 
 // CodecParametersPair bundles audio and video codec parameters for a multimedia stream.
 type CodecParametersPair struct {
-	URL string // The source URL of the multimedia stream.
+	SourceID string // The source ID of the multimedia stream.
 	AudioCodecParameters
 	VideoCodecParameters
 }
@@ -50,8 +50,8 @@ type Packet interface {
 	// the backing memory is returned to the ring allocator (or becomes GC-eligible
 	// for heap-backed packets). Must be called exactly once per owner.
 	Release()
-	URL() string                // Returns the source URL of the packet.
-	SetURL(string)              // Sets the source URL for the packet.
+	SourceID() string           // Returns the source ID of the packet.
+	SetSourceID(string)         // Sets the source ID for the packet.
 	StreamIndex() uint8         // Returns the stream index this packet belongs to.
 	SetStreamIndex(uint8)       // Sets the stream index for this packet.
 	Timestamp() time.Duration   // Returns the presentation timestamp.

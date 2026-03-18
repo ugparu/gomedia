@@ -321,7 +321,7 @@ func (s *segmenter) flushSegment(stream *streamState, stopChan <-chan struct{}) 
 		Start:      af.startTime,
 		Stop:       af.startTime.Add(af.duration),
 		Size:       int(actualSize),
-		URL:        stream.codecPar.URL,
+		URL:        stream.codecPar.SourceID,
 		Resolution: fmt.Sprintf("%dx%d", stream.codecPar.VideoCodecParameters.Width(), stream.codecPar.VideoCodecParameters.Height()),
 		Codec:      stream.codecPar.VideoCodecParameters.Type().String(),
 	}:
@@ -410,7 +410,7 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 		}
 
 		// Extract URL from packet
-		url := inpPkt.URL()
+		url := inpPkt.SourceID()
 
 		s.streamsMu.Lock()
 		defer s.streamsMu.Unlock()
@@ -429,7 +429,7 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 				activeFile:   nil,
 				ringBuf:      newRingBuffer(s.targetDuration / 2), //nolint:mnd
 				seenKeyframe: false,
-				codecPar:     gomedia.CodecParametersPair{URL: url, AudioCodecParameters: nil, VideoCodecParameters: nil},
+				codecPar:     gomedia.CodecParametersPair{SourceID: url, AudioCodecParameters: nil, VideoCodecParameters: nil},
 			}
 			s.streams[url] = stream
 		}

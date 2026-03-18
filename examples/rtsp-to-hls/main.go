@@ -90,12 +90,12 @@ func main() {
 			case pkt := <-aacEnc.Packets():
 				for _, url := range rtspURLs {
 					clonePkt := pkt.Clone(true)
-					clonePkt.SetURL(url)
+					clonePkt.SetSourceID(url)
 					hlsWr.Packets() <- clonePkt
 				}
 			case pkt := <-rdr.Packets():
 				if inPkt, ok := pkt.(gomedia.AudioPacket); ok {
-					if inPkt.URL() != rtspURLs[0] {
+					if inPkt.SourceID() != rtspURLs[0] {
 						continue
 					}
 					audioDecoder.Packets() <- inPkt

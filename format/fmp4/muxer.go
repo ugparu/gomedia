@@ -27,7 +27,7 @@ func NewMuxer() *Muxer {
 	return &Muxer{
 		strs: []*Stream{},
 		params: gomedia.CodecParametersPair{
-			URL:                  "",
+			SourceID:             "",
 			AudioCodecParameters: nil,
 			VideoCodecParameters: nil,
 		},

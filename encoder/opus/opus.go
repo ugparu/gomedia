@@ -96,7 +96,7 @@ func (e *opusEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err e
 			return nil, err
 		}
 
-		p := goopus.NewPacket(outData[:n], 0, pkt.URL(), pkt.StartTime(), e.codecPar, e.frameDuration)
+		p := goopus.NewPacket(outData[:n], 0, pkt.SourceID(), pkt.StartTime(), e.codecPar, e.frameDuration)
 		p.Slot = handle
 		resp = append(resp, p)
 	}

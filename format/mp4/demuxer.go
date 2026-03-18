@@ -38,7 +38,7 @@ func (dmx *Demuxer) Demux() (params gomedia.CodecParametersPair, err error) {
 		return
 	}
 
-	params.URL = dmx.url
+	params.SourceID = dmx.url
 	params.VideoCodecParameters = dmx.videoCodecData
 	params.AudioCodecParameters = dmx.audioCodecData
 
