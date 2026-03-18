@@ -642,8 +642,8 @@ func (s *segmenter) findFirstKeyframe(pkts []gomedia.Packet) int {
 	return 0
 }
 
-// Close_ initiates the closing process for the archiver.
-func (s *segmenter) Close_() { //nolint: revive
+// Release initiates the closing process for the archiver.
+func (s *segmenter) Release() { //nolint: revive
 	const stopGraceTimeout = time.Second * 5
 	stopCh := make(chan struct{})
 	go func() {

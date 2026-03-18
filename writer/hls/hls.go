@@ -314,7 +314,7 @@ func (hlsw *hlsWriter) GetFragment(ctx context.Context, index uint8, segIndex ui
 }
 
 // Close closes the innerHLS instance by closing all associated HLS Muxers, inpPktCh, and paramsChan channels.
-func (hlsw *hlsWriter) Close_() { //nolint: revive
+func (hlsw *hlsWriter) Release() { //nolint: revive
 	for _, mux := range hlsw.muxerURLs {
 		mux.Close()
 	}

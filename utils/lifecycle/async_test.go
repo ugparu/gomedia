@@ -11,7 +11,7 @@ import (
 
 type Bar struct{}
 
-func (*Bar) Close_() {}
+func (*Bar) Release() {}
 
 func (*Bar) String() string { return "" }
 

@@ -41,7 +41,7 @@ func (ssc *defaultLifecycleManager[T]) Start(startFunc func(T) error) (err error
 
 func (ssc *defaultLifecycleManager[T]) Close() {
 	ssc.closeOnce.Do(func() {
-		ssc.instance.Close_()
+		ssc.instance.Release()
 		close(ssc.closeChan)
 	})
 }

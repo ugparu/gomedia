@@ -129,7 +129,7 @@ func (d *audioDecoder) Close() {
 	d.AsyncManager.Close()
 }
 
-func (d *audioDecoder) Close_() { //nolint:revive // required by lifecycle.AsyncInstance interface
+func (d *audioDecoder) Release() { //nolint:revive // required by lifecycle.AsyncInstance interface
 	if d.InnerAudioDecoder != nil {
 		d.InnerAudioDecoder.Close()
 	}

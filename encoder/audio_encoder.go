@@ -88,7 +88,7 @@ func (e *audioEncoder) Step(doneCh <-chan struct{}) error {
 	return nil
 }
 
-func (e *audioEncoder) Close_() { //nolint:revive // required by lifecycle.AsyncInstance interface
+func (e *audioEncoder) Release() { //nolint:revive // required by lifecycle.AsyncInstance interface
 	e.InnerAudioEncoder.Close()
 	close(e.outSamples)
 }

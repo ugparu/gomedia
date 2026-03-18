@@ -270,8 +270,8 @@ func (rdr *reader) Read() {
 	_ = rdr.Start(startFunc)
 }
 
-// Close_ closes the demuxer and the packets channel.
-func (rdr *reader) Close_() { //nolint: revive
+// Release closes the demuxer and the packets channel.
+func (rdr *reader) Release() { //nolint: revive
 	rdr.mu.Lock()
 	defer rdr.mu.Unlock()
 

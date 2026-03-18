@@ -10,7 +10,7 @@ import (
 
 type Foo struct{}
 
-func (*Foo) Close_() {}
+func (*Foo) Release() {}
 
 func (*Foo) String() string { return "" }
 

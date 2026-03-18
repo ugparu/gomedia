@@ -222,8 +222,8 @@ func (dec *videoDecoder) Close() {
 	dec.AsyncManager.Close()
 }
 
-// Close_ stops the inner decoder and closes associated channels.
-func (dec *videoDecoder) Close_() { //nolint:revive // required by lifecycle.AsyncInstance interface
+// Release stops the inner decoder and closes associated channels.
+func (dec *videoDecoder) Release() { //nolint:revive // required by lifecycle.AsyncInstance interface
 	dec.stopDecoder()
 	// Drain remaining packets from the channel to prevent leaks.
 	for {

@@ -11,7 +11,7 @@ import (
 
 type Arr struct{}
 
-func (*Arr) Close_() {}
+func (*Arr) Release() {}
 
 func (*Arr) String() string { return "" }
 

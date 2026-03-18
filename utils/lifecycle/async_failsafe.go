@@ -75,7 +75,7 @@ func (ssc *failsafeAsyncLifecycleManager[T]) Close() {
 			close(ssc.doneChan)
 		})
 		<-ssc.doneChan
-		ssc.instance.Close_()
+		ssc.instance.Release()
 	})
 }
 

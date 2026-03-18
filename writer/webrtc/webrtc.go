@@ -574,7 +574,7 @@ func (element *webRTCWriter) removePeer(peer *peerTrack) (err error) {
 
 // Close closes the innerWriter by closing the input packet channel and removing all existing peers.
 // It calls the removePeer method for each existing peer.
-func (element *webRTCWriter) Close_() { //nolint: revive
+func (element *webRTCWriter) Release() { //nolint: revive
 	close(element.inpPktCh)
 	for pkt := range element.inpPktCh {
 		if pkt != nil {

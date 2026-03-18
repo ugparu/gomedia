@@ -172,8 +172,8 @@ func (w *rtspWriter) resetMuxer() {
 	w.codecPar = gomedia.CodecParametersPair{}
 }
 
-// Close_ is called by AsyncManager to gracefully stop the writer.
-func (w *rtspWriter) Close_() { //nolint:revive
+// Release is called by AsyncManager to gracefully stop the writer.
+func (w *rtspWriter) Release() { //nolint:revive
 	w.resetMuxer()
 	close(w.inpPktCh)
 }

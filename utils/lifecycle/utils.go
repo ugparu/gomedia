@@ -1,7 +1,7 @@
 package lifecycle
 
 type Instance interface {
-	Close_()
+	Release()
 	String() string
 }
 

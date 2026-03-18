@@ -66,7 +66,7 @@ func (s *segments) getCurSegment() *segment {
 // muxer is an implementation of the HLS interface.
 type muxer struct {
 	lifecycle.Manager[*muxer] // Embedding lifecycle.Manager to manage lifecycle functions.
-	log logger.Logger
+	log                       logger.Logger
 	*segments
 	segmentCount          uint8                               // Number of segments to keep in the playlist.
 	mediaSequence         int64                               // Media sequence number.
@@ -275,12 +275,12 @@ func (mxr *muxer) updateIndexM3u8() string {
 	for _, id := range mxr.segIDs {
 		segment, ok := mxr.getSegment(id)
 		if !ok {
-			mxr.log.Errorf(mxr,"Segment %d not found in map", id)
+			mxr.log.Errorf(mxr, "Segment %d not found in map", id)
 			continue
 		}
 
 		if segment.manifestEntry == "" {
-			mxr.log.Errorf(mxr,"Manifest entry for segment %d is nil", id)
+			mxr.log.Errorf(mxr, "Manifest entry for segment %d is nil", id)
 			continue
 		}
 
@@ -330,7 +330,7 @@ func (mxr *muxer) GetIndexM3u8(ctx context.Context, needSeg int64, needPart int8
 func (mxr *muxer) waitForSegmentOrPart(ctx context.Context, needSeg int64, needPart int8) error {
 	// Check for potential overflow before conversion
 	if needSeg < 0 {
-		mxr.log.Errorf(mxr,"Segment index %d is negative", needSeg)
+		mxr.log.Errorf(mxr, "Segment index %d is negative", needSeg)
 		return errors.New("segment index cannot be negative")
 	}
 
@@ -472,8 +472,8 @@ func (mxr *muxer) GetFragment(ctx context.Context, segindex uint64, index uint8)
 	return bytes, nil
 }
 
-// Close_ closes the HLS muxer, releasing all retained packet slots.
-func (mxr *muxer) Close_() { //nolint:revive // Method name required by interface
+// Release closes the HLS muxer, releasing all retained packet slots.
+func (mxr *muxer) Release() { //nolint:revive // Method name required by interface
 	mxr.segments.Lock()
 	segs := make([]*segment, 0, len(mxr.segments.segments))
 	for _, seg := range mxr.segments.segments {
