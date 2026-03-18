@@ -24,6 +24,16 @@ func WithLogger(l logger.Logger) Option {
 	return func(h *hlsWriter) { h.log = l }
 }
 
+// WithIndexName overrides the default index playlist filename ("index.m3u8").
+func WithIndexName(name string) Option {
+	return func(h *hlsWriter) { h.indexName = name }
+}
+
+// WithMediaName overrides the default media segment/fragment filename base ("media").
+func WithMediaName(name string) Option {
+	return func(h *hlsWriter) { h.mediaName = name }
+}
+
 // hlsWriter is a struct representing an HLS (HTTP Live Streaming) writer.
 type hlsWriter struct {
 	lifecycle.AsyncManager[*hlsWriter]
@@ -42,6 +52,8 @@ type hlsWriter struct {
 	sortedURLs   []string
 	mu           sync.RWMutex
 	master       string
+	indexName    string
+	mediaName    string
 	partHoldBack float64
 }
 
@@ -63,6 +75,8 @@ func New(id uint64, segCnt uint8, segDur time.Duration, chanSize int, partHoldBa
 		sortedURLs:   []string{},
 		mu:           sync.RWMutex{},
 		master:       "",
+		indexName:    "index.m3u8",
+		mediaName:    "media",
 		partHoldBack: partHoldBack,
 	}
 
@@ -117,7 +131,7 @@ func (hlsw *hlsWriter) checkCodPar(url string, codecPar gomedia.CodecParameters)
 			return
 		}
 	} else {
-		mux = hls.NewHLSMuxer(hlsw.segmentDuration, hlsw.segmentCount, hlsw.partHoldBack, hlsw.log)
+		mux = hls.NewHLSMuxer(hlsw.segmentDuration, hlsw.segmentCount, hlsw.partHoldBack, hlsw.log, hls.WithMediaName(hlsw.mediaName))
 		if err = mux.Mux(*par); err != nil {
 			return
 		}
@@ -187,7 +201,7 @@ func (hlsw *hlsWriter) recalcManifest() (err error) {
 		if _, err = builder.WriteString(fmt.Sprintf("%s\n", entry)); err != nil {
 			return
 		}
-		if _, err = builder.WriteString(fmt.Sprintf("%d/%d/cubic.m3u8\n", hlsw.id, index)); err != nil {
+		if _, err = builder.WriteString(fmt.Sprintf("%d/%d/%s\n", hlsw.id, index, hlsw.indexName)); err != nil {
 			return
 		}
 		index++

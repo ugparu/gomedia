@@ -41,6 +41,7 @@ type segment struct {
 	released           bool                        // True after packets have been released.
 	discontinuity      bool                        // True if this segment starts after a codec change.
 	initVersion        int                         // Init segment version this segment belongs to.
+	mediaName          string                      // Base filename used in manifest URIs (e.g. "media").
 	log                logger.Logger
 }
 
@@ -50,6 +51,7 @@ func newSegment(
 	targetFragmentDuration,
 	targetDuration time.Duration,
 	codecPars gomedia.CodecParametersPair,
+	mediaName string,
 	log logger.Logger,
 ) *segment {
 	seg := &segment{
@@ -57,13 +59,14 @@ func newSegment(
 		codecPars:          codecPars,
 		targetDuration:     targetDuration,
 		targetFragDuration: targetFragmentDuration,
-		fragments:          []*fragment{newFragment(0, id, targetFragmentDuration, codecPars, log)},
+		fragments:          []*fragment{newFragment(0, id, targetFragmentDuration, codecPars, mediaName, log)},
 		finished:           make(chan struct{}),
 		duration:           0,
 		time:               time.Now(),
 		cacheEntry:         "",
 		curFragment:        nil,
 		manifestEntry:      "",
+		mediaName:          mediaName,
 		cachedMp4:          nil,
 		log:                log,
 	}
@@ -84,12 +87,12 @@ func (element *segment) writePacket(packet gomedia.Packet) (err error) {
 		element.duration += curFrag.duration
 		element.cacheEntry = fmt.Sprintf("%s%s", element.cacheEntry, curFrag.manifestEntry)
 		if element.duration >= element.targetDuration {
-			element.manifestEntry = fmt.Sprintf("%s#EXT-X-PROGRAM-DATE-TIME:%s\n#EXTINF:%.5f\nsegment/%d/cubic.m4s\n",
-				element.cacheEntry, element.time.Format("2006-01-02T15:04:05.000000Z"), element.duration.Seconds(), element.id)
+			element.manifestEntry = fmt.Sprintf("%s#EXT-X-PROGRAM-DATE-TIME:%s\n#EXTINF:%.5f\nsegment/%d/%s.m4s\n",
+				element.cacheEntry, element.time.Format("2006-01-02T15:04:05.000000Z"), element.duration.Seconds(), element.id, element.mediaName)
 			return element.close()
 		} else {
 			newFragID := curFrag.id + 1
-			newFragment := newFragment(newFragID, element.id, element.targetFragDuration, element.codecPars, element.log)
+			newFragment := newFragment(newFragID, element.id, element.targetFragDuration, element.codecPars, element.mediaName, element.log)
 			element.fragments = append(element.fragments, newFragment)
 			element.curFragment = element.fragments[newFragID]
 

@@ -22,11 +22,12 @@ type fragment struct {
 	packets        []gomedia.Packet
 	codecPars      gomedia.CodecParametersPair // Codec parameters for the fragment.
 	cachedMp4      []byte                      // Lazily generated MP4 data; populated on first HTTP request.
+	mediaName      string                      // Base filename used in manifest URIs (e.g. "media").
 	log            logger.Logger
 }
 
 // newFragment creates a new fragment with the specified parameters.
-func newFragment(id uint8, segID uint64, targetDuration time.Duration, codecPars gomedia.CodecParametersPair, log logger.Logger) *fragment {
+func newFragment(id uint8, segID uint64, targetDuration time.Duration, codecPars gomedia.CodecParametersPair, mediaName string, log logger.Logger) *fragment {
 	frag := &fragment{
 		id:             id,
 		segID:          segID,
@@ -38,10 +39,11 @@ func newFragment(id uint8, segID uint64, targetDuration time.Duration, codecPars
 		packets:        make([]gomedia.Packet, 0),
 		codecPars:      codecPars,
 		cachedMp4:      nil,
+		mediaName:      mediaName,
 		log:            log,
 	}
 	// Initialize the manifest entry with a preload hint.
-	frag.manifestEntry = fmt.Sprintf("#EXT-X-PRELOAD-HINT:TYPE=PART,URI=\"fragment/%d/%d/cubic.m4s\"\n", segID, id)
+	frag.manifestEntry = fmt.Sprintf("#EXT-X-PRELOAD-HINT:TYPE=PART,URI=\"fragment/%d/%d/%s.m4s\"\n", segID, id, mediaName)
 	return frag
 }
 
@@ -78,17 +80,19 @@ func (fr *fragment) close() error {
 	// Update the manifest entry based on whether the fragment is independent.
 	if fr.independent {
 		fr.manifestEntry = fmt.Sprintf(
-			"#EXT-X-PART:DURATION=%.5f,INDEPENDENT=YES,URI=\"fragment/%d/%d/cubic.m4s\"\n",
+			"#EXT-X-PART:DURATION=%.5f,INDEPENDENT=YES,URI=\"fragment/%d/%d/%s.m4s\"\n",
 			fr.duration.Seconds(),
 			fr.segID,
 			fr.id,
+			fr.mediaName,
 		)
 	} else {
 		fr.manifestEntry = fmt.Sprintf(
-			"#EXT-X-PART:DURATION=%.5f,URI=\"fragment/%d/%d/cubic.m4s\"\n",
+			"#EXT-X-PART:DURATION=%.5f,URI=\"fragment/%d/%d/%s.m4s\"\n",
 			fr.duration.Seconds(),
 			fr.segID,
 			fr.id,
+			fr.mediaName,
 		)
 	}
 

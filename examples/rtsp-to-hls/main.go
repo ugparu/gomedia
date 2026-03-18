@@ -33,7 +33,7 @@ var rtspURLs = strings.Split(os.Getenv("RTSP_URLS"), ",")
 const segSize = 4 * time.Second
 
 var log = examplelogger.New(logrus.InfoLevel)
-var hlsWr = hls.New(1, 3, segSize, 100, 5., hls.WithLogger(log))
+var hlsWr = hls.New(1, 3, segSize, 100, 5.)
 
 func main() {
 	fmt.Println("Starting HLS debug server...")
@@ -177,7 +177,7 @@ func GetServer() *Server {
 		pprof.Register(router)
 
 		router.GET("/streams/stream.m3u8", GetMaster)
-		router.GET("/streams/:uuid/:id/cubic.m3u8", GetManifest)
+		router.GET("/streams/:uuid/:id/index.m3u8", GetManifest)
 		router.GET("/streams/:uuid/:id/init.mp4", GetInit)
 		router.GET("/streams/:uuid/:id/segment/:segment/:any", GetSegment)
 		router.GET("/streams/:uuid/:id/fragment/:segment/:fragment/:any", GetFragment)

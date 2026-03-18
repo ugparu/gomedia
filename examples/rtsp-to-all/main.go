@@ -236,7 +236,7 @@ func GetServer() *Server {
 
 		// HLS endpoints
 		router.GET("/streams/stream.m3u8", GetMaster)
-		router.GET("/streams/:uuid/:id/cubic.m3u8", GetManifest)
+		router.GET("/streams/:uuid/:id/index.m3u8", GetManifest)
 		router.GET("/streams/:uuid/:id/init.mp4", GetInit)
 		router.GET("/streams/:uuid/:id/segment/:segment/:any", GetSegment)
 		router.GET("/streams/:uuid/:id/fragment/:segment/:fragment/:any", GetFragment)

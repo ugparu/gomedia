@@ -63,6 +63,14 @@ func (s *segments) getCurSegment() *segment {
 	return s.segments[s.segIDs[len(s.segIDs)-1]]
 }
 
+// MuxerOption is a functional option for configuring a muxer.
+type MuxerOption func(*muxer)
+
+// WithMediaName overrides the default media filename base ("media") used in segment and fragment URIs.
+func WithMediaName(name string) MuxerOption {
+	return func(m *muxer) { m.mediaName = name }
+}
+
 // muxer is an implementation of the HLS interface.
 type muxer struct {
 	lifecycle.Manager[*muxer] // Embedding lifecycle.Manager to manage lifecycle functions.
@@ -80,10 +88,11 @@ type muxer struct {
 	initVersion           int                                 // Current init segment version (incremented on codec change).
 	initCache             map[int]gomedia.CodecParametersPair // Cached codec params per init version.
 	initBytesCache        map[int][]byte                      // Cached generated init segment bytes per version.
+	mediaName             string                              // Base filename used in segment/fragment URIs (e.g. "media").
 }
 
 // NewHLSMuxer creates a new HLS muxer with the specified segment duration and segment count.
-func NewHLSMuxer(segmentDuration time.Duration, segmentCount uint8, partHoldBack float64, log logger.Logger) gomedia.HLSMuxer {
+func NewHLSMuxer(segmentDuration time.Duration, segmentCount uint8, partHoldBack float64, log logger.Logger, opts ...MuxerOption) gomedia.HLSMuxer {
 	newHLS := &muxer{
 		Manager: nil,
 		log:     log,
@@ -109,6 +118,10 @@ func NewHLSMuxer(segmentDuration time.Duration, segmentCount uint8, partHoldBack
 		initVersion:    0,
 		initCache:      make(map[int]gomedia.CodecParametersPair),
 		initBytesCache: make(map[int][]byte),
+		mediaName:      "media",
+	}
+	for _, o := range opts {
+		o(newHLS)
 	}
 	newHLS.Manager = lifecycle.NewDefaultManager(newHLS, log)
 	return newHLS
@@ -131,7 +144,7 @@ func (mxr *muxer) Mux(codecPars gomedia.CodecParametersPair) (err error) {
 		mxr.initVersion = 0
 		mxr.initCache[0] = codecPars
 		// Create a new segment and set it as the current segment.
-		newSeg := newSegment(0, mxr.fragmentDuration, mxr.segmentDuration, codecPars, mxr.log)
+		newSeg := newSegment(0, mxr.fragmentDuration, mxr.segmentDuration, codecPars, mxr.mediaName, mxr.log)
 		newSeg.initVersion = mxr.initVersion
 		mxr.addSegment(newSeg)
 
@@ -160,8 +173,8 @@ func (mxr *muxer) UpdateCodecParameters(codecPars gomedia.CodecParametersPair) e
 	case <-curSeg.finished:
 	default:
 		if curSeg.duration > 0 {
-			curSeg.manifestEntry = fmt.Sprintf("%s#EXT-X-PROGRAM-DATE-TIME:%s\n#EXTINF:%.5f\nsegment/%d/cubic.m4s\n",
-				curSeg.cacheEntry, curSeg.time.Format("2006-01-02T15:04:05.000000Z"), curSeg.duration.Seconds(), curSeg.id)
+			curSeg.manifestEntry = fmt.Sprintf("%s#EXT-X-PROGRAM-DATE-TIME:%s\n#EXTINF:%.5f\nsegment/%d/%s.m4s\n",
+				curSeg.cacheEntry, curSeg.time.Format("2006-01-02T15:04:05.000000Z"), curSeg.duration.Seconds(), curSeg.id, curSeg.mediaName)
 		}
 		close(curSeg.finished)
 	}
@@ -171,7 +184,7 @@ func (mxr *muxer) UpdateCodecParameters(codecPars gomedia.CodecParametersPair) e
 	mxr.initCache[mxr.initVersion] = codecPars
 
 	newSegID := curSeg.id + 1
-	newSeg := newSegment(newSegID, mxr.fragmentDuration, mxr.segmentDuration, codecPars, mxr.log)
+	newSeg := newSegment(newSegID, mxr.fragmentDuration, mxr.segmentDuration, codecPars, mxr.mediaName, mxr.log)
 	newSeg.discontinuity = true
 	newSeg.initVersion = mxr.initVersion
 	mxr.addSegment(newSeg)
@@ -244,7 +257,7 @@ func (mxr *muxer) WritePacket(inpPkt gomedia.Packet) (err error) {
 	case <-mxr.getCurSegment().finished:
 		// The current segment has finished, create a new one and update the segment list.
 		newSegID := mxr.getCurSegment().id + 1
-		newSeg := newSegment(newSegID, mxr.fragmentDuration, mxr.segmentDuration, mxr.codecPars, mxr.log)
+		newSeg := newSegment(newSegID, mxr.fragmentDuration, mxr.segmentDuration, mxr.codecPars, mxr.mediaName, mxr.log)
 		newSeg.initVersion = mxr.initVersion
 		mxr.addSegment(newSeg)
 		mxr.evictOldSegments()
