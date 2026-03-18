@@ -148,19 +148,17 @@ func ParseSliceHeaderFromNALU(packet []byte) (sliceType SliceType, err error) {
 }
 
 func ParseSliceHeaderComplete(packet []byte) (header SliceHeader, err error) {
-	if len(packet) <= 1 {
+	if len(packet) < 3 { //nolint:mnd // RFC 7798 §1.1.4: 2-byte NAL header + at least 1 payload byte
 		err = errors.New("h265parser: packet too short to parse slice header")
 		return
 	}
-	nalUnitTypy := packet[0] & 0x1f //nolint:mnd // 0x1f is a mask for the NAL unit type in H.265
-	switch nalUnitTypy {
-	case 1, 2, 5, 19: //nolint:mnd // These are NAL unit types that contain slice headers
-	default:
-		err = fmt.Errorf("h265parser: nal_unit_type=%d has no slice header", nalUnitTypy)
+	nalUnitType := (packet[0] >> 1) & 0x3f //nolint:mnd // RFC 7798 §1.1.4: nal_unit_type = (byte0 >> 1) & 0x3F
+	if nalUnitType >= 32 {                  //nolint:mnd // RFC 7798 §1.1.4: types 0-31 are VCL; non-VCL have no slice header
+		err = fmt.Errorf("h265parser: nal_unit_type=%d has no slice header", nalUnitType)
 		return
 	}
 
-	r := &bits.GolombBitReader{R: bytes.NewReader(packet[1:])}
+	r := &bits.GolombBitReader{R: bytes.NewReader(packet[2:])} // RFC 7798 §1.1.4: skip both header bytes
 
 	// Parse slice_address (first_slice_segment_in_pic_flag is at bit 0)
 	if header.SliceAddress, err = r.ReadExponentialGolombCode(); err != nil {

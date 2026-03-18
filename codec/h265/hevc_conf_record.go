@@ -7,8 +7,11 @@ import (
 )
 
 func IsDataNALU(b []byte) bool {
-	typ := b[0] & 0x1f //nolint:mnd // 0x1f is a mask for the NAL unit type in H.265
-	return typ >= 1 && typ <= 5
+	if len(b) < 2 { //nolint:mnd // H.265 NAL header is 2 bytes
+		return false
+	}
+	typ := (b[0] >> 1) & 0x3f //nolint:mnd // RFC 7798 §1.1.4: nal_unit_type = (byte0 >> 1) & 0x3F
+	return typ < 32            //nolint:mnd // RFC 7798 §1.1.4: types 0-31 are VCL (data) NAL units
 }
 
 var StartCodeBytes = []byte{0, 0, 1}
@@ -54,16 +57,14 @@ func (avc *HEVCDecoderConfRecord) Unmarshal(b []byte) (n int, err error) {
 		n += vpslen
 	}
 
-	if len(b) < n+1 {
+	if len(b) < n+3 { //nolint:mnd // need 1 byte type + 2 bytes numNalus
 		err = ErrDecconfInvalid
 		return
 	}
 
-	n++
-	n++
-
-	spscount := int(b[n])
-	n++
+	n++                              // skip array_completeness|NAL_unit_type byte
+	spscount := int(pio.U16BE(b[n:])) // numNalus is uint16 BE per ISO 14496-15
+	n += 2
 
 	for range spscount {
 		if len(b) < n+2 {
@@ -81,11 +82,14 @@ func (avc *HEVCDecoderConfRecord) Unmarshal(b []byte) (n int, err error) {
 		n += spslen
 	}
 
-	n++
-	n++
+	if len(b) < n+3 { //nolint:mnd // need 1 byte type + 2 bytes numNalus
+		err = ErrDecconfInvalid
+		return
+	}
 
-	ppscount := int(b[n])
-	n++
+	n++                              // skip array_completeness|NAL_unit_type byte
+	ppscount := int(pio.U16BE(b[n:])) // numNalus is uint16 BE per ISO 14496-15
+	n += 2
 
 	for range ppscount {
 		if len(b) < n+2 {
@@ -127,7 +131,7 @@ func (avc *HEVCDecoderConfRecord) Marshal(b []byte) (n int) {
 	b[21] = 3
 	b[22] = 3
 	n += 23
-	if len(avc.VPS[0]) > 0 {
+	if len(avc.VPS) > 0 && len(avc.VPS[0]) > 0 {
 		b[n] = (avc.VPS[0][0] >> 1) & 0x3f //nolint:mnd // 0x3f is a mask for the VPS NAL unit type
 		n++
 		b[n] = byte(len(avc.VPS) >> 8) //nolint:mnd // 8 bits for the high byte of the VPS count
@@ -146,7 +150,9 @@ func (avc *HEVCDecoderConfRecord) Marshal(b []byte) (n int) {
 			n += len(vps)
 		}
 	}
-	b[n] = (avc.SPS[0][0] >> 1) & 0x3f //nolint:mnd // 0x3f is a mask for the SPS NAL unit type
+	if len(avc.SPS) > 0 && len(avc.SPS[0]) > 0 {
+		b[n] = (avc.SPS[0][0] >> 1) & 0x3f //nolint:mnd // 0x3f is a mask for the SPS NAL unit type
+	}
 	n++
 	b[n] = byte(len(avc.SPS) >> 8) //nolint:mnd // 8 bits for the high byte of the SPS count
 	n++
@@ -163,7 +169,9 @@ func (avc *HEVCDecoderConfRecord) Marshal(b []byte) (n int) {
 		copy(b[n:], sps)
 		n += len(sps)
 	}
-	b[n] = (avc.PPS[0][0] >> 1) & 0x3f //nolint:mnd // 0x3f is a mask for the PPS NAL unit type
+	if len(avc.PPS) > 0 && len(avc.PPS[0]) > 0 {
+		b[n] = (avc.PPS[0][0] >> 1) & 0x3f //nolint:mnd // 0x3f is a mask for the PPS NAL unit type
+	}
 	n++
 	b[n] = byte(len(avc.PPS) >> 8) //nolint:mnd // 8 bits for the high byte of the PPS count
 	n++

@@ -203,13 +203,12 @@ func FillADTSHeader(header []byte, config MPEG4AudioConfig, samples int, payload
 	}
 
 	// AAAAAAAA AAAABCCD EEFFFFGH HHIJKLMM MMMMMMMM MMMOOOOO OOOOOOPP (QQQQQQQQ QQQQQQQQ)
+	// header[5] bits 4-0: buffer_fullness[10:6] — set to 0x1f (all ones = VBR)
+	// header[6] bits 7-2: buffer_fullness[5:0]  — set to 0xfc (all ones = VBR)
 	header[0] = 0xff
 	header[1] = 0xf1
-	header[2] = 0x50
-	header[3] = 0x80
-	header[4] = 0x43
 	header[5] = 0xff
-	header[6] = 0xcd
+	header[6] = 0xff
 
 	header[2] = (byte(config.ObjectType-1)&0x3)<<6 |
 		(byte(config.SampleRateIndex)&0xf)<<2 | byte(config.ChannelConfig>>2)&0x1

@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/sirupsen/logrus"
@@ -65,6 +67,7 @@ func main() {
 	n := flag.Int("n", 100, "number of packets to capture")
 	paramsFile := flag.String("params-file", "parameters.json", "output file for codec parameters")
 	packetsFile := flag.String("packets-file", "packets.json", "output file for captured packets")
+	split := flag.Bool("split", false, "write one file per codec (e.g. packets_H264.json, parameters_AAC.json)")
 	flag.Parse()
 
 	if *url == "" {
@@ -90,10 +93,12 @@ func main() {
 		params.VideoCodecParameters != nil,
 		params.AudioCodecParameters != nil)
 
-	// --- Capture N packets, tracking last codec parameters ---
+	// --- Capture N packets, tracking last codec parameters per codec ---
 	var lastVideoParams gomedia.VideoCodecParameters
 	var lastAudioParams gomedia.AudioCodecParameters
 	captured := make([]PacketJSON, 0, *n)
+	// per-codec buckets used when -split is set
+	perCodec := map[string][]PacketJSON{}
 	logrus.Infof("Capturing %d packets...", *n)
 
 	for len(captured) < *n {
@@ -131,6 +136,9 @@ func main() {
 		}
 
 		captured = append(captured, entry)
+		if *split && entry.Codec != "" {
+			perCodec[entry.Codec] = append(perCodec[entry.Codec], entry)
+		}
 		pkt.Release()
 
 		if len(captured)%50 == 0 {
@@ -175,15 +183,42 @@ done:
 		pj.Audio = aj
 	}
 
-	if err := writeJSON(*paramsFile, pj); err != nil {
-		logrus.Fatalf("Failed to write parameters: %v", err)
-	}
-	logrus.Infof("Wrote codec parameters to %s", *paramsFile)
+	if *split {
+		// Write one parameters file per codec.
+		if pj.Video != nil {
+			path := splitPath(*paramsFile, pj.Video.Codec)
+			if err := writeJSON(path, pj.Video); err != nil {
+				logrus.Fatalf("Failed to write video parameters: %v", err)
+			}
+			logrus.Infof("Wrote video parameters to %s", path)
+		}
+		if pj.Audio != nil {
+			path := splitPath(*paramsFile, pj.Audio.Codec)
+			if err := writeJSON(path, pj.Audio); err != nil {
+				logrus.Fatalf("Failed to write audio parameters: %v", err)
+			}
+			logrus.Infof("Wrote audio parameters to %s", path)
+		}
 
-	if err := writeJSON(*packetsFile, PacketsJSON{Packets: captured}); err != nil {
-		logrus.Fatalf("Failed to write packets: %v", err)
+		// Write one packets file per codec.
+		for codec, pkts := range perCodec {
+			path := splitPath(*packetsFile, codec)
+			if err := writeJSON(path, PacketsJSON{Packets: pkts}); err != nil {
+				logrus.Fatalf("Failed to write packets for %s: %v", codec, err)
+			}
+			logrus.Infof("Wrote %d %s packets to %s", len(pkts), codec, path)
+		}
+	} else {
+		if err := writeJSON(*paramsFile, pj); err != nil {
+			logrus.Fatalf("Failed to write parameters: %v", err)
+		}
+		logrus.Infof("Wrote codec parameters to %s", *paramsFile)
+
+		if err := writeJSON(*packetsFile, PacketsJSON{Packets: captured}); err != nil {
+			logrus.Fatalf("Failed to write packets: %v", err)
+		}
+		logrus.Infof("Wrote %d packets to %s", len(captured), *packetsFile)
 	}
-	logrus.Infof("Wrote %d packets to %s", len(captured), *packetsFile)
 }
 
 func b64(data []byte) string {
@@ -191,6 +226,14 @@ func b64(data []byte) string {
 		return ""
 	}
 	return base64.StdEncoding.EncodeToString(data)
+}
+
+// splitPath derives a per-codec filename from a base path by inserting the
+// codec name before the extension, e.g. "packets.json" → "packets_H264.json".
+func splitPath(base, codec string) string {
+	ext := filepath.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	return stem + "_" + codec + ext
 }
 
 func writeJSON(path string, v any) error {

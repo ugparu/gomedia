@@ -38,17 +38,24 @@ func NewCodecDataFromAVCDecoderConfRecord(record []byte) (codecPar CodecParamete
 	}
 	codecPar.CodecType = gomedia.H265
 	// Calculate bitrate based on width, FPS and a constant factor
-	codecPar.BRate = uint(
-		float64(codecPar.Width()) *
-			(bitrateEstimationFactor * (referenceFrameRate / float64(codecPar.FPS()))) *
-			kbpsToBpsMultiplier,
-	)
+	if fps := codecPar.FPS(); fps > 0 {
+		codecPar.BRate = uint(
+			float64(codecPar.Width()) *
+				(bitrateEstimationFactor * (referenceFrameRate / float64(fps))) *
+				kbpsToBpsMultiplier,
+		)
+	}
 
 	return
 }
 
 func NewCodecDataFromVPSAndSPSAndPPS(vps, sps, pps []byte) (codecPar CodecParameters, err error) {
 	if len(sps) == 0 || len(pps) == 0 || len(vps) == 0 {
+		// SDP may not carry VPS/SPS/PPS for some cameras; they arrive in-band later.
+		return
+	}
+	if len(sps) < 6 { //nolint:mnd // need bytes 3,4,5 for profile/compat/level
+		err = errors.New("h265parser: SPS too short (need at least 6 bytes)")
 		return
 	}
 
@@ -69,11 +76,13 @@ func NewCodecDataFromVPSAndSPSAndPPS(vps, sps, pps []byte) (codecPar CodecParame
 	codecPar.Record = buf
 	codecPar.CodecType = gomedia.H265
 	// Calculate bitrate based on width, FPS and a constant factor
-	codecPar.BRate = uint(
-		float64(codecPar.Width()) *
-			(bitrateEstimationFactor * (referenceFrameRate / float64(codecPar.FPS()))) *
-			kbpsToBpsMultiplier,
-	)
+	if fps := codecPar.FPS(); fps > 0 {
+		codecPar.BRate = uint(
+			float64(codecPar.Width()) *
+				(bitrateEstimationFactor * (referenceFrameRate / float64(fps))) *
+				kbpsToBpsMultiplier,
+		)
+	}
 
 	return
 }
@@ -84,21 +93,21 @@ func (par *CodecParameters) AVCDecoderConfRecordBytes() []byte {
 
 func (par *CodecParameters) SPS() []byte {
 	if len(par.RecordInfo.SPS) == 0 {
-		return []byte{}
+		return nil
 	}
 	return par.RecordInfo.SPS[0]
 }
 
 func (par *CodecParameters) PPS() []byte {
 	if len(par.RecordInfo.PPS) == 0 {
-		return []byte{}
+		return nil
 	}
 	return par.RecordInfo.PPS[0]
 }
 
 func (par *CodecParameters) VPS() []byte {
 	if len(par.RecordInfo.VPS) == 0 {
-		return []byte{}
+		return nil
 	}
 	return par.RecordInfo.VPS[0]
 }

@@ -8,14 +8,13 @@ import (
 // Opus TOC bit constants
 const (
 	configShift      = 3    // Number of bits to shift to get the config
-	stereoMask       = 0x4  // Bitmask to check for stereo
 	framesTocMask    = 0x3  // Bitmask for the frame count code
-	multiFrameMask   = 0x3F // Bitmask for number of frames in mode 3
+	multiFrameMask   = 0x3F // Bitmask for number of frames in mode 3 (RFC 6716 §3.2.5)
 	minPacketSize    = 1    // Minimum size of an Opus packet
-	minMultiPackSize = 2    // Minimum size for a multi-frame packet
-	singleFrameCode  = 0    // TOC code for a single frame
-	twoFramesCode    = 1    // TOC code for two frames (same as 2)
-	// TOC code 3 is for multiple frames with count in second byte
+	minMultiPackSize = 2    // Minimum size for a multi-frame packet (TOC + frame-count byte)
+	singleFrameCode  = 0    // TOC code for a single frame (RFC 6716 §3.2.1)
+	twoFramesCode    = 1    // TOC code for two frames; code 2 also means two frames
+	maxFrameCount    = 48   // Maximum number of frames per packet (RFC 6716 §3.2.5)
 )
 
 func PacketDuration(pkt []byte) (time.Duration, error) {
@@ -29,21 +28,22 @@ func PacketDuration(pkt []byte) (time.Duration, error) {
 	numFr := 0
 	switch code {
 	case singleFrameCode:
-		// one frame
-		if len(pkt) > minPacketSize {
-			numFr = 1
-		}
+		// RFC 6716 §3.2.1: Code 0 always contains exactly one frame.
+		// A TOC-only packet (0-byte frame body) is a valid DTX frame.
+		numFr = 1
 	case twoFramesCode, twoFramesCode + 1: // Cases 1 and 2 both indicate two frames
-		// two frames
-		if len(pkt) > minMultiPackSize {
-			numFr = 2
-		}
+		// RFC 6716 §3.2.2/§3.2.3: Code 1 and Code 2 always contain exactly two frames.
+		numFr = 2
 	case framesTocMask: // Case 3 - multiple frames
-		// N frames
+		// RFC 6716 §3.2.5: second byte carries the frame count M.
 		if len(pkt) < minMultiPackSize {
 			return 0, errors.New("invalid opus packet")
 		}
 		numFr = int(pkt[1] & multiFrameMask)
+		// RFC 6716 §3.2.5: M MUST be in the range 1 to 48.
+		if numFr < 1 || numFr > maxFrameCount {
+			return 0, errors.New("invalid opus frame count")
+		}
 	}
 	return time.Duration(numFr) * opusFrameTimes[config], nil
 }

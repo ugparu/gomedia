@@ -543,7 +543,9 @@ func parseSPS(data []byte) (s SPSInfo, err error) { //nolint:nakedret,gocyclo,cy
 			if err != nil {
 				return s, err
 			}
-			s.FPS = uint(math.Floor(float64(timeScale) / float64(numUnitsInTick) / frameRateDivisor))
+			if numUnitsInTick > 0 {
+				s.FPS = uint(math.Floor(float64(timeScale) / float64(numUnitsInTick) / frameRateDivisor))
+			}
 			var fixedFrameRateFlag uint
 			fixedFrameRateFlag, err = r.ReadBit()
 			if err != nil {

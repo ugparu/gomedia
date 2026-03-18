@@ -2,6 +2,7 @@ package aac
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -302,7 +303,7 @@ func TestCodecParameters_Accessors(t *testing.T) {
 			require.NoError(t, err, "object type %d", ot)
 
 			tag := cod.Tag()
-			require.Equal(t, "mp4a.40."+string(rune('0'+ot)), tag, "object type %d", ot)
+			require.Equal(t, fmt.Sprintf("mp4a.40.%d", ot), tag, "object type %d", ot)
 		}
 	})
 }

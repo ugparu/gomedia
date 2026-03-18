@@ -1,0 +1,15 @@
+{
+  "url": "rtsp://admin:cubiccv2025@10.0.110.237:554/cam/realmonitor?channel=1\u0026subtype=0",
+  "video": {
+    "codec": "H264",
+    "stream_index": 0,
+    "record": "AU0AKf/hABVnTQApiopQKALdNEAAAPoAACzsAQABAAVo7jyAAA==",
+    "sps": "Z00AKYqKUCgC3TRAAAD6AAAs7AEA",
+    "pps": "aO48gAA="
+  },
+  "audio": {
+    "codec": "AAC",
+    "stream_index": 1,
+    "config": "FAg="
+  }
+}

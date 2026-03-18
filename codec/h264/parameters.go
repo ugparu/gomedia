@@ -17,6 +17,10 @@ type CodecParameters struct {
 }
 
 func NewCodecDataFromSPSAndPPS(sps, pps []byte) (codecPar CodecParameters, err error) {
+	if len(sps) < 4 {
+		err = errors.New("h264parser: SPS too short (need at least 4 bytes)")
+		return
+	}
 	recordinfo := AVCDecoderConfRecord{
 		AVCProfileIndication: sps[1],
 		ProfileCompatibility: sps[2],
@@ -36,10 +40,12 @@ func NewCodecDataFromSPSAndPPS(sps, pps []byte) (codecPar CodecParameters, err e
 	if codecPar.SPSInfo, err = parseSPS(sps); err != nil {
 		return
 	}
-	// Calculate bitrate based on width, scale factor, and frame rate
-	widthFactor := float64(codecPar.Width())
-	fpsRatio := bitrateFrameRate / float64(codecPar.FPS())
-	codecPar.BRate = uint(widthFactor*float64(bitrateScaleFactor)*fpsRatio) * bitrateMultiplier
+	// Calculate bitrate based on width, scale factor, and frame rate; skip if FPS is unknown.
+	if fps := codecPar.FPS(); fps > 0 {
+		widthFactor := float64(codecPar.Width())
+		fpsRatio := bitrateFrameRate / float64(fps)
+		codecPar.BRate = uint(widthFactor*float64(bitrateScaleFactor)*fpsRatio) * bitrateMultiplier
+	}
 
 	return
 }
@@ -63,10 +69,12 @@ func NewCodecDataFromHevcDecoderConfRecord(record []byte) (codecPar CodecParamet
 	}
 
 	codecPar.CodecType = gomedia.H264
-	// Calculate bitrate based on width, scale factor, and frame rate
-	widthFactor := float64(codecPar.Width())
-	fpsRatio := bitrateFrameRate / float64(codecPar.FPS())
-	codecPar.BRate = uint(widthFactor*float64(bitrateScaleFactor)*fpsRatio) * bitrateMultiplier
+	// Calculate bitrate based on width, scale factor, and frame rate; skip if FPS is unknown.
+	if fps := codecPar.FPS(); fps > 0 {
+		widthFactor := float64(codecPar.Width())
+		fpsRatio := bitrateFrameRate / float64(fps)
+		codecPar.BRate = uint(widthFactor*float64(bitrateScaleFactor)*fpsRatio) * bitrateMultiplier
+	}
 
 	return
 }
@@ -78,10 +86,16 @@ func (par *CodecParameters) AVCDecoderConfRecordBytes() []byte {
 }
 
 func (par *CodecParameters) SPS() []byte {
+	if len(par.RecordInfo.SPS) == 0 {
+		return nil
+	}
 	return par.RecordInfo.SPS[0]
 }
 
 func (par *CodecParameters) PPS() []byte {
+	if len(par.RecordInfo.PPS) == 0 {
+		return nil
+	}
 	return par.RecordInfo.PPS[0]
 }
 
