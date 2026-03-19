@@ -32,7 +32,7 @@ int aacenc_init(aacenc_t* h, int aot, int channels, int sample_rate, int bitrate
     //         - 6: Audio Mux Elements (LATM) with muxConfigPresent = 1
     //         - 7: Audio Mux Elements (LATM) with muxConfigPresent = 0, out of band StreamMuxConfig
     //         - 10: Audio Sync Stream (LOAS)
-	int trans_mux = 0; // adts
+	int trans_mux = 0; // raw access units
 
 	int signaling = 0; // Implicit backward compatible signaling (default for ADIF and ADTS)
 	int afterburner = 1; // 1 or 0(default)
@@ -55,14 +55,13 @@ int aacenc_init(aacenc_t* h, int aot, int channels, int sample_rate, int bitrate
 	//  - CPE: Channel Pair.
 	//  - LFE: Low Frequency Element.
     CHANNEL_MODE mode = MODE_INVALID;
-    int sce = 0, cpe = 0;
     switch (channels) {
-        case 1: mode = MODE_1;       sce = 1; cpe = 0; break;
-        case 2: mode = MODE_2;       sce = 0; cpe = 1; break;
-        case 3: mode = MODE_1_2;     sce = 1; cpe = 1; break;
-        case 4: mode = MODE_1_2_1;   sce = 2; cpe = 1; break;
-        case 5: mode = MODE_1_2_2;   sce = 1; cpe = 2; break;
-        case 6: mode = MODE_1_2_2_1; sce = 2; cpe = 2; break;
+        case 1: mode = MODE_1;       break;
+        case 2: mode = MODE_2;       break;
+        case 3: mode = MODE_1_2;     break;
+        case 4: mode = MODE_1_2_1;   break;
+        case 5: mode = MODE_1_2_2;   break;
+        case 6: mode = MODE_1_2_2_1; break;
         default:
             return -1;
     }

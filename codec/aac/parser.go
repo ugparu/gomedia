@@ -83,6 +83,17 @@ var sampleRateTable = []int{
 	24000, 22050, 16000, 12000, 11025, 8000, 7350,
 }
 
+// SampleRateIndex returns the MPEG-4 sample rate index for the given rate.
+// If the rate is not in the standard table, it returns 0xf (explicit rate).
+func SampleRateIndex(rate int) uint {
+	for i, r := range sampleRateTable {
+		if r == rate {
+			return uint(i) //nolint:gosec // index fits in uint
+		}
+	}
+	return 0xf //nolint:mnd // 0xf signals explicit sample rate in AudioSpecificConfig
+}
+
 /*
 These are the channel configurations:
 0: Defined in AOT Specifc Config
@@ -95,6 +106,15 @@ These are the channel configurations:
 7: 8 channels: front-center, front-left, front-right, side-left, side-right, back-left, back-right, LFE-channel
 8-15: Reserved.
 */
+// ChannelLayoutForConfig returns the channel layout bitmask for the given
+// AAC channel configuration index (0-7). Returns 0 for out-of-range values.
+func ChannelLayoutForConfig(config uint) gomedia.ChannelLayout {
+	if config < uint(len(chanConfigTable)) {
+		return chanConfigTable[config]
+	}
+	return 0
+}
+
 var chanConfigTable = []gomedia.ChannelLayout{
 	0,
 	gomedia.ChFrontCenter,

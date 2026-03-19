@@ -19,6 +19,7 @@ const AlawFrameSize = ALAWSampleRate * AlawChannels * 2 / 10
 type alawEncoder struct {
 	r             aresample.ResampleSampleRate
 	inpChannels   uint8
+	inpFrameSize  int
 	frameDuration time.Duration
 	buf           []uint8
 	codecPar      *pcm.CodecParameters
@@ -41,7 +42,10 @@ func (e *alawEncoder) Init(params *pcm.CodecParameters) error {
 		sampleRate = uint64(maxInt32)
 	}
 
-	// Use safe conversion function
+	// Input frame size scales with channel count so we consume a full duration of multi-channel audio
+	e.inpFrameSize = AlawFrameSize * int(e.inpChannels)
+
+	// Resampler operates on mono data — multi-channel input is downmixed before resampling
 	e.r, err = utils.NewPcmS16leResampler(AlawChannels, int(uint32(sampleRate)), ALAWSampleRate)
 
 	// Division by 10 is used to create 100ms frame duration
@@ -55,13 +59,18 @@ func (e *alawEncoder) Init(params *pcm.CodecParameters) error {
 }
 
 func (e *alawEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err error) {
+	if len(pkt.Data()) < 2 {
+		return nil, nil
+	}
 	e.buf = append(e.buf, pkt.Data()...)
 
-	for len(e.buf) >= AlawFrameSize {
-		inData := e.buf[:AlawFrameSize]
-		e.buf = e.buf[AlawFrameSize:]
+	consumed := 0
+	for len(e.buf)-consumed >= e.inpFrameSize {
+		inData := e.buf[consumed : consumed+e.inpFrameSize]
+		consumed += e.inpFrameSize
 
 		var inBuf []byte
+		var poolBuf buffer.PooledBuffer
 		if e.inpChannels == 1 {
 			inBuf = inData
 		} else {
@@ -69,6 +78,9 @@ func (e *alawEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err e
 			// Each sample is 2 bytes, and samples are interleaved by channel
 			bytesPerSample := 2
 			totalChannels := int(e.inpChannels)
+			monoSize := len(inData) / totalChannels
+			poolBuf = buffer.Get(monoSize)
+			inBuf = poolBuf.Data()[:0]
 			for i := 0; i < len(inData); i += bytesPerSample * totalChannels {
 				// Take the 2 bytes of the first channel's sample
 				if i+1 < len(inData) {
@@ -78,7 +90,13 @@ func (e *alawEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err e
 		}
 
 		if inBuf, err = e.r.Resample(inBuf); err != nil {
+			if poolBuf != nil {
+				poolBuf.Release()
+			}
 			return
+		}
+		if poolBuf != nil {
+			poolBuf.Release()
 		}
 		encoded := g711.EncodeAlaw(inBuf)
 		var outData []byte
@@ -95,8 +113,17 @@ func (e *alawEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err e
 		p.Slot = handle
 		resp = append(resp, p)
 	}
+
+	// Compact: copy remaining samples to the front to prevent unbounded backing-array growth
+	remaining := len(e.buf) - consumed
+	copy(e.buf, e.buf[consumed:])
+	e.buf = e.buf[:remaining]
+
 	return
 }
 
 func (e *alawEncoder) Close() {
+	e.buf = nil
+	e.ring = nil
+	e.r = nil
 }

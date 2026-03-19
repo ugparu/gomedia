@@ -2,6 +2,7 @@
 package opus
 
 import (
+	"fmt"
 	"time"
 	"unsafe"
 
@@ -47,9 +48,9 @@ func (e *opusEncoder) Init(params *pcm.CodecParameters) error {
 
 	e.frameSize = int(params.Channels()) * 40 * opusSampleRate / 1000
 
-	// Safe type conversion for duration calculation
 	safeRate := uint32(sampleRate)
-	e.frameDuration = time.Duration(40*opusSampleRate/1000) * time.Second / time.Duration(safeRate)
+	// Frame duration is always relative to 48kHz (the Opus internal rate)
+	e.frameDuration = time.Duration(40*opusSampleRate/1000) * time.Second / time.Duration(opusSampleRate)
 
 	channels := int(params.Channels())
 	// Using a safer type to convert to int
@@ -58,9 +59,14 @@ func (e *opusEncoder) Init(params *pcm.CodecParameters) error {
 		return err
 	}
 
-	cl := gomedia.ChMono
-	if channels == 2 {
+	var cl gomedia.ChannelLayout
+	switch channels {
+	case 1:
+		cl = gomedia.ChMono
+	case 2:
 		cl = gomedia.ChStereo
+	default:
+		return fmt.Errorf("opus encoder: unsupported channel count %d (only mono and stereo are supported)", channels)
 	}
 
 	e.codecPar = goopus.NewCodecParameters(params.StreamIndex(), cl, opusSampleRate)
@@ -70,15 +76,27 @@ func (e *opusEncoder) Init(params *pcm.CodecParameters) error {
 }
 
 func (e *opusEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err error) {
-	buf16 := unsafe.Slice((*int16)(unsafe.Pointer(&pkt.Data()[0])), pkt.Len()/2)
+	if len(pkt.Data()) < 2 {
+		return nil, nil
+	}
+
+	// Resample input PCM to 48kHz before encoding
+	resampled, err := e.r.Resample(pkt.Data())
+	if err != nil {
+		return nil, err
+	}
+
+	if len(resampled) < 2 {
+		return nil, nil
+	}
+
+	buf16 := unsafe.Slice((*int16)(unsafe.Pointer(&resampled[0])), len(resampled)/2)
 	e.buf = append(e.buf, buf16...)
 
-	for {
-		if len(e.buf) < e.frameSize {
-			return resp, nil
-		}
-		pcm := e.buf[:e.frameSize]
-		e.buf = e.buf[e.frameSize:]
+	consumed := 0
+	for len(e.buf)-consumed >= e.frameSize {
+		pcm := e.buf[consumed : consumed+e.frameSize]
+		consumed += e.frameSize
 
 		const bufSize = 1000
 		var outData []byte
@@ -100,7 +118,18 @@ func (e *opusEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err e
 		p.Slot = handle
 		resp = append(resp, p)
 	}
+
+	// Compact: copy remaining samples to the front to prevent unbounded backing-array growth
+	remaining := len(e.buf) - consumed
+	copy(e.buf, e.buf[consumed:])
+	e.buf = e.buf[:remaining]
+
+	return resp, nil
 }
 
 func (e *opusEncoder) Close() {
+	e.buf = nil
+	e.ring = nil
+	e.r = nil
+	e.Encoder = nil
 }
