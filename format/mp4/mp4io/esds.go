@@ -1,8 +1,14 @@
 package mp4io
 
 import (
+	"fmt"
+
 	"github.com/ugparu/gomedia/utils/bits/pio"
 )
+
+func (self ElemStreamDesc) String() string {
+	return fmt.Sprintf("configlen=%d", len(self.DecConfig))
+}
 
 const (
 	MP4ESDescrTag          = 3

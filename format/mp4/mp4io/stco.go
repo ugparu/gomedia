@@ -1,6 +1,14 @@
 package mp4io
 
-import "github.com/ugparu/gomedia/utils/bits/pio"
+import (
+	"fmt"
+
+	"github.com/ugparu/gomedia/utils/bits/pio"
+)
+
+func (self ChunkOffset) String() string {
+	return fmt.Sprintf("entries=%d", len(self.Entries))
+}
 
 const STCO = Tag(0x7374636f)
 

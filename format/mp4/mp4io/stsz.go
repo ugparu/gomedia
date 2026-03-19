@@ -1,6 +1,14 @@
 package mp4io
 
-import "github.com/ugparu/gomedia/utils/bits/pio"
+import (
+	"fmt"
+
+	"github.com/ugparu/gomedia/utils/bits/pio"
+)
+
+func (self SampleSize) String() string {
+	return fmt.Sprintf("entries=%d", len(self.Entries))
+}
 
 const STSZ = Tag(0x7374737a)
 

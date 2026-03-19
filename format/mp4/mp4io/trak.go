@@ -89,6 +89,30 @@ func (self *Track) Unmarshal(b []byte, offset int) (n int, err error) {
 	}
 	return
 }
+func (self *Track) GetAVC1Conf() (conf *AVC1Conf) {
+	atom := FindChildren(self, AVCC)
+	conf, _ = atom.(*AVC1Conf)
+	return
+}
+
+func (self *Track) GetHV1Conf() (conf *HV1Conf) {
+	atom := FindChildren(self, HVCC)
+	conf, _ = atom.(*HV1Conf)
+	return
+}
+
+func (self *Track) GetMJPGDesc() (desc *MJPGDesc) {
+	atom := FindChildren(self, MJPG)
+	desc, _ = atom.(*MJPGDesc)
+	return
+}
+
+func (self *Track) GetElemStreamDesc() (esds *ElemStreamDesc) {
+	atom := FindChildren(self, ESDS)
+	esds, _ = atom.(*ElemStreamDesc)
+	return
+}
+
 func (self Track) Children() (r []Atom) {
 	if self.Header != nil {
 		r = append(r, self.Header)

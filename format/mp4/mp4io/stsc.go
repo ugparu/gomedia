@@ -1,6 +1,14 @@
 package mp4io
 
-import "github.com/ugparu/gomedia/utils/bits/pio"
+import (
+	"fmt"
+
+	"github.com/ugparu/gomedia/utils/bits/pio"
+)
+
+func (self SampleToChunk) String() string {
+	return fmt.Sprintf("entries=%d", len(self.Entries))
+}
 
 const STSC = Tag(0x73747363)
 
