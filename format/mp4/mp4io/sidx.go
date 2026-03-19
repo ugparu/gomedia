@@ -26,7 +26,7 @@ type Reference struct {
 type SegmentIndex struct {
 	Version     byte  // 0 or 1; 1 signals time is 64-bit
 	Flags       int32 // 3 bytes
-	RefernceID  int32 // ID of the reference (track) that points to the segment
+	ReferenceID  int32 // ID of the reference (track) that points to the segment
 	Timescale   int32
 	EarliestPT  int64
 	FirstOffset int64
@@ -56,9 +56,9 @@ func (sidx SegmentIndex) Marshal(b []byte) (n int) {
 func (sidx *SegmentIndex) marshal(b []byte) (n int) {
 	pio.PutU8(b[n:], sidx.Version)
 	n += 1
-	pio.PutU32BE(b[n:], uint32(sidx.Flags))
+	pio.PutU24BE(b[n:], uint32(sidx.Flags))
 	n += 3
-	pio.PutU32BE(b[n:], uint32(sidx.RefernceID))
+	pio.PutU32BE(b[n:], uint32(sidx.ReferenceID))
 	n += 4
 	pio.PutU32BE(b[n:], uint32(sidx.Timescale))
 	n += 4

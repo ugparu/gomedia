@@ -147,26 +147,22 @@ func (tfr *TrackFragRun) Unmarshal(b []byte, offset int) (n int, err error) {
 	}
 
 	for i := 0; i < int(_lenEntries); i++ {
-		var flags uint32
-		if i > 0 {
-			flags = tfr.Flags
-		} else {
-			flags = tfr.FirstSampleFlags
-		}
 		entry := &tfr.Entries[i]
-		if flags&TRUNSampleDuration != 0 {
+		if tfr.Flags&TRUNSampleDuration != 0 {
 			entry.Duration = pio.U32BE(b[n:])
 			n += 4
 		}
-		if flags&TRUNSampleSize != 0 {
+		if tfr.Flags&TRUNSampleSize != 0 {
 			entry.Size = pio.U32BE(b[n:])
 			n += 4
 		}
-		if flags&TRUNSampleFlags != 0 {
+		if tfr.Flags&TRUNSampleFlags != 0 {
 			entry.Flags = pio.U32BE(b[n:])
 			n += 4
+		} else if i == 0 && tfr.Flags&TRUNFirstSampleFlags != 0 {
+			entry.Flags = tfr.FirstSampleFlags
 		}
-		if flags&TRUNSampleCTS != 0 {
+		if tfr.Flags&TRUNSampleCTS != 0 {
 			entry.Cts = pio.U32BE(b[n:])
 			n += 4
 		}

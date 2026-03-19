@@ -19,7 +19,7 @@ type MJPGDesc struct {
 	Width                int16
 	Height               int16
 	HorizontalResolution float64
-	VorizontalResolution float64
+	VerticalResolution float64
 	FrameCount           int16
 	CompressorName       [32]byte
 	Depth                int16
@@ -54,7 +54,7 @@ func (self MJPGDesc) marshal(b []byte) (n int) {
 	n += 2
 	PutFixed32(b[n:], self.HorizontalResolution)
 	n += 4
-	PutFixed32(b[n:], self.VorizontalResolution)
+	PutFixed32(b[n:], self.VerticalResolution)
 	n += 4
 	n += 4
 	pio.PutI16BE(b[n:], self.FrameCount)
@@ -153,10 +153,10 @@ func (self *MJPGDesc) Unmarshal(b []byte, offset int) (n int, err error) {
 	self.HorizontalResolution = GetFixed32(b[n:])
 	n += 4
 	if len(b) < n+4 {
-		err = parseErr("VorizontalResolution", n+offset, err)
+		err = parseErr("VerticalResolution", n+offset, err)
 		return
 	}
-	self.VorizontalResolution = GetFixed32(b[n:])
+	self.VerticalResolution = GetFixed32(b[n:])
 	n += 4
 	n += 4
 	if len(b) < n+2 {

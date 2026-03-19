@@ -107,7 +107,7 @@ func isH265FirstSliceInPicture(nal []byte) bool {
 func (s *Stream) fillTrackAtom() (err error) {
 	// Set time scale and duration in the media header of the Track Atom.
 	s.trackAtom.Media.Header.TimeScale = int32(s.timeScale) //nolint:gosec
-	s.trackAtom.Media.Header.Duration = int32(s.duration)   //nolint:gosec
+	s.trackAtom.Media.Header.Duration = s.duration
 
 	const defaultDPI = 72
 	const defaultDepth = 24
@@ -127,7 +127,7 @@ func (s *Stream) fillTrackAtom() (err error) {
 			Width:                int16(width),  //nolint:gosec
 			Height:               int16(height), //nolint:gosec
 			HorizontalResolution: defaultDPI,
-			VorizontalResolution: defaultDPI,
+			VerticalResolution: defaultDPI,
 			FrameCount:           1,
 			CompressorName:       [32]byte{},
 			Depth:                defaultDepth,
@@ -157,7 +157,7 @@ func (s *Stream) fillTrackAtom() (err error) {
 			Width:                int16(width),  //nolint:gosec
 			Height:               int16(height), //nolint:gosec
 			HorizontalResolution: defaultDPI,
-			VorizontalResolution: defaultDPI,
+			VerticalResolution: defaultDPI,
 			FrameCount:           1,
 			CompressorName:       [32]byte{},
 			Depth:                defaultDepth,
@@ -188,7 +188,7 @@ func (s *Stream) fillTrackAtom() (err error) {
 			Width:                int16(width),  //nolint:gosec
 			Height:               int16(height), //nolint:gosec
 			HorizontalResolution: defaultDPI,
-			VorizontalResolution: defaultDPI,
+			VerticalResolution: defaultDPI,
 			FrameCount:           1,
 			CompressorName:       [32]byte{},
 			Depth:                defaultDepth,

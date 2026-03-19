@@ -63,10 +63,7 @@ func (s *Stream) fillTrackAtom() {
 	timeScaleInt32 := s.safeInt32Conversion(s.timeScale, "timeScale")
 	s.trackAtom.Media.Header.TimeScale = timeScaleInt32
 
-	// Safe conversion with validation for Duration
-	durationNs := int64(s.duration)
-	durationInt32 := s.safeInt32Conversion(durationNs, "duration")
-	s.trackAtom.Media.Header.Duration = durationInt32
+	s.trackAtom.Media.Header.Duration = int64(s.duration)
 
 	// Customize settings based on the codec type
 	switch codecPar := s.CodecParameters.(type) {
@@ -85,7 +82,7 @@ func (s *Stream) fillTrackAtom() {
 			Width:                widthInt16,
 			Height:               heightInt16,
 			HorizontalResolution: defaultDPI,
-			VorizontalResolution: defaultDPI,
+			VerticalResolution: defaultDPI,
 			FrameCount:           1,
 			CompressorName:       [32]byte{},
 			Depth:                defaultDepth,
@@ -118,7 +115,7 @@ func (s *Stream) fillTrackAtom() {
 			Width:                widthInt16,
 			Height:               heightInt16,
 			HorizontalResolution: defaultDPI,
-			VorizontalResolution: defaultDPI,
+			VerticalResolution: defaultDPI,
 			FrameCount:           1,
 			CompressorName:       [32]byte{},
 			Depth:                defaultDepth,

@@ -37,19 +37,19 @@ func (*SegmentType) Tag() Tag {
 }
 
 func (f *SegmentType) Marshal(b []byte) (n int) {
-	l := baseFtypSize + bytesPerBrand*len(f.CompatibleBrands)
+	l := baseStypSize + bytesPerBrand*len(f.CompatibleBrands)
 	pio.PutU32BE(b, uint32(l))
 	pio.PutU32BE(b[4:], uint32(STYP))
 	pio.PutU32BE(b[8:], f.MajorBrand)
 	pio.PutU32BE(b[12:], f.MinorVersion)
 	for i, v := range f.CompatibleBrands {
-		pio.PutU32BE(b[baseFtypSize+bytesPerBrand*i:], v)
+		pio.PutU32BE(b[baseStypSize+bytesPerBrand*i:], v)
 	}
 	return l
 }
 
 func (f *SegmentType) Len() int {
-	return baseFtypSize + bytesPerBrand*len(f.CompatibleBrands)
+	return baseStypSize + bytesPerBrand*len(f.CompatibleBrands)
 }
 
 func (f *SegmentType) Unmarshal(b []byte, offset int) (n int, err error) {

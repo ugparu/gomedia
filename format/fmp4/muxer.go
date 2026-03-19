@@ -383,7 +383,7 @@ func (m *Muxer) processPackets(track *mp4io.TrackFrag, s *Stream) {
 
 // createSegmentIndex creates segment index entries to reduce complexity
 func (m *Muxer) createSegmentIndex(s *Stream, _ int) mp4io.SegmentIndex {
-	// Safe conversion with validation for RefernceID
+	// Safe conversion with validation for ReferenceID
 	streamIndex := int(s.StreamIndex())
 	refID := m.safeInt32Conversion(int64(streamIndex+1), "stream index")
 
@@ -399,7 +399,7 @@ func (m *Muxer) createSegmentIndex(s *Stream, _ int) mp4io.SegmentIndex {
 	return mp4io.SegmentIndex{
 		Version:     1,
 		Flags:       0,
-		RefernceID:  refID,
+		ReferenceID:  refID,
 		Timescale:   timeScaleInt32,
 		EarliestPT:  int64(s.firstPacketTime) * s.timeScale / int64(time.Second),
 		FirstOffset: 0,
@@ -470,7 +470,7 @@ func (m *Muxer) GetMP4Fragment(idx int) buffer.PooledBuffer {
 				Version: 0,
 				// Split long line to fix line length issue
 				Flags: mp4io.TFHDDefaultDuration | mp4io.TFHDDefaultSize |
-					mp4io.TFHDDefaultFlags | mp4io.TFHDDurationIsEmpty,
+					mp4io.TFHDDefaultFlags | mp4io.TFHDDefaultBaseIsMOOF,
 				TrackID:         trackID,
 				BaseDataOffset:  0,
 				StsdID:          0,

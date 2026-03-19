@@ -267,7 +267,7 @@ func (mux *Muxer) WriteTrailer() (err error) {
 			return
 		}
 		dur := stream.tsToTime(stream.duration)
-		stream.trackAtom.Header.Duration = int32(timeToTS(dur, int64(moov.Header.TimeScale))) //nolint:gosec
+		stream.trackAtom.Header.Duration = timeToTS(dur, int64(moov.Header.TimeScale))
 		if dur > maxDur {
 			maxDur = dur
 		}

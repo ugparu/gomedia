@@ -63,11 +63,18 @@ func (self *TrackFragDecodeTime) Unmarshal(b []byte, offset int) (n int, err err
 	self.Flags = pio.U24BE(b[n:])
 	n += 3
 	if self.Version != 0 {
+		if len(b) < n+8 {
+			err = parseErr("Time", n+offset, err)
+			return
+		}
 		self.Time = pio.U64BE(b[n:])
 		n += 8
 	} else {
-
-		self.Time = pio.U64BE(b[n:])
+		if len(b) < n+4 {
+			err = parseErr("Time", n+offset, err)
+			return
+		}
+		self.Time = uint64(pio.U32BE(b[n:]))
 		n += 4
 	}
 	return

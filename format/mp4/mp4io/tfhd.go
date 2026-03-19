@@ -12,8 +12,8 @@ const (
 	TFHDDefaultDuration   = uint32(0x08)
 	TFHDDefaultSize       = uint32(0x10)
 	TFHDDefaultFlags      = uint32(0x20)
-	TFHDDurationIsEmpty   = uint32(0x20000) //
-	TFHDDefaultBaseIsMOOF = uint32(0x10000)
+	TFHDDurationIsEmpty   = uint32(0x10000)
+	TFHDDefaultBaseIsMOOF = uint32(0x20000)
 )
 
 type TrackFragHeader struct {
@@ -75,12 +75,6 @@ func (tfhd TrackFragHeader) marshal(b []byte) (n int) {
 			n += 4
 		}
 	}
-	if tfhd.Flags&TFHDDurationIsEmpty != 0 {
-		{
-			n += 4
-		}
-	}
-
 	return
 }
 func (tfhd TrackFragHeader) Len() (n int) {
@@ -113,11 +107,6 @@ func (tfhd TrackFragHeader) Len() (n int) {
 			n += 4
 		}
 	}
-	if tfhd.Flags&TFHDDurationIsEmpty != 0 {
-		{
-			n += 4
-		}
-	}
 	return
 }
 func (tfhd *TrackFragHeader) Unmarshal(b []byte, offset int) (n int, err error) {
@@ -135,6 +124,12 @@ func (tfhd *TrackFragHeader) Unmarshal(b []byte, offset int) (n int, err error) 
 	}
 	tfhd.Flags = pio.U24BE(b[n:])
 	n += 3
+	if len(b) < n+4 {
+		err = parseErr("TrackID", n+offset, err)
+		return
+	}
+	tfhd.TrackID = pio.U32BE(b[n:])
+	n += 4
 	if tfhd.Flags&TFHDBaseDataOffset != 0 {
 		{
 			if len(b) < n+8 {

@@ -24,7 +24,7 @@ func (p *ParseError) Error() string {
 }
 
 func parseErr(debug string, offset int, prev error) (err error) {
-	if !errors.As(prev, &errParse) {
+	if prev != nil && !errors.As(prev, &errParse) {
 		return prev
 	}
 	ppe, _ := prev.(*ParseError) // nolint: errorlint

@@ -160,24 +160,24 @@ func (mvhd *MovieHeader) Unmarshal(b []byte, offset int) (n int, err error) {
 	}
 	mvhd.TimeScale = pio.I32BE(b[n:])
 	n += 4
-	if len(b) < n+4 {
-		err = parseErr("Duration", n+offset, err)
-		return
-	}
 	if mvhd.Version == 1 {
+		if len(b) < n+8 {
+			err = parseErr("Duration", n+offset, err)
+			return
+		}
 		mvhd.Duration = pio.I64BE(b[n:])
 		n += 8
-		if len(b) < n+8 {
-			err = parseErr("PreferredRate", n+offset, err)
+	} else {
+		if len(b) < n+4 {
+			err = parseErr("Duration", n+offset, err)
 			return
 		}
-	} else {
 		mvhd.Duration = int64(pio.I32BE(b[n:]))
 		n += 4
-		if len(b) < n+4 {
-			err = parseErr("PreferredRate", n+offset, err)
-			return
-		}
+	}
+	if len(b) < n+4 {
+		err = parseErr("PreferredRate", n+offset, err)
+		return
 	}
 
 	mvhd.PreferredRate = GetFixed32(b[n:])

@@ -18,7 +18,7 @@ type TrackHeader struct {
 	CreateTime     time.Time
 	ModifyTime     time.Time
 	TrackId        int32
-	Duration       int32
+	Duration       int64
 	Layer          int16
 	AlternateGroup int16
 	Volume         float64
@@ -39,15 +39,27 @@ func (self TrackHeader) marshal(b []byte) (n int) {
 	n += 1
 	pio.PutU24BE(b[n:], self.Flags)
 	n += 3
-	PutTime32(b[n:], self.CreateTime)
-	n += 4
-	PutTime32(b[n:], self.ModifyTime)
-	n += 4
+	if self.Version == 1 {
+		PutTime64(b[n:], self.CreateTime)
+		n += 8
+		PutTime64(b[n:], self.ModifyTime)
+		n += 8
+	} else {
+		PutTime32(b[n:], self.CreateTime)
+		n += 4
+		PutTime32(b[n:], self.ModifyTime)
+		n += 4
+	}
 	pio.PutI32BE(b[n:], self.TrackId)
 	n += 4
 	n += 4
-	pio.PutI32BE(b[n:], self.Duration)
-	n += 4
+	if self.Version == 1 {
+		pio.PutI64BE(b[n:], self.Duration)
+		n += 8
+	} else {
+		pio.PutI32BE(b[n:], int32(self.Duration))
+		n += 4
+	}
 	n += 8
 	pio.PutI16BE(b[n:], self.Layer)
 	n += 2
@@ -70,11 +82,20 @@ func (self TrackHeader) Len() (n int) {
 	n += 8
 	n += 1
 	n += 3
+	if self.Version == 1 {
+		n += 8
+		n += 8
+	} else {
+		n += 4
+		n += 4
+	}
 	n += 4
 	n += 4
-	n += 4
-	n += 4
-	n += 4
+	if self.Version == 1 {
+		n += 8
+	} else {
+		n += 4
+	}
 	n += 8
 	n += 2
 	n += 2
@@ -100,18 +121,33 @@ func (self *TrackHeader) Unmarshal(b []byte, offset int) (n int, err error) {
 	}
 	self.Flags = pio.U24BE(b[n:])
 	n += 3
-	if len(b) < n+4 {
-		err = parseErr("CreateTime", n+offset, err)
-		return
+	if self.Version == 1 {
+		if len(b) < n+8 {
+			err = parseErr("CreateTime", n+offset, err)
+			return
+		}
+		self.CreateTime = GetTime64(b[n:])
+		n += 8
+		if len(b) < n+8 {
+			err = parseErr("ModifyTime", n+offset, err)
+			return
+		}
+		self.ModifyTime = GetTime64(b[n:])
+		n += 8
+	} else {
+		if len(b) < n+4 {
+			err = parseErr("CreateTime", n+offset, err)
+			return
+		}
+		self.CreateTime = GetTime32(b[n:])
+		n += 4
+		if len(b) < n+4 {
+			err = parseErr("ModifyTime", n+offset, err)
+			return
+		}
+		self.ModifyTime = GetTime32(b[n:])
+		n += 4
 	}
-	self.CreateTime = GetTime32(b[n:])
-	n += 4
-	if len(b) < n+4 {
-		err = parseErr("ModifyTime", n+offset, err)
-		return
-	}
-	self.ModifyTime = GetTime32(b[n:])
-	n += 4
 	if len(b) < n+4 {
 		err = parseErr("TrackId", n+offset, err)
 		return
@@ -119,12 +155,21 @@ func (self *TrackHeader) Unmarshal(b []byte, offset int) (n int, err error) {
 	self.TrackId = pio.I32BE(b[n:])
 	n += 4
 	n += 4
-	if len(b) < n+4 {
-		err = parseErr("Duration", n+offset, err)
-		return
+	if self.Version == 1 {
+		if len(b) < n+8 {
+			err = parseErr("Duration", n+offset, err)
+			return
+		}
+		self.Duration = pio.I64BE(b[n:])
+		n += 8
+	} else {
+		if len(b) < n+4 {
+			err = parseErr("Duration", n+offset, err)
+			return
+		}
+		self.Duration = int64(pio.I32BE(b[n:]))
+		n += 4
 	}
-	self.Duration = pio.I32BE(b[n:])
-	n += 4
 	n += 8
 	if len(b) < n+2 {
 		err = parseErr("Layer", n+offset, err)
