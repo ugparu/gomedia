@@ -33,7 +33,10 @@ type Stream struct {
 }
 
 func (s *Stream) timeToTS(tm time.Duration) int64 {
-	return int64(tm * time.Duration(s.timeScale) / time.Second)
+	// Split into seconds and remainder to avoid int64 overflow on large durations
+	sec := tm / time.Second
+	rem := tm % time.Second
+	return int64(sec)*s.timeScale + int64(rem)*s.timeScale/int64(time.Second)
 }
 
 // safeInt16Conversion safely converts a uint value to int16 with validation
@@ -42,28 +45,16 @@ func (s *Stream) safeInt16Conversion(val uint, name string) int16 {
 		return int16(val)
 	}
 	// Default to max int16 value if overflow would occur
-	s.log.Errorf(s,"%s value %d is too large for int16, capping at %d", name, val, maxInt16Value)
+	s.log.Errorf(s, "%s value %d is too large for int16, capping at %d", name, val, maxInt16Value)
 	return maxInt16Value
-}
-
-// safeInt32Conversion safely converts an int64 value to int32
-func (s *Stream) safeInt32Conversion(val int64, name string) int32 {
-	maxSafeInt32 := int64(^uint32(0) >> 1) // Maximum value for int32
-	if val <= maxSafeInt32 {
-		//nolint:gosec // This is a safe int32 conversion
-		return int32(val)
-	}
-	// Default to max int32 value if overflow would occur
-	s.log.Errorf(s,"%s value %d is too large for int32, capping at %d", name, val, maxSafeInt32)
-	return int32(maxSafeInt32)
 }
 
 func (s *Stream) fillTrackAtom() {
 	// Safe conversion with validation for TimeScale
-	timeScaleInt32 := s.safeInt32Conversion(s.timeScale, "timeScale")
+	timeScaleInt32 := safeInt32Conversion(s.log, s, s.timeScale, "timeScale")
 	s.trackAtom.Media.Header.TimeScale = timeScaleInt32
 
-	s.trackAtom.Media.Header.Duration = int64(s.duration)
+	s.trackAtom.Media.Header.Duration = s.timeToTS(s.duration)
 
 	// Customize settings based on the codec type
 	switch codecPar := s.CodecParameters.(type) {
@@ -82,7 +73,7 @@ func (s *Stream) fillTrackAtom() {
 			Width:                widthInt16,
 			Height:               heightInt16,
 			HorizontalResolution: defaultDPI,
-			VerticalResolution: defaultDPI,
+			VerticalResolution:   defaultDPI,
 			FrameCount:           1,
 			CompressorName:       [32]byte{},
 			Depth:                defaultDepth,
@@ -100,6 +91,7 @@ func (s *Stream) fillTrackAtom() {
 				Size:   0,
 			},
 		}
+		s.trackAtom.Media.Info.Video = new(mp4io.VideoMediaInfo)
 	case *h265.CodecParameters:
 		width, height := codecPar.Width(), codecPar.Height()
 		widthInt16 := s.safeInt16Conversion(width, "width")
@@ -115,7 +107,7 @@ func (s *Stream) fillTrackAtom() {
 			Width:                widthInt16,
 			Height:               heightInt16,
 			HorizontalResolution: defaultDPI,
-			VerticalResolution: defaultDPI,
+			VerticalResolution:   defaultDPI,
 			FrameCount:           1,
 			CompressorName:       [32]byte{},
 			Depth:                defaultDepth,
@@ -133,6 +125,7 @@ func (s *Stream) fillTrackAtom() {
 				Size:   0,
 			},
 		}
+		s.trackAtom.Media.Info.Video = new(mp4io.VideoMediaInfo)
 	case *aac.CodecParameters:
 		// Safe conversions with validation
 		var channelsInt16 int16
@@ -141,7 +134,7 @@ func (s *Stream) fillTrackAtom() {
 			channelsInt16 = int16(channelCount)
 		} else {
 			channelsInt16 = maxInt16Value
-			s.log.Errorf(s,"channel count %d is too large for int16, capping at %d", channelCount, channelsInt16)
+			s.log.Errorf(s, "channel count %d is too large for int16, capping at %d", channelCount, channelsInt16)
 		}
 
 		var sampleSizeInt16 int16
@@ -150,7 +143,7 @@ func (s *Stream) fillTrackAtom() {
 			sampleSizeInt16 = int16(bytesPerSample)
 		} else {
 			sampleSizeInt16 = maxInt16Value
-			s.log.Errorf(s,"sample size %d is too large for int16, capping at %d", bytesPerSample, sampleSizeInt16)
+			s.log.Errorf(s, "sample size %d is too large for int16, capping at %d", bytesPerSample, sampleSizeInt16)
 		}
 
 		s.sample.SampleDesc.MP4ADesc = &mp4io.MP4ADesc{
@@ -177,22 +170,9 @@ func (s *Stream) fillTrackAtom() {
 			},
 		}
 
-		s.trackAtom.Header.Volume = 1
-		s.trackAtom.Header.AlternateGroup = 1
-		s.trackAtom.Media.Handler = &mp4io.HandlerRefer{
-			Version: 0,
-			Flags:   0,
-			Type:    [4]byte{},
-			SubType: [4]byte{'s', 'o', 'u', 'n'},
-			Name:    []byte("SoundHandler"),
-			AtomPos: mp4io.AtomPos{
-				Offset: 0,
-				Size:   0,
-			},
-		}
 		s.trackAtom.Media.Info.Sound = new(mp4io.SoundMediaInfo)
 	default:
-		s.log.Errorf(s,"unsupported codec type %T", codecPar)
+		s.log.Errorf(s, "unsupported codec type %T", codecPar)
 	}
 }
 

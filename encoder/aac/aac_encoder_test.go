@@ -3,6 +3,7 @@ package aac
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -13,10 +14,7 @@ import (
 	"github.com/ugparu/gomedia/codec/pcm"
 )
 
-const (
-	pcmPacketsPath = "../../tests/data/pcm/packets.json"
-	aacPacketsPath = "../../tests/data/aac/packets.json"
-)
+const pcmPacketsPath = "../../tests/data/pcm/packets.json"
 
 // fixturePacket holds decoded test data for a single packet.
 type fixturePacket struct {
@@ -121,7 +119,7 @@ func TestInit_SampleRates(t *testing.T) {
 
 	rates := []uint64{8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000}
 	for _, sr := range rates {
-		t.Run("rate_"+string(rune('0'+sr/1000)), func(t *testing.T) {
+		t.Run(fmt.Sprintf("%dHz", sr), func(t *testing.T) {
 			t.Parallel()
 			enc := NewAacEncoder()
 			defer enc.Close()
@@ -249,7 +247,7 @@ func TestEncode_LargerThanOneFrame(t *testing.T) {
 	require.NoError(t, err)
 
 	// Should have encoded at least 2 frames (buffered the remaining half)
-	assert.GreaterOrEqual(t, len(result), 1)
+	assert.GreaterOrEqual(t, len(result), 2) //nolint:mnd // 2.5 frames input → at least 2 output
 
 	// Internal buffer should hold the remaining half frame
 	assert.Equal(t, frameBytes/2, inner.pcmLen) //nolint:mnd // half frame remains
@@ -315,7 +313,6 @@ func TestEncode_WithRealPCMData(t *testing.T) {
 	t.Parallel()
 
 	pcmPackets := loadFixturePackets(t, pcmPacketsPath)
-	aacPackets := loadFixturePackets(t, aacPacketsPath)
 
 	enc := NewAacEncoder()
 	defer enc.Close()
@@ -345,8 +342,6 @@ func TestEncode_WithRealPCMData(t *testing.T) {
 	expectedFrames := totalPCMBytes / inner.NbBytesPerFrame()
 	assert.InDelta(t, expectedFrames, len(allOutput), 5, //nolint:mnd // tolerance for encoder delay
 		"output packet count should match PCM data (got %d, want ~%d)", len(allOutput), expectedFrames)
-	_ = aacPackets // reference data used for size validation below
-
 	// Every output packet should have non-zero data
 	for i, p := range allOutput {
 		assert.Greater(t, len(p.Data()), 0, "packet %d should have data", i)

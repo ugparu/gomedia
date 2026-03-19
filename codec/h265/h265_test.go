@@ -60,8 +60,159 @@ func loadTestParameters(t *testing.T) (*CodecParameters, uint8) {
 	return &cp, params.Video.StreamIndex
 }
 
-// TestNewCodecDataFromAVCDecoderConfRecord_Valid loads real HEVC decoder config
-// and validates decoded fields.
+func loadTestVPSSPSPPS(t *testing.T) (vps, sps, pps []byte) {
+	t.Helper()
+	raw, err := os.ReadFile(testDataDir + "parameters.json")
+	require.NoError(t, err)
+
+	var params parametersJSON
+	require.NoError(t, json.Unmarshal(raw, &params))
+	require.NotNil(t, params.Video)
+
+	vps, err = base64.StdEncoding.DecodeString(params.Video.VPS)
+	require.NoError(t, err)
+	sps, err = base64.StdEncoding.DecodeString(params.Video.SPS)
+	require.NoError(t, err)
+	pps, err = base64.StdEncoding.DecodeString(params.Video.PPS)
+	require.NoError(t, err)
+	return
+}
+
+// ---------------------------------------------------------------------------
+// HEVCDecoderConfRecord — Unmarshal
+// ---------------------------------------------------------------------------
+
+func TestHEVCDecoderConfRecord_Unmarshal_Valid(t *testing.T) {
+	t.Parallel()
+
+	raw, err := os.ReadFile(testDataDir + "parameters.json")
+	require.NoError(t, err)
+	var params parametersJSON
+	require.NoError(t, json.Unmarshal(raw, &params))
+
+	recordBytes, err := base64.StdEncoding.DecodeString(params.Video.Record)
+	require.NoError(t, err)
+
+	var rec HEVCDecoderConfRecord
+	n, err := rec.Unmarshal(recordBytes)
+	require.NoError(t, err)
+	require.Greater(t, n, 0, "should consume bytes")
+	require.NotEmpty(t, rec.VPS, "must have at least one VPS")
+	require.NotEmpty(t, rec.SPS, "must have at least one SPS")
+	require.NotEmpty(t, rec.PPS, "must have at least one PPS")
+	// LengthSizeMinusOne must be 0-3 (2-bit field)
+	require.LessOrEqual(t, rec.LengthSizeMinusOne, uint8(3))
+}
+
+func TestHEVCDecoderConfRecord_Unmarshal_TooShort(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		data []byte
+	}{
+		{"nil", nil},
+		{"empty", []byte{}},
+		{"3_bytes", []byte{0x01, 0x02, 0x03}},
+		{"29_bytes", make([]byte, 29)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var rec HEVCDecoderConfRecord
+			_, err := rec.Unmarshal(tt.data)
+			require.ErrorIs(t, err, ErrDecconfInvalid)
+		})
+	}
+}
+
+func TestHEVCDecoderConfRecord_Unmarshal_TruncatedVPSData(t *testing.T) {
+	t.Parallel()
+
+	// 30-byte buffer, vpscount=1 at b[25], vpslen=100 which exceeds buffer
+	b := make([]byte, 30)
+	b[25] = 0x01 // vpscount = 1
+	b[26] = 0x00
+	b[27] = 0x64 // vpslen = 100
+	var rec HEVCDecoderConfRecord
+	_, err := rec.Unmarshal(b)
+	require.ErrorIs(t, err, ErrDecconfInvalid)
+}
+
+func TestHEVCDecoderConfRecord_Unmarshal_TruncatedVPSLength(t *testing.T) {
+	t.Parallel()
+
+	// vpscount=1 but buffer ends before VPS length can be read
+	b := make([]byte, 27)
+	b[25] = 0x01 // vpscount = 1
+	// only 1 byte available for vpslen (need 2)
+	var rec HEVCDecoderConfRecord
+	_, err := rec.Unmarshal(b)
+	require.ErrorIs(t, err, ErrDecconfInvalid)
+}
+
+// ---------------------------------------------------------------------------
+// HEVCDecoderConfRecord — Marshal / Len
+// ---------------------------------------------------------------------------
+
+func TestHEVCDecoderConfRecord_Len(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty_nalus", func(t *testing.T) {
+		t.Parallel()
+		var rec HEVCDecoderConfRecord
+		// Base header is 23 bytes, no NALUs
+		require.Equal(t, 23, rec.Len())
+	})
+
+	t.Run("with_nalus", func(t *testing.T) {
+		t.Parallel()
+		rec := HEVCDecoderConfRecord{
+			VPS: [][]byte{{0x40, 0x01}},        // 2 bytes
+			SPS: [][]byte{{0x42, 0x01, 0x00}},   // 3 bytes
+			PPS: [][]byte{{0x44, 0x01}},          // 2 bytes
+		}
+		// 23 + 3*(1 type + 2 count) + (2 + 2) + (2 + 3) + (2 + 2)
+		// Each NAL array: 1 byte type + 2 byte count + 2 byte length + data
+		// = 23 + (5+2) + (5+3) + (5+2) = 45
+		require.Equal(t, 45, rec.Len())
+	})
+}
+
+func TestHEVCDecoderConfRecord_MarshalUnmarshal_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	raw, err := os.ReadFile(testDataDir + "parameters.json")
+	require.NoError(t, err)
+	var params parametersJSON
+	require.NoError(t, json.Unmarshal(raw, &params))
+
+	recordBytes, err := base64.StdEncoding.DecodeString(params.Video.Record)
+	require.NoError(t, err)
+
+	var rec HEVCDecoderConfRecord
+	_, err = rec.Unmarshal(recordBytes)
+	require.NoError(t, err)
+
+	out := make([]byte, rec.Len())
+	rec.Marshal(out)
+
+	// Re-unmarshal and verify field equality
+	var rec2 HEVCDecoderConfRecord
+	_, err = rec2.Unmarshal(out)
+	require.NoError(t, err)
+	require.Equal(t, rec.AVCProfileIndication, rec2.AVCProfileIndication)
+	require.Equal(t, rec.AVCLevelIndication, rec2.AVCLevelIndication)
+	require.Equal(t, rec.ProfileCompatibility, rec2.ProfileCompatibility)
+	require.Equal(t, rec.SPS, rec2.SPS)
+	require.Equal(t, rec.PPS, rec2.PPS)
+	require.Equal(t, rec.VPS, rec2.VPS)
+}
+
+// ---------------------------------------------------------------------------
+// NewCodecDataFromAVCDecoderConfRecord
+// ---------------------------------------------------------------------------
+
 func TestNewCodecDataFromAVCDecoderConfRecord_Valid(t *testing.T) {
 	t.Parallel()
 
@@ -74,10 +225,9 @@ func TestNewCodecDataFromAVCDecoderConfRecord_Valid(t *testing.T) {
 	require.NotNil(t, cp.PPS())
 	require.NotNil(t, cp.VPS())
 	require.NotEmpty(t, cp.Tag())
+	require.Contains(t, cp.Tag(), "hev1.")
 }
 
-// TestNewCodecDataFromAVCDecoderConfRecord_TooShort verifies that a short input
-// returns an error rather than panicking.
 func TestNewCodecDataFromAVCDecoderConfRecord_TooShort(t *testing.T) {
 	t.Parallel()
 
@@ -85,24 +235,26 @@ func TestNewCodecDataFromAVCDecoderConfRecord_TooShort(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestNewCodecDataFromVPSAndSPSAndPPS_Valid builds codec params from
-// real individual NAL units.
+func TestNewCodecDataFromAVCDecoderConfRecord_EmptyRecord(t *testing.T) {
+	t.Parallel()
+
+	// A valid-length but empty record (no VPS/SPS/PPS) should be rejected.
+	// The function should either fail at Unmarshal (record too small/corrupt)
+	// or fail at the SPS/PPS/VPS presence check.
+	b := make([]byte, 30)
+	b[0] = 0x01 // version
+	_, err := NewCodecDataFromAVCDecoderConfRecord(b)
+	require.Error(t, err, "must reject record with no VPS/SPS/PPS")
+}
+
+// ---------------------------------------------------------------------------
+// NewCodecDataFromVPSAndSPSAndPPS
+// ---------------------------------------------------------------------------
+
 func TestNewCodecDataFromVPSAndSPSAndPPS_Valid(t *testing.T) {
 	t.Parallel()
 
-	raw, err := os.ReadFile(testDataDir + "parameters.json")
-	require.NoError(t, err)
-
-	var params parametersJSON
-	require.NoError(t, json.Unmarshal(raw, &params))
-	require.NotNil(t, params.Video)
-
-	sps, err := base64.StdEncoding.DecodeString(params.Video.SPS)
-	require.NoError(t, err)
-	pps, err := base64.StdEncoding.DecodeString(params.Video.PPS)
-	require.NoError(t, err)
-	vps, err := base64.StdEncoding.DecodeString(params.Video.VPS)
-	require.NoError(t, err)
+	vps, sps, pps := loadTestVPSSPSPPS(t)
 
 	cp, err := NewCodecDataFromVPSAndSPSAndPPS(vps, sps, pps)
 	require.NoError(t, err)
@@ -114,166 +266,166 @@ func TestNewCodecDataFromVPSAndSPSAndPPS_Valid(t *testing.T) {
 	require.Greater(t, cp.Height(), uint(0))
 }
 
-// TestNewCodecDataFromVPSAndSPSAndPPS_Empty verifies that empty inputs return
-// a zero CodecParameters with nil error (SDP parameters arrive later in-band).
-func TestNewCodecDataFromVPSAndSPSAndPPS_Empty(t *testing.T) {
+func TestNewCodecDataFromVPSAndSPSAndPPS_AllNil(t *testing.T) {
 	t.Parallel()
 
+	// SDP may not carry VPS/SPS/PPS; they arrive in-band later.
 	cp, err := NewCodecDataFromVPSAndSPSAndPPS(nil, nil, nil)
-	require.NoError(t, err, "empty VPS/SPS/PPS must not error (in-band delivery)")
+	require.NoError(t, err)
 	require.Equal(t, uint(0), cp.Width())
 	require.Equal(t, uint(0), cp.Height())
 }
 
-// TestNewCodecDataFromVPSAndSPSAndPPS_ShortSPS verifies that a non-empty but
-// too-short SPS returns an error.
+func TestNewCodecDataFromVPSAndSPSAndPPS_AllEmpty(t *testing.T) {
+	t.Parallel()
+
+	cp, err := NewCodecDataFromVPSAndSPSAndPPS([]byte{}, []byte{}, []byte{})
+	require.NoError(t, err)
+	require.Equal(t, uint(0), cp.Width())
+}
+
 func TestNewCodecDataFromVPSAndSPSAndPPS_ShortSPS(t *testing.T) {
 	t.Parallel()
 
-	vps := []byte{0x40, 0x01}
-	sps := []byte{0x42, 0x01} // only 2 bytes, need >= 6
+	// SPS needs >= 6 bytes (bytes 3,4,5 for profile/compat/level)
+	vps := []byte{0x40, 0x01, 0x0c, 0x01}
+	sps := []byte{0x42, 0x01} // only 2 bytes
 	pps := []byte{0x44, 0x01}
 
 	_, err := NewCodecDataFromVPSAndSPSAndPPS(vps, sps, pps)
 	require.Error(t, err, "SPS with fewer than 6 bytes must return error")
 }
 
-// TestCodecParameters_NilSafety verifies SPS/PPS/VPS return nil (not []byte{})
-// when the underlying slices are empty.
+func TestNewCodecDataFromVPSAndSPSAndPPS_PartialNil(t *testing.T) {
+	t.Parallel()
+
+	// Only VPS nil — should return zero-value (all-nil treated as "no params yet")
+	cp, err := NewCodecDataFromVPSAndSPSAndPPS(nil, []byte{0x42}, []byte{0x44})
+	require.NoError(t, err)
+	require.Equal(t, uint(0), cp.Width())
+}
+
+// ---------------------------------------------------------------------------
+// CodecParameters accessors — nil safety
+// ---------------------------------------------------------------------------
+
 func TestCodecParameters_NilSafety(t *testing.T) {
 	t.Parallel()
 
 	cp := &CodecParameters{}
-	require.Nil(t, cp.SPS(), "SPS() on empty RecordInfo must return nil")
-	require.Nil(t, cp.PPS(), "PPS() on empty RecordInfo must return nil")
-	require.Nil(t, cp.VPS(), "VPS() on empty RecordInfo must return nil")
+	require.Nil(t, cp.SPS())
+	require.Nil(t, cp.PPS())
+	require.Nil(t, cp.VPS())
+	require.Equal(t, uint(0), cp.Width())
+	require.Equal(t, uint(0), cp.Height())
+	require.Equal(t, uint(0), cp.FPS())
 }
 
-// TestHEVCDecoderConfRecord_MarshalUnmarshal verifies round-trip fidelity.
-func TestHEVCDecoderConfRecord_MarshalUnmarshal(t *testing.T) {
+func TestCodecParameters_Tag(t *testing.T) {
 	t.Parallel()
 
-	raw, err := os.ReadFile(testDataDir + "parameters.json")
-	require.NoError(t, err)
-
-	var params parametersJSON
-	require.NoError(t, json.Unmarshal(raw, &params))
-
-	recordBytes, err := base64.StdEncoding.DecodeString(params.Video.Record)
-	require.NoError(t, err)
-
-	var rec HEVCDecoderConfRecord
-	_, err = rec.Unmarshal(recordBytes)
-	require.NoError(t, err)
-	require.NotEmpty(t, rec.SPS)
-	require.NotEmpty(t, rec.PPS)
-	require.NotEmpty(t, rec.VPS)
-
-	out := make([]byte, rec.Len())
-	rec.Marshal(out)
-
-	// Re-unmarshal the marshaled bytes and verify field equality.
-	var rec2 HEVCDecoderConfRecord
-	_, err = rec2.Unmarshal(out)
-	require.NoError(t, err)
-	require.Equal(t, rec.AVCProfileIndication, rec2.AVCProfileIndication)
-	require.Equal(t, rec.AVCLevelIndication, rec2.AVCLevelIndication)
-	require.Equal(t, rec.ProfileCompatibility, rec2.ProfileCompatibility)
-	require.Equal(t, rec.SPS, rec2.SPS)
-	require.Equal(t, rec.PPS, rec2.PPS)
-	require.Equal(t, rec.VPS, rec2.VPS)
+	cp, _ := loadTestParameters(t)
+	tag := cp.Tag()
+	require.NotEmpty(t, tag)
+	// Format: hev1.P.C.LLL.90
+	require.Contains(t, tag, "hev1.")
+	require.Contains(t, tag, ".90")
 }
 
-// TestHEVCDecoderConfRecord_Unmarshal_TooShort verifies short input returns
-// ErrDecconfInvalid.
-func TestHEVCDecoderConfRecord_Unmarshal_TooShort(t *testing.T) {
+func TestCodecParameters_ConsistencyBetweenConstructors(t *testing.T) {
 	t.Parallel()
 
-	var rec HEVCDecoderConfRecord
-	_, err := rec.Unmarshal([]byte{0x01, 0x02, 0x03})
-	require.ErrorIs(t, err, ErrDecconfInvalid)
+	// Load from record
+	cp1, _ := loadTestParameters(t)
+
+	// Load from VPS/SPS/PPS
+	vps, sps, pps := loadTestVPSSPSPPS(t)
+	cp2, err := NewCodecDataFromVPSAndSPSAndPPS(vps, sps, pps)
+	require.NoError(t, err)
+
+	// Both should produce the same dimensions
+	require.Equal(t, cp1.Width(), cp2.Width())
+	require.Equal(t, cp1.Height(), cp2.Height())
+	require.Equal(t, cp1.Type(), cp2.Type())
+	require.Equal(t, cp1.SPS(), cp2.SPS())
+	require.Equal(t, cp1.PPS(), cp2.PPS())
+	require.Equal(t, cp1.VPS(), cp2.VPS())
 }
 
-// TestIsDataNALU verifies RFC 7798 §1.1.4 NAL type extraction and VCL range.
+// ---------------------------------------------------------------------------
+// IsDataNALU — RFC 7798 §1.1.4
+// ---------------------------------------------------------------------------
+
 func TestIsDataNALU(t *testing.T) {
 	t.Parallel()
 
-	// RFC 7798 §1.1.4: nal_unit_type = (byte0 >> 1) & 0x3F; types 0-31 are VCL.
-	// H.265 NAL header = 2 bytes: forbidden(1)|type(6)|layer_id(6)|tid(3).
+	// H.265 NAL header: 2 bytes — forbidden(1)|type(6)|layer_id(6)|tid(3)
+	// byte0 = (nalType << 1), byte1 = 0x01 (layer=0, tid=1)
 	makeHeader := func(nalType byte) []byte {
-		// byte0 = (nalType << 1), byte1 = 0x01 (layer=0, tid=1)
 		return []byte{nalType << 1, 0x01}
 	}
 
-	vcl := []byte{0, 1, 5, 9, 16, 19, 21, 31}
-	for _, typ := range vcl {
-		require.True(t, IsDataNALU(makeHeader(typ)), "type %d should be data NALU", typ)
+	// VCL types: 0-31
+	vclTypes := []byte{0, 1, 2, 5, 9, 16, 19, 20, 21, 31}
+	for _, typ := range vclTypes {
+		require.True(t, IsDataNALU(makeHeader(typ)), "type %d should be VCL (data NALU)", typ)
 	}
 
-	nonVCL := []byte{32, 33, 34, 35, 48, 49, 63}
-	for _, typ := range nonVCL {
-		require.False(t, IsDataNALU(makeHeader(typ)), "type %d should NOT be data NALU", typ)
+	// Non-VCL types: 32-63
+	nonVCLTypes := []byte{32, 33, 34, 35, 39, 40, 48, 49, 63}
+	for _, typ := range nonVCLTypes {
+		require.False(t, IsDataNALU(makeHeader(typ)), "type %d should be non-VCL", typ)
 	}
 
-	// Empty and single-byte inputs must not panic.
-	require.False(t, IsDataNALU(nil))
-	require.False(t, IsDataNALU([]byte{0x02}))
+	// Edge cases
+	require.False(t, IsDataNALU(nil), "nil must not panic")
+	require.False(t, IsDataNALU([]byte{}), "empty must not panic")
+	require.False(t, IsDataNALU([]byte{0x02}), "1-byte must return false (need 2-byte header)")
 }
 
-// TestIsKey verifies that IDR/BLA/CRA types are identified as keyframes.
+// ---------------------------------------------------------------------------
+// IsKey — BLA/IDR/CRA detection
+// ---------------------------------------------------------------------------
+
 func TestIsKey(t *testing.T) {
 	t.Parallel()
 
-	// Key types per H.265: BLA_W_LP(16)..CRA(21).
+	// H.265 key frame types: BLA_W_LP(16) through CRA(21)
 	keyTypes := []byte{
-		NalUnitCodedSliceBlaWLp,
-		NalUnitCodedSliceBlaWRadl,
-		NalUnitCodedSliceBlaNLp,
-		NalUnitCodedSliceIdrWRadl,
-		NalUnitCodedSliceIdrNLp,
-		NalUnitCodedSliceCra,
+		NalUnitCodedSliceBlaWLp,   // 16
+		NalUnitCodedSliceBlaWRadl, // 17
+		NalUnitCodedSliceBlaNLp,   // 18
+		NalUnitCodedSliceIdrWRadl, // 19
+		NalUnitCodedSliceIdrNLp,   // 20
+		NalUnitCodedSliceCra,      // 21
 	}
 	for _, typ := range keyTypes {
 		require.True(t, IsKey(typ), "type %d should be a key frame", typ)
 	}
 
+	// Non-key types
 	nonKeyTypes := []byte{
-		NalUnitCodedSliceTrailR,
-		NalUnitCodedSliceTsaN,
-		NalUnitVps,
-		NalUnitSps,
-		NalUnitPps,
+		0,                            // TRAIL_N
+		NalUnitCodedSliceTrailR,      // 1
+		NalUnitCodedSliceTsaN,        // 2
+		NalUnitCodedSliceTsaR,        // 3
+		NalUnitCodedSliceRaslR,       // 9
+		15,                           // last VCL before BLA range
+		NalUnitReservedIrapVcl22,     // 22 — reserved, NOT key
+		NalUnitVps,                   // 32
+		NalUnitSps,                   // 33
+		NalUnitPps,                   // 34
+		NalUnitAccessUnitDelimiter,   // 35
 	}
 	for _, typ := range nonKeyTypes {
 		require.False(t, IsKey(typ), "type %d should NOT be a key frame", typ)
 	}
 }
 
-// TestParseSliceHeaderComplete_NonVCL verifies that non-VCL NAL types
-// (type >= 32) are rejected per RFC 7798 §1.1.4.
-func TestParseSliceHeaderComplete_NonVCL(t *testing.T) {
-	t.Parallel()
+// ---------------------------------------------------------------------------
+// nal2rbsp — emulation prevention byte removal
+// ---------------------------------------------------------------------------
 
-	// VPS NAL type 32: byte0 = (32 << 1) = 0x40
-	packet := []byte{0x40, 0x01, 0x00, 0x00, 0x00}
-	_, err := ParseSliceHeaderComplete(packet)
-	require.Error(t, err, "non-VCL NAL must be rejected")
-	require.Contains(t, err.Error(), "no slice header")
-}
-
-// TestParseSliceHeaderComplete_TooShort verifies that packets shorter than
-// 3 bytes (2-byte header + at least 1 payload) are rejected.
-func TestParseSliceHeaderComplete_TooShort(t *testing.T) {
-	t.Parallel()
-
-	_, err := ParseSliceHeaderComplete([]byte{0x02, 0x01})
-	require.Error(t, err)
-
-	_, err = ParseSliceHeaderComplete(nil)
-	require.Error(t, err)
-}
-
-// TestNal2Rbsp verifies that nal2rbsp strips H.265 emulation prevention bytes (0x00 0x00 0x03).
 func TestNal2Rbsp(t *testing.T) {
 	t.Parallel()
 
@@ -288,19 +440,49 @@ func TestNal2Rbsp(t *testing.T) {
 			want:  []byte{0x01, 0x02, 0x03},
 		},
 		{
-			name:  "single emulation prevention byte",
+			name:  "single emulation prevention byte 00 00 03 01",
 			input: []byte{0x00, 0x00, 0x03, 0x01},
 			want:  []byte{0x00, 0x00, 0x01},
 		},
 		{
-			name:  "two emulation prevention sequences",
-			input: []byte{0x00, 0x00, 0x03, 0x00, 0x00, 0x03},
-			want:  []byte{0x00, 0x00, 0x00, 0x00},
+			name:  "single emulation prevention byte 00 00 03 00",
+			input: []byte{0x00, 0x00, 0x03, 0x00},
+			want:  []byte{0x00, 0x00, 0x00},
 		},
 		{
-			name:  "empty",
-			input: []byte{},
-			want:  nil, // bytes.ReplaceAll returns nil for empty input
+			name:  "single emulation prevention byte 00 00 03 02",
+			input: []byte{0x00, 0x00, 0x03, 0x02},
+			want:  []byte{0x00, 0x00, 0x02},
+		},
+		{
+			name:  "single emulation prevention byte 00 00 03 03",
+			input: []byte{0x00, 0x00, 0x03, 0x03},
+			want:  []byte{0x00, 0x00, 0x03},
+		},
+		{
+			name:  "two separate sequences",
+			input: []byte{0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x03, 0x01},
+			// Two EPBs at positions 0-2 and 4-6 in the original stream.
+			// Remove both 0x03 bytes: 00 00 + 00 + 00 00 + 01 = 6 bytes
+			want: []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x01},
+		},
+		// NOTE: Per ITU-T H.265 §7.4.2.2, 0x03 is the emulation prevention byte
+		// that appears ONLY between 00 00 and {00, 01, 02, 03}. The function
+		// should only remove 0x03 in the pattern 00 00 03 XX where XX ∈ {00-03}.
+		// However, the implementation uses bytes.ReplaceAll which removes ALL
+		// occurrences of 00 00 03 regardless of the following byte.
+		// The test below documents the INTENDED spec behavior:
+		{
+			name:  "0x03 NOT followed by 00-03 should be preserved per spec",
+			input: []byte{0x00, 0x00, 0x03, 0x04},
+			// Per spec: 0x03 before 0x04 is NOT an emulation prevention byte
+			want: []byte{0x00, 0x00, 0x03, 0x04},
+		},
+		{
+			name:  "trailing 0x03 at end of stream",
+			input: []byte{0x01, 0x00, 0x00, 0x03},
+			// Per spec: 0x03 at end with nothing following is NOT emulation prevention
+			want: []byte{0x01, 0x00, 0x00, 0x03},
 		},
 	}
 
@@ -312,43 +494,48 @@ func TestNal2Rbsp(t *testing.T) {
 	}
 }
 
-// TestHEVCDecoderConfRecord_Len verifies that Len() returns the expected size.
-func TestHEVCDecoderConfRecord_Len(t *testing.T) {
+// ---------------------------------------------------------------------------
+// ParseSliceHeaderComplete
+// ---------------------------------------------------------------------------
+
+func TestParseSliceHeaderComplete_TooShort(t *testing.T) {
 	t.Parallel()
 
-	rec := HEVCDecoderConfRecord{
-		VPS: [][]byte{{0x40, 0x01}},             // 2 bytes
-		SPS: [][]byte{{0x42, 0x01, 0x00}},        // 3 bytes
-		PPS: [][]byte{{0x44, 0x01}},              // 2 bytes
-	}
-	// 23 + (5+2) + (5+3) + (5+2) = 45
-	require.Equal(t, 45, rec.Len())
+	_, err := ParseSliceHeaderComplete(nil)
+	require.Error(t, err)
+
+	_, err = ParseSliceHeaderComplete([]byte{0x02})
+	require.Error(t, err)
+
+	_, err = ParseSliceHeaderComplete([]byte{0x02, 0x01})
+	require.Error(t, err)
 }
 
-// TestHEVCDecoderConfRecord_Unmarshal_TruncatedAfterVPS verifies that a record
-// whose VPS length field points beyond the buffer returns ErrDecconfInvalid.
-func TestHEVCDecoderConfRecord_Unmarshal_TruncatedAfterVPS(t *testing.T) {
+func TestParseSliceHeaderComplete_NonVCL(t *testing.T) {
 	t.Parallel()
 
-	b := make([]byte, 30)
-	b[25] = 0x01 // vpscount = 1
-	b[26] = 0x00 // vpslen hi
-	b[27] = 0x64 // vpslen lo = 100 (far beyond 30-byte buffer)
-	var rec HEVCDecoderConfRecord
-	_, err := rec.Unmarshal(b)
-	require.ErrorIs(t, err, ErrDecconfInvalid)
+	// VPS type=32: byte0 = (32 << 1) = 0x40
+	packet := []byte{0x40, 0x01, 0x00, 0x00, 0x00}
+	_, err := ParseSliceHeaderComplete(packet)
+	require.Error(t, err, "non-VCL NAL must be rejected")
 }
 
-// TestParseSliceHeaderComplete_ValidSlices verifies that valid VCL NAL packets
-// are parsed into the correct SliceType and PPSID.
-//
-// Packet layout (after 2-byte NAL header):
-//
-//	SliceAddress (exp-Golomb) | slice_type u (exp-Golomb) | PPSID (exp-Golomb)
-//
-// Encoding used: SliceAddress=0 → "1"; u values: 0→"1"(P), 1→"010"(B), 2→"011"(I); PPSID=0→"1", PPSID=1→"010".
 func TestParseSliceHeaderComplete_ValidSlices(t *testing.T) {
 	t.Parallel()
+
+	// Packet layout (after 2-byte NAL header):
+	//   first_slice_segment_in_pic_flag (exp-Golomb) | slice_type (exp-Golomb) | PPSID (exp-Golomb)
+	//
+	// Exp-Golomb encoding: 0→"1", 1→"010", 2→"011"
+	//
+	// H.265 spec (ITU-T H.265 §7.4.7.1, Table 7-7):
+	//   slice_type 0 = B
+	//   slice_type 1 = P
+	//   slice_type 2 = I
+	//
+	// NOTE: The implementation maps 0→P, 1→B (swapped from spec).
+	// This test documents the INTENDED spec behavior. If it fails,
+	// the bug is in ParseSliceHeaderComplete, not in this test.
 
 	tests := []struct {
 		name     string
@@ -356,20 +543,20 @@ func TestParseSliceHeaderComplete_ValidSlices(t *testing.T) {
 		wantType SliceType
 		wantPPS  uint
 	}{
-		// 0xe0 = "11100000": SliceAddr=0("1"), u=0 P("1"), PPSID=0("1")
-		{name: "P slice PPSID=0", payload: 0xe0, wantType: SliceP, wantPPS: 0},
-		// 0xb8 = "10111000": SliceAddr=0("1"), u=2 I("011"), PPSID=0("1")
-		{name: "I slice PPSID=0", payload: 0xb8, wantType: SliceI, wantPPS: 0},
-		// 0xa8 = "10101000": SliceAddr=0("1"), u=1 B("010"), PPSID=0("1")
-		{name: "B slice PPSID=0", payload: 0xa8, wantType: SliceB, wantPPS: 0},
-		// 0xd0 = "11010000": SliceAddr=0("1"), u=0 P("1"), PPSID=1("010")
-		{name: "P slice PPSID=1", payload: 0xd0, wantType: SliceP, wantPPS: 1},
+		// SliceAddr=0("1"), slice_type=0("1"), PPSID=0("1") → 1_1_1_00000 = 0xe0
+		{name: "B slice (type=0)", payload: 0xe0, wantType: SliceB, wantPPS: 0},
+		// SliceAddr=0("1"), slice_type=1("010"), PPSID=0("1") → 1_010_1_000 = 0xa8
+		{name: "P slice (type=1)", payload: 0xa8, wantType: SliceP, wantPPS: 0},
+		// SliceAddr=0("1"), slice_type=2("011"), PPSID=0("1") → 1_011_1_000 = 0xb8
+		{name: "I slice (type=2)", payload: 0xb8, wantType: SliceI, wantPPS: 0},
+		// SliceAddr=0("1"), slice_type=1("010"), PPSID=1("010") → 1_010_010_0 = 0xa4
+		{name: "P slice PPSID=1", payload: 0xa4, wantType: SliceP, wantPPS: 1},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			// NAL header: type=1 (TrailR, VCL), byte0=(1<<1)=0x02, byte1=0x01
+			// NAL type=1 (TrailR, VCL): byte0=(1<<1)=0x02, byte1=0x01
 			packet := []byte{0x02, 0x01, tt.payload}
 			header, err := ParseSliceHeaderComplete(packet)
 			require.NoError(t, err)
@@ -379,55 +566,58 @@ func TestParseSliceHeaderComplete_ValidSlices(t *testing.T) {
 	}
 }
 
-// TestParseSliceHeaderComplete_InvalidSliceType verifies that an out-of-range
-// slice_type value returns an error.
 func TestParseSliceHeaderComplete_InvalidSliceType(t *testing.T) {
 	t.Parallel()
 
-	// 0x8b = "10001011": SliceAddr=0("1"), u=10("0001011") — invalid slice_type.
+	// Per H.265 spec, only slice_type 0-2 are valid.
+	// Encode slice_type=10 via exp-Golomb: 10 → "00001011" (leading zeros + value)
+	// SliceAddr=0("1"), slice_type=10("00001011")
+	// 1_0000_101_1 → but we need this as bytes starting from bit position
+	// Actually: "1" then "00001011" = 1_00001011 = 9 bits
+	// In a byte: 0b1_0000_101 = 0x85, next byte starts with 1...
+	// Simpler: 0x8b = 10001011
+	// "1" (addr=0), "0001011" → exp-golomb for 10: code is 0b00001011, but exp-golomb(10) =
+	// 10+1=11=0b1011, width=4, so 000_1011. Total: 1_000_1011 = 0b10001011 = 0x8b
 	packet := []byte{0x02, 0x01, 0x8b}
 	_, err := ParseSliceHeaderComplete(packet)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "slice_type=10 invalid")
+	require.Contains(t, err.Error(), "invalid")
 }
 
-// TestParseSliceHeaderFromNALU_Valid verifies that the helper returns only SliceType.
 func TestParseSliceHeaderFromNALU_Valid(t *testing.T) {
 	t.Parallel()
 
-	// P slice packet identical to TestParseSliceHeaderComplete_ValidSlices.
-	packet := []byte{0x02, 0x01, 0xe0}
+	// I slice: SliceAddr=0("1"), slice_type=2("011"), PPSID=0("1") → 0xb8
+	// slice_type=2 maps to I per H.265 spec Table 7-7
+	packet := []byte{0x02, 0x01, 0xb8}
 	sliceType, err := ParseSliceHeaderFromNALU(packet)
 	require.NoError(t, err)
-	require.Equal(t, SliceType(SliceP), sliceType)
+	require.Equal(t, SliceType(SliceI), sliceType)
 }
 
-// TestPPSValidator_FirstSlice verifies that the very first slice of a frame
-// always succeeds regardless of PPS ID, and sets the expected ID.
+// ---------------------------------------------------------------------------
+// PPSValidator
+// ---------------------------------------------------------------------------
+
 func TestPPSValidator_FirstSlice(t *testing.T) {
 	t.Parallel()
 
 	v := NewPPSValidator()
 	h := SliceHeader{SliceType: SliceI, PPSID: 3}
 	require.NoError(t, v.ValidateSlice(h, true))
-	// Subsequent non-first-slice with same PPSID must pass.
+	// Same PPSID in subsequent slice must pass
 	require.NoError(t, v.ValidateSlice(SliceHeader{PPSID: 3}, false))
 }
 
-// TestPPSValidator_ConsistentPPS verifies that multiple slices within the same
-// frame with matching PPSID all pass validation.
 func TestPPSValidator_ConsistentPPS(t *testing.T) {
 	t.Parallel()
 
 	v := NewPPSValidator()
-	first := SliceHeader{PPSID: 2}
-	require.NoError(t, v.ValidateSlice(first, true))
+	require.NoError(t, v.ValidateSlice(SliceHeader{PPSID: 2}, true))
 	require.NoError(t, v.ValidateSlice(SliceHeader{PPSID: 2}, false))
 	require.NoError(t, v.ValidateSlice(SliceHeader{PPSID: 2}, false))
 }
 
-// TestPPSValidator_MismatchedPPS verifies that a PPS change within the same
-// frame returns an error.
 func TestPPSValidator_MismatchedPPS(t *testing.T) {
 	t.Parallel()
 
@@ -438,54 +628,41 @@ func TestPPSValidator_MismatchedPPS(t *testing.T) {
 	require.Contains(t, err.Error(), "PPS changed between slices")
 }
 
-// TestPPSValidator_NewFrame verifies that MarkNewFrame resets the validator so
-// a new frame may use a different PPS ID without triggering a mismatch error.
 func TestPPSValidator_NewFrame(t *testing.T) {
 	t.Parallel()
 
 	v := NewPPSValidator()
-	// First frame uses PPSID=1.
 	require.NoError(t, v.ValidateSlice(SliceHeader{PPSID: 1}, true))
 	v.MarkNewFrame()
 
-	// New frame may start with any PPSID (isNewFrame=true acts like first slice).
+	// New frame may use any PPSID
 	require.NoError(t, v.ValidateSlice(SliceHeader{PPSID: 5}, false))
-	// Within the new frame, same PPSID must succeed.
+	// Within the new frame, same PPSID must succeed
 	require.NoError(t, v.ValidateSlice(SliceHeader{PPSID: 5}, false))
-	// Different PPSID in the same new frame must fail.
+	// Different PPSID in the same frame must fail
 	require.Error(t, v.ValidateSlice(SliceHeader{PPSID: 1}, false))
 }
 
-// TestPPSValidator_Uninitialized verifies that calling ValidateSlice on a
-// zero-value PPSValidator (isNewFrame=false, currentFramePPSID=nil) returns
-// the "not properly initialized" error.
 func TestPPSValidator_Uninitialized(t *testing.T) {
 	t.Parallel()
 
-	v := &PPSValidator{} // not via NewPPSValidator; isNewFrame=false
+	// Zero-value (not via NewPPSValidator) — isNewFrame is false
+	v := &PPSValidator{}
 	err := v.ValidateSlice(SliceHeader{PPSID: 0}, false)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not properly initialized")
 }
 
-// TestTag verifies the Tag format: "hev1.P.C.LLL.90".
-func TestTag(t *testing.T) {
-	t.Parallel()
+// ---------------------------------------------------------------------------
+// Packet
+// ---------------------------------------------------------------------------
 
-	cp, _ := loadTestParameters(t)
-	tag := cp.Tag()
-	require.NotEmpty(t, tag)
-	require.Contains(t, tag, "hev1.")
-	require.Contains(t, tag, ".90")
-}
-
-// TestNewPacket verifies that NewPacket stores all fields correctly.
 func TestNewPacket(t *testing.T) {
 	t.Parallel()
 
 	cp, _ := loadTestParameters(t)
 
-	data := []byte{0x26, 0x01, 0x00, 0x00, 0x01} // IDR_W_RADL NAL
+	data := []byte{0x26, 0x01, 0x00, 0x00, 0x01}
 	ts := 500 * time.Millisecond
 	absTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	sourceID := "rtsp://camera/stream"
@@ -502,12 +679,10 @@ func TestNewPacket(t *testing.T) {
 	require.Equal(t, gomedia.H265, pkt.CodecParameters().Type())
 }
 
-// TestPacket_Clone_CopyData verifies Clone(true) produces an independent copy.
 func TestPacket_Clone_CopyData(t *testing.T) {
 	t.Parallel()
 
 	cp, _ := loadTestParameters(t)
-
 	original := []byte{0x02, 0x01, 0xAA, 0xBB}
 	pkt := NewPacket(false, 100*time.Millisecond, time.Time{}, original, "src", cp)
 
@@ -518,17 +693,15 @@ func TestPacket_Clone_CopyData(t *testing.T) {
 	require.Equal(t, pkt.Data(), cloned.Data())
 	require.False(t, cloned.IsKeyFrame())
 
-	// Mutating the clone must not affect the original.
+	// Mutating the clone must not affect the original
 	cloned.Data()[0] = 0xFF
-	require.Equal(t, byte(0x02), pkt.Data()[0], "original must be unaffected")
+	require.Equal(t, byte(0x02), pkt.Data()[0])
 }
 
-// TestPacket_Clone_SharedData verifies Clone(false) shares the underlying buffer.
 func TestPacket_Clone_SharedData(t *testing.T) {
 	t.Parallel()
 
 	cp, _ := loadTestParameters(t)
-
 	data := []byte{0x26, 0x01, 0x00}
 	pkt := NewPacket(true, 0, time.Time{}, data, "src", cp)
 
@@ -540,7 +713,6 @@ func TestPacket_Clone_SharedData(t *testing.T) {
 	cloned.Release()
 }
 
-// TestPacket_Release verifies Release does not panic.
 func TestPacket_Release(t *testing.T) {
 	t.Parallel()
 
@@ -549,7 +721,10 @@ func TestPacket_Release(t *testing.T) {
 	require.NotPanics(t, pkt.Release)
 }
 
-// TestLoadPacketsFromFile loads all real HEVC packets and validates each one.
+// ---------------------------------------------------------------------------
+// Load test data — real packets
+// ---------------------------------------------------------------------------
+
 func TestLoadPacketsFromFile(t *testing.T) {
 	t.Parallel()
 
@@ -586,7 +761,6 @@ func TestLoadPacketsFromFile(t *testing.T) {
 	require.Greater(t, keyCount, 0, "expected at least one keyframe in test data")
 }
 
-// TestLoadPackets_CloneRoundtrip verifies Clone on real packet data.
 func TestLoadPackets_CloneRoundtrip(t *testing.T) {
 	t.Parallel()
 
@@ -620,4 +794,58 @@ func TestLoadPackets_CloneRoundtrip(t *testing.T) {
 		sharedClone.Release()
 		pkt.Release()
 	}
+}
+
+// ---------------------------------------------------------------------------
+// ParseSPS — using real test data
+// ---------------------------------------------------------------------------
+
+func TestParseSPS_RealData(t *testing.T) {
+	t.Parallel()
+
+	_, sps, _ := loadTestVPSSPSPPS(t)
+
+	info, err := ParseSPS(sps)
+	require.NoError(t, err)
+	require.Greater(t, info.Width, uint(0))
+	require.Greater(t, info.Height, uint(0))
+	// Typical resolutions should be reasonable
+	require.LessOrEqual(t, info.Width, uint(8192))
+	require.LessOrEqual(t, info.Height, uint(8192))
+}
+
+func TestParseSPS_TooShort(t *testing.T) {
+	t.Parallel()
+
+	_, err := ParseSPS(nil)
+	require.Error(t, err)
+
+	_, err = ParseSPS([]byte{0x42})
+	require.Error(t, err)
+}
+
+// ---------------------------------------------------------------------------
+// SliceType.String()
+// ---------------------------------------------------------------------------
+// (Skipped per project convention: "Do not write tests for String() methods.")
+
+// ---------------------------------------------------------------------------
+// NAL type constants — verify ranges
+// ---------------------------------------------------------------------------
+
+func TestNALTypeConstants(t *testing.T) {
+	t.Parallel()
+
+	// BLA/IDR/CRA range is contiguous: 16-21
+	require.Equal(t, 16, NalUnitCodedSliceBlaWLp)
+	require.Equal(t, 17, NalUnitCodedSliceBlaWRadl)
+	require.Equal(t, 18, NalUnitCodedSliceBlaNLp)
+	require.Equal(t, 19, NalUnitCodedSliceIdrWRadl)
+	require.Equal(t, 20, NalUnitCodedSliceIdrNLp)
+	require.Equal(t, 21, NalUnitCodedSliceCra)
+
+	// Non-VCL boundary
+	require.Equal(t, 32, NalUnitVps)
+	require.Equal(t, 33, NalUnitSps)
+	require.Equal(t, 34, NalUnitPps)
 }

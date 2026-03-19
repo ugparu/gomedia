@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ugparu/gomedia"
@@ -81,13 +83,14 @@ type muxer struct {
 	discontinuitySequence int64                               // Discontinuity sequence number (incremented when a discontinuity segment is evicted).
 	segmentDuration       time.Duration                       // Target duration for each segment.
 	fragmentDuration      time.Duration                       // Target duration for each fragment.
-	manifest              string                              // Atomic value to store the HLS manifest.
+	manifest              atomic.Value                        // Stores the HLS manifest (string).
 	indexChan             chan struct{}                       // Channel for signaling index changes.
 	header                string                              // Initial part of the HLS playlist.
 	codecPars             gomedia.CodecParametersPair         // Codec parameters for video and audio.
 	initVersion           int                                 // Current init segment version (incremented on codec change).
 	initCache             map[int]gomedia.CodecParametersPair // Cached codec params per init version.
 	initBytesCache        map[int][]byte                      // Cached generated init segment bytes per version.
+	initMu                sync.RWMutex                        // Protects codecPars, initVersion, initCache, initBytesCache.
 	mediaName             string                              // Base filename used in segment/fragment URIs (e.g. "media").
 }
 
@@ -105,7 +108,7 @@ func NewHLSMuxer(segmentDuration time.Duration, segmentCount uint8, partHoldBack
 		mediaSequence:    0,
 		segmentDuration:  segmentDuration,
 		fragmentDuration: fragmentDuration,
-		manifest:         "",
+		manifest:         atomic.Value{}, //nolint:govet // initialized with Store("") below
 		indexChan:        make(chan struct{}),
 		header: fmt.Sprintf(`#EXTM3U
 #EXT-X-VERSION:7
@@ -113,13 +116,14 @@ func NewHLSMuxer(segmentDuration time.Duration, segmentCount uint8, partHoldBack
 #EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,PART-HOLD-BACK=%.5f
 #EXT-X-PART-INF:PART-TARGET=%.5f
 #EXT-X-INDEPENDENT-SEGMENTS
-`, int(segmentDuration.Seconds()), partHoldBack, partTarget),
+`, int(math.Ceil(segmentDuration.Seconds())), partHoldBack, partTarget),
 		codecPars:      gomedia.CodecParametersPair{AudioCodecParameters: nil, VideoCodecParameters: nil, SourceID: ""},
 		initVersion:    0,
 		initCache:      make(map[int]gomedia.CodecParametersPair),
 		initBytesCache: make(map[int][]byte),
 		mediaName:      "media",
 	}
+	newHLS.manifest.Store("")
 	for _, o := range opts {
 		o(newHLS)
 	}
@@ -157,6 +161,10 @@ func (mxr *muxer) Mux(codecPars gomedia.CodecParametersPair) (err error) {
 // The current segment is force-closed and a new segment with a discontinuity tag is created,
 // signalling the player to re-fetch the init segment and reinitialize its decoder.
 func (mxr *muxer) UpdateCodecParameters(codecPars gomedia.CodecParametersPair) error {
+	if codecPars.VideoCodecParameters == nil && codecPars.AudioCodecParameters == nil {
+		return &utils.NoCodecDataError{}
+	}
+
 	curSeg := mxr.getCurSegment()
 
 	// Close the current fragment so pending waiters are unblocked.
@@ -179,19 +187,22 @@ func (mxr *muxer) UpdateCodecParameters(codecPars gomedia.CodecParametersPair) e
 		close(curSeg.finished)
 	}
 
+	mxr.initMu.Lock()
 	mxr.codecPars = codecPars
 	mxr.initVersion++
 	mxr.initCache[mxr.initVersion] = codecPars
+	initVersion := mxr.initVersion
+	mxr.initMu.Unlock()
 
 	newSegID := curSeg.id + 1
 	newSeg := newSegment(newSegID, mxr.fragmentDuration, mxr.segmentDuration, codecPars, mxr.mediaName, mxr.log)
 	newSeg.discontinuity = true
-	newSeg.initVersion = mxr.initVersion
+	newSeg.initVersion = initVersion
 	mxr.addSegment(newSeg)
 
 	mxr.evictOldSegments()
 
-	mxr.manifest = mxr.updateIndexM3u8()
+	mxr.manifest.Store(mxr.updateIndexM3u8())
 	return nil
 }
 
@@ -233,6 +244,8 @@ func (mxr *muxer) cleanupInitCache() {
 			used[seg.initVersion] = true
 		}
 	}
+	mxr.initMu.Lock()
+	defer mxr.initMu.Unlock()
 	for v := range mxr.initCache {
 		if !used[v] {
 			delete(mxr.initCache, v)
@@ -265,7 +278,7 @@ func (mxr *muxer) WritePacket(inpPkt gomedia.Packet) (err error) {
 	}
 
 	// Update the HLS manifest and signal the change.
-	mxr.manifest = mxr.updateIndexM3u8()
+	mxr.manifest.Store(mxr.updateIndexM3u8())
 	for {
 		select {
 		case mxr.indexChan <- struct{}{}:
@@ -316,7 +329,7 @@ func (mxr *muxer) updateIndexM3u8() string {
 // GetIndexM3u8 returns the HLS manifest based on the requested segment and part.
 func (mxr *muxer) GetIndexM3u8(ctx context.Context, needSeg int64, needPart int8) (string, error) {
 	if needSeg < 0 {
-		return mxr.manifest, nil
+		return mxr.manifest.Load().(string), nil
 	}
 
 	// Wait for segment or part
@@ -335,7 +348,7 @@ func (mxr *muxer) GetIndexM3u8(ctx context.Context, needSeg int64, needPart int8
 	case <-mxr.indexChan:
 	}
 
-	return mxr.manifest, nil
+	return mxr.manifest.Load().(string), nil
 }
 
 // waitForSegmentOrPart is a helper function to wait for a segment or part
@@ -414,16 +427,22 @@ func (mxr *muxer) waitForSegmentOrPart(ctx context.Context, needSeg int64, needP
 
 // GetInit returns the MP4 initialization segment for the current codec version.
 func (mxr *muxer) GetInit() ([]byte, error) {
-	return mxr.GetInitByVersion(mxr.initVersion)
+	mxr.initMu.RLock()
+	version := mxr.initVersion
+	mxr.initMu.RUnlock()
+	return mxr.GetInitByVersion(version)
 }
 
 // GetInitByVersion returns the MP4 initialization segment for a specific codec version.
 // The generated bytes are cached to avoid re-muxing on every request.
 func (mxr *muxer) GetInitByVersion(version int) ([]byte, error) {
+	mxr.initMu.RLock()
 	if cached, ok := mxr.initBytesCache[version]; ok {
+		mxr.initMu.RUnlock()
 		return cached, nil
 	}
 	codecPars, ok := mxr.initCache[version]
+	mxr.initMu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("init version %d not found", version)
 	}
@@ -438,7 +457,9 @@ func (mxr *muxer) GetInitByVersion(version int) ([]byte, error) {
 	}
 	data := make([]byte, len(buf.Data()))
 	copy(data, buf.Data())
+	mxr.initMu.Lock()
 	mxr.initBytesCache[version] = data
+	mxr.initMu.Unlock()
 	return data, nil
 }
 
@@ -503,22 +524,25 @@ func (mxr *muxer) Release() { //nolint:revive // Method name required by interfa
 
 // GetMasterEntry returns the master entry for the HLS playlist.
 func (mxr *muxer) GetMasterEntry() (string, error) {
-	if mxr.codecPars.VideoCodecParameters == nil {
+	mxr.initMu.RLock()
+	codecPars := mxr.codecPars
+	mxr.initMu.RUnlock()
+	if codecPars.VideoCodecParameters == nil {
 		return "", errors.New("no video codec")
 	}
-	w, h := mxr.codecPars.VideoCodecParameters.Width(), mxr.codecPars.VideoCodecParameters.Height()
-	codecsStr := mxr.codecPars.VideoCodecParameters.Tag()
-	if mxr.codecPars.AudioCodecParameters != nil {
-		codecsStr += fmt.Sprintf(",%s", mxr.codecPars.AudioCodecParameters.Tag())
+	w, h := codecPars.VideoCodecParameters.Width(), codecPars.VideoCodecParameters.Height()
+	codecsStr := codecPars.VideoCodecParameters.Tag()
+	if codecPars.AudioCodecParameters != nil {
+		codecsStr += fmt.Sprintf(",%s", codecPars.AudioCodecParameters.Tag())
 	}
 
 	masterEntry := fmt.Sprintf(
 		"#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d,CODECS=\"%s\",FRAME-RATE=%.3f",
-		mxr.codecPars.VideoCodecParameters.Bitrate(),
+		codecPars.VideoCodecParameters.Bitrate(),
 		w,
 		h,
 		codecsStr,
-		float64(mxr.codecPars.VideoCodecParameters.FPS()),
+		float64(codecPars.VideoCodecParameters.FPS()),
 	)
 	return masterEntry, nil
 }

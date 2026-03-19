@@ -335,10 +335,19 @@ func TestStep_InitError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 
 	codecPar := pcm.NewCodecParameters(0, gomedia.PCM, 1, 16000) //nolint:mnd
+	codecPar2 := pcm.NewCodecParameters(0, gomedia.PCM, 2, 48000) //nolint:mnd // different params to trigger second init
 	initErr := fmt.Errorf("init failed")
+	pktDuration := 20 * time.Millisecond //nolint:mnd
 
 	mockInner := mocks.NewMockInnerAudioEncoder(ctrl)
+	// First init fails
 	mockInner.EXPECT().Init(codecPar).Return(initErr).Times(1)
+	// Second init (different params) succeeds — proves encoder recovered
+	mockInner.EXPECT().Init(codecPar2).Return(nil).Times(1)
+	mockInner.EXPECT().Encode(gomock.Any()).DoAndReturn(func(_ *pcm.Packet) ([]gomedia.AudioPacket, error) {
+		out := pcm.NewPacket([]byte{0x01}, 0, "test", time.Now(), codecPar2, pktDuration)
+		return []gomedia.AudioPacket{out}, nil
+	}).Times(1)
 	mockInner.EXPECT().Close().MinTimes(1)
 
 	enc := NewAudioEncoder(10, func() InnerAudioEncoder { //nolint:mnd
@@ -347,11 +356,18 @@ func TestStep_InitError(t *testing.T) {
 
 	enc.Encode()
 
-	// Send packet — init will fail, failsafe manager logs error and continues
+	// First packet — init fails, failsafe manager logs error and continues
 	enc.Samples() <- newTestPCMPacket(make([]byte, 320), codecPar) //nolint:mnd
 
-	// Give Step time to process
-	time.Sleep(50 * time.Millisecond) //nolint:mnd
+	// Second packet with different params — triggers new init that succeeds
+	enc.Samples() <- newTestPCMPacket(make([]byte, 640), codecPar2) //nolint:mnd
+
+	select {
+	case <-enc.Packets():
+		// success — encoder recovered from init error
+	case <-time.After(time.Second):
+		t.Fatal("timed out — encoder did not recover from init error")
+	}
 
 	closeEncoder(enc)
 }
@@ -412,14 +428,16 @@ func TestSamples_ReturnsSendOnlyChannel(t *testing.T) {
 	closeEncoder(enc)
 }
 
-func TestStep_InputPacketIsReleased(t *testing.T) {
+func TestStep_ProcessesPacketWithoutPanic(t *testing.T) {
 	ctrl := gomock.NewController(t)
 
 	codecPar := pcm.NewCodecParameters(0, gomedia.PCM, 1, 16000) //nolint:mnd
 
 	mockInner := mocks.NewMockInnerAudioEncoder(ctrl)
 	mockInner.EXPECT().Init(codecPar).Return(nil).Times(1)
-	mockInner.EXPECT().Encode(gomock.Any()).Return(nil, nil).Times(1)
+
+	outPkt := pcm.NewPacket([]byte{0x01}, 0, "test", time.Now(), codecPar, 20*time.Millisecond) //nolint:mnd
+	mockInner.EXPECT().Encode(gomock.Any()).Return([]gomedia.AudioPacket{outPkt}, nil).Times(1)
 	mockInner.EXPECT().Close().Times(2) //nolint:mnd // param-change + Release
 
 	enc := NewAudioEncoder(10, func() InnerAudioEncoder { //nolint:mnd
@@ -428,13 +446,15 @@ func TestStep_InputPacketIsReleased(t *testing.T) {
 
 	enc.Encode()
 
-	// Use a real pcm.Packet — Release() is a no-op for heap-backed packets,
-	// but confirms Step calls defer aPkt.Release()
 	inPkt := newTestPCMPacket(make([]byte, 320), codecPar) //nolint:mnd
 	enc.Samples() <- inPkt
 
-	// Give Step time to process and call Release
-	time.Sleep(50 * time.Millisecond) //nolint:mnd
+	// Wait for output to confirm Step processed the packet
+	select {
+	case <-enc.Packets():
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for output packet")
+	}
 
 	closeEncoder(enc)
 }

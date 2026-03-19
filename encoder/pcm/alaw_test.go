@@ -4,6 +4,7 @@ package pcm
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -114,7 +115,7 @@ func TestInit_SampleRates(t *testing.T) {
 
 	rates := []uint64{8000, 16000, 32000, 44100, 48000}
 	for _, sr := range rates {
-		t.Run("rate", func(t *testing.T) {
+		t.Run(fmt.Sprintf("%dHz", sr), func(t *testing.T) {
 			t.Parallel()
 			enc := NewAlawEncoder()
 			defer enc.Close()
@@ -568,7 +569,7 @@ func TestFrameDuration(t *testing.T) {
 	// Frame duration should always be 100ms regardless of input sample rate
 	rates := []uint64{8000, 16000, 44100, 48000}
 	for _, sr := range rates {
-		t.Run("rate", func(t *testing.T) {
+		t.Run(fmt.Sprintf("%dHz", sr), func(t *testing.T) {
 			t.Parallel()
 			enc := NewAlawEncoder()
 			defer enc.Close()

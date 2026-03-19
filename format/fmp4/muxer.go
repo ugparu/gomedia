@@ -16,7 +16,22 @@ import (
 // Constants for safe integer conversions
 const (
 	maxInt32Value = int64(^uint32(0) >> 1) // Maximum value for int32
+	minInt32Value = -maxInt32Value - 1     // Minimum value for int32
 )
+
+// safeInt32Conversion safely converts an int64 value to int32
+func safeInt32Conversion(log logger.Logger, src any, val int64, name string) int32 {
+	if val >= minInt32Value && val <= maxInt32Value {
+		//nolint:gosec // This is a safe int32 conversion
+		return int32(val)
+	}
+	if val < minInt32Value {
+		log.Errorf(src, "%s value %d is too small for int32, capping at %d", name, val, minInt32Value)
+		return int32(minInt32Value)
+	}
+	log.Errorf(src, "%s value %d is too large for int32, capping at %d", name, val, maxInt32Value)
+	return int32(maxInt32Value)
+}
 
 type Muxer struct {
 	strs   []*Stream
@@ -36,21 +51,10 @@ func NewMuxer(log logger.Logger) *Muxer {
 	}
 }
 
-// safeInt32Conversion safely converts an int64 value to int32
-func (m *Muxer) safeInt32Conversion(val int64, name string) int32 {
-	if val <= maxInt32Value {
-		//nolint:gosec // This is a safe int32 conversion
-		return int32(val)
-	}
-	// Default to max int32 value if overflow would occur
-	m.log.Errorf(m,"%s value %d is too large for int32, capping at %d", name, val, maxInt32Value)
-	return int32(maxInt32Value)
-}
-
 // safeUint32Conversion safely converts an int value to uint32
 func (m *Muxer) safeUint32Conversion(val int, name string) uint32 {
 	if val < 0 || val > int(^uint32(0)) {
-		m.log.Errorf(m,"%s value %d is outside uint32 range, using 0", name, val)
+		m.log.Errorf(m, "%s value %d is outside uint32 range, using 0", name, val)
 		return 0
 	}
 	return uint32(val)
@@ -110,7 +114,7 @@ func (m *Muxer) newStream(codec gomedia.CodecParameters) (err error) {
 	stream.trackAtom.Media = new(mp4io.Media)
 
 	// Use int32 conversion with validation to avoid potential overflow
-	timeScaleInt32 := m.safeInt32Conversion(stream.timeScale, "timeScale")
+	timeScaleInt32 := safeInt32Conversion(m.log, m, stream.timeScale, "timeScale")
 
 	stream.trackAtom.Media.Header = &mp4io.MediaHeader{
 		Version:    0,
@@ -160,23 +164,34 @@ func (m *Muxer) newStream(codec gomedia.CodecParameters) (err error) {
 		},
 	}
 
-	stream.trackAtom.Media.Handler = &mp4io.HandlerRefer{
-		Version: 0,
-		Flags:   0,
-		Type:    [4]byte([]byte("mhlr")),
-		SubType: [4]byte([]byte("vide")),
-		Name:    []byte("VideoHandler"),
-		AtomPos: mp4io.AtomPos{
-			Offset: 0,
-			Size:   0,
-		},
-	}
-
 	switch codec.Type() {
-	case gomedia.H264:
+	case gomedia.H264, gomedia.H265:
+		stream.trackAtom.Media.Handler = &mp4io.HandlerRefer{
+			Version: 0,
+			Flags:   0,
+			Type:    [4]byte{},
+			SubType: [4]byte([]byte("vide")),
+			Name:    []byte("VideoHandler"),
+			AtomPos: mp4io.AtomPos{
+				Offset: 0,
+				Size:   0,
+			},
+		}
 		stream.sample.SyncSample = new(mp4io.SyncSample)
-	case gomedia.H265:
-		stream.sample.SyncSample = new(mp4io.SyncSample)
+	case gomedia.AAC:
+		stream.trackAtom.Header.Volume = 1
+		stream.trackAtom.Header.AlternateGroup = 1
+		stream.trackAtom.Media.Handler = &mp4io.HandlerRefer{
+			Version: 0,
+			Flags:   0,
+			Type:    [4]byte{},
+			SubType: [4]byte{'s', 'o', 'u', 'n'},
+			Name:    []byte("SoundHandler"),
+			AtomPos: mp4io.AtomPos{
+				Offset: 0,
+				Size:   0,
+			},
+		}
 	}
 
 	m.strs = append(m.strs, stream)
@@ -226,7 +241,7 @@ func (m *Muxer) GetInit() buffer.PooledBuffer {
 	}
 
 	// Safe int->int32 conversion with a check
-	nextTrackID := m.safeInt32Conversion(int64(len(m.strs)+1), "next track ID")
+	nextTrackID := safeInt32Conversion(m.log, m, int64(len(m.strs)+1), "next track ID")
 	moov.Header.NextTrackID = nextTrackID
 
 	for i, stream := range m.strs {
@@ -272,13 +287,13 @@ func (m *Muxer) processMuxer() {
 
 	if m.params.VideoCodecParameters != nil {
 		if err := m.newStream(m.params.VideoCodecParameters); err != nil {
-			m.log.Errorf(m,"newStream error: %v", err)
+			m.log.Errorf(m, "newStream error: %v", err)
 		}
 	}
 
 	if m.params.AudioCodecParameters != nil {
 		if err := m.newStream(m.params.AudioCodecParameters); err != nil {
-			m.log.Errorf(m,"newStream error: %v", err)
+			m.log.Errorf(m, "newStream error: %v", err)
 		}
 	}
 }
@@ -292,7 +307,7 @@ func (m *Muxer) processTrackHeader(track *mp4io.TrackFrag, s *Stream) {
 	// Safe conversion with validation for DefaultDuration
 	durationTS := s.timeToTS(s.packets[0].Duration())
 	if durationTS < 0 || durationTS > int64(^uint32(0)) {
-		m.log.Errorf(m,"Duration time value %d is outside uint32 range", durationTS)
+		m.log.Errorf(m, "Duration time value %d is outside uint32 range", durationTS)
 		track.Header.DefaultDuration = 0
 	} else {
 		track.Header.DefaultDuration = uint32(durationTS)
@@ -301,20 +316,20 @@ func (m *Muxer) processTrackHeader(track *mp4io.TrackFrag, s *Stream) {
 	// Safe conversion with validation for DefaultSize
 	pktSize := s.packets[0].Len()
 	if pktSize < 0 || pktSize > int(^uint32(0)) {
-		m.log.Errorf(m,"Packet size %d is outside uint32 range", pktSize)
+		m.log.Errorf(m, "Packet size %d is outside uint32 range", pktSize)
 		track.Header.DefaultSize = 0
 	} else {
 		track.Header.DefaultSize = uint32(pktSize)
 	}
 
-	firstFlags := mp4io.SampleNonKeyframe
-	if vPkt, casted := s.packets[0].(gomedia.VideoPacket); casted && vPkt.IsKeyFrame() {
-		firstFlags = mp4io.SampleNoDependencies
+	firstFlags := mp4io.SampleNoDependencies
+	if vPkt, casted := s.packets[0].(gomedia.VideoPacket); casted && !vPkt.IsKeyFrame() {
+		firstFlags = mp4io.SampleNonKeyframe
 	}
 	if len(s.packets) > 1 {
-		track.Header.DefaultFlags = mp4io.SampleNonKeyframe
-		if vPkt, casted := s.packets[1].(gomedia.VideoPacket); casted && vPkt.IsKeyFrame() {
-			track.Header.DefaultFlags = mp4io.SampleNoDependencies
+		track.Header.DefaultFlags = mp4io.SampleNoDependencies
+		if vPkt, casted := s.packets[1].(gomedia.VideoPacket); casted && !vPkt.IsKeyFrame() {
+			track.Header.DefaultFlags = mp4io.SampleNonKeyframe
 		}
 	} else {
 		track.Header.DefaultFlags = firstFlags
@@ -335,25 +350,25 @@ func (m *Muxer) processPackets(track *mp4io.TrackFrag, s *Stream) {
 		// Safe conversion with validation
 		pktDurationTS := s.timeToTS(pkt.Duration())
 		if pktDurationTS < 0 || pktDurationTS > int64(^uint32(0)) {
-			m.log.Errorf(m,"Packet duration %d is outside uint32 range", pktDurationTS)
+			m.log.Errorf(m, "Packet duration %d is outside uint32 range", pktDurationTS)
 		} else if uint32(pktDurationTS) != track.Header.DefaultDuration {
 			track.Run.Flags |= mp4io.TRUNSampleDuration
 		}
 
 		// Use a different name to avoid shadowing
-		entryRunFlag := mp4io.SampleNonKeyframe
-		if vPkt, casted := pkt.(gomedia.VideoPacket); casted && vPkt.IsKeyFrame() {
-			entryRunFlag = mp4io.SampleNoDependencies
+		entryRunFlag := mp4io.SampleNoDependencies
+		if vPkt, casted := pkt.(gomedia.VideoPacket); casted && !vPkt.IsKeyFrame() {
+			entryRunFlag = mp4io.SampleNonKeyframe
 		}
 
-		if j != 0 && entryRunFlag != mp4io.SampleNonKeyframe {
+		if j != 0 && entryRunFlag != track.Header.DefaultFlags {
 			track.Run.Flags |= mp4io.TRUNSampleFlags
 		}
 
 		// Safe conversions with validation
 		var entryDuration uint32
 		if pktDurationTS < 0 || pktDurationTS > int64(^uint32(0)) {
-			m.log.Errorf(m,"Packet duration %d is outside uint32 range, using 0", pktDurationTS)
+			m.log.Errorf(m, "Packet duration %d is outside uint32 range, using 0", pktDurationTS)
 			entryDuration = 0
 		} else {
 			entryDuration = uint32(pktDurationTS)
@@ -362,46 +377,42 @@ func (m *Muxer) processPackets(track *mp4io.TrackFrag, s *Stream) {
 		var entrySize uint32
 		pktDataSize := pkt.Len()
 		if pktDataSize < 0 || pktDataSize > int(^uint32(0)) {
-			m.log.Errorf(m,"Packet data size %d is outside uint32 range, using 0", pktDataSize)
+			m.log.Errorf(m, "Packet data size %d is outside uint32 range, using 0", pktDataSize)
 			entrySize = 0
 		} else {
 			entrySize = uint32(pktDataSize)
 		}
 
-		runEnrty := mp4io.TrackFragRunEntry{
+		runEntry := mp4io.TrackFragRunEntry{
 			Duration: entryDuration,
 			Size:     entrySize,
 			Cts:      0,
 			Flags:    entryRunFlag,
 		}
-		// if streamIndex == 1 {
-		// 	runEnrty.Duration++ // Increment for audio stream
-		// }
-		track.Run.Entries = append(track.Run.Entries, runEnrty)
+		track.Run.Entries = append(track.Run.Entries, runEntry)
 	}
 }
 
 // createSegmentIndex creates segment index entries to reduce complexity
-func (m *Muxer) createSegmentIndex(s *Stream, _ int) mp4io.SegmentIndex {
+func (m *Muxer) createSegmentIndex(s *Stream) mp4io.SegmentIndex {
 	// Safe conversion with validation for ReferenceID
 	streamIndex := int(s.StreamIndex())
-	refID := m.safeInt32Conversion(int64(streamIndex+1), "stream index")
+	refID := safeInt32Conversion(m.log, m, int64(streamIndex+1), "stream index")
 
 	// Safe conversion with validation for Timescale
-	timeScaleInt32 := m.safeInt32Conversion(s.timeScale, "timeScale")
+	timeScaleInt32 := safeInt32Conversion(m.log, m, s.timeScale, "timeScale")
 
-	referencedSize := m.safeInt32Conversion(int64(s.bufSize), "buffer size")
+	referencedSize := safeInt32Conversion(m.log, m, int64(s.bufSize), "buffer size")
 
 	// Safe conversion for SubsegmentDuration
-	durationValue := int64(s.duration) * s.timeScale / int64(time.Second)
-	subsegmentDuration := m.safeInt32Conversion(durationValue, "subsegment duration")
+	subsegmentDuration := safeInt32Conversion(m.log, m, s.timeToTS(s.duration), "subsegment duration")
 
 	return mp4io.SegmentIndex{
 		Version:     1,
 		Flags:       0,
-		ReferenceID:  refID,
+		ReferenceID: refID,
 		Timescale:   timeScaleInt32,
-		EarliestPT:  int64(s.firstPacketTime) * s.timeScale / int64(time.Second),
+		EarliestPT:  s.timeToTS(s.firstPacketTime),
 		FirstOffset: 0,
 		Entries: []mp4io.Reference{
 			{
@@ -454,10 +465,10 @@ func (m *Muxer) GetMP4Fragment(idx int) buffer.PooledBuffer {
 
 	for _, s := range m.strs {
 		// Define runFlag at function level to avoid shadowing
-		outerRunFlag := mp4io.SampleNonKeyframe
+		outerRunFlag := mp4io.SampleNoDependencies
 		if len(s.packets) > 0 {
-			if vPkt, casted := s.packets[0].(gomedia.VideoPacket); casted && vPkt.IsKeyFrame() {
-				outerRunFlag = mp4io.SampleNoDependencies
+			if vPkt, casted := s.packets[0].(gomedia.VideoPacket); casted && !vPkt.IsKeyFrame() {
+				outerRunFlag = mp4io.SampleNonKeyframe
 			}
 		}
 
@@ -487,9 +498,9 @@ func (m *Muxer) GetMP4Fragment(idx int) buffer.PooledBuffer {
 				Flags:   0,
 				// Safe conversion with validation
 				Time: func() uint64 {
-					timeValue := int64(s.firstPacketTime) * s.timeScale / int64(time.Second)
+					timeValue := s.timeToTS(s.firstPacketTime)
 					if timeValue < 0 {
-						m.log.Errorf(m,"Negative time value %d, using 0", timeValue)
+						m.log.Errorf(m, "Negative time value %d, using 0", timeValue)
 						return 0
 					}
 					return uint64(timeValue)
@@ -529,7 +540,7 @@ func (m *Muxer) GetMP4Fragment(idx int) buffer.PooledBuffer {
 	bufSz := moof.Len() + styp.Len() + 8
 	for i, s := range m.strs {
 		bufSz += s.bufSize
-		sidx = append(sidx, m.createSegmentIndex(s, i))
+		sidx = append(sidx, m.createSegmentIndex(s))
 		bufSz += sidx[i].Len()
 	}
 

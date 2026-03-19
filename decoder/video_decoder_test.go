@@ -1,3 +1,4 @@
+//nolint:mnd // Test file uses many literal values for expected results
 package decoder_test
 
 import (
@@ -72,7 +73,7 @@ func TestNewVideo_ChannelsNotNil(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Close without Decode (start never called)
+// Lifecycle
 // ---------------------------------------------------------------------------
 
 func TestVideoClose_WithoutDecode(t *testing.T) {
@@ -87,10 +88,6 @@ func TestVideoClose_WithoutDecode_ImagesClosedAfterClose(t *testing.T) {
 	d.Close()
 	require.Empty(t, drainImages(d))
 }
-
-// ---------------------------------------------------------------------------
-// Close after Decode (started but no packets)
-// ---------------------------------------------------------------------------
 
 func TestVideoClose_AfterDecode(t *testing.T) {
 	t.Parallel()
@@ -128,18 +125,39 @@ func TestDurationFromFPS_Zero(t *testing.T) {
 	require.Equal(t, time.Duration(0), decoder.DurationFromFPS(0))
 }
 
-func TestDurationFromFPS_30(t *testing.T) {
-	t.Parallel()
-	require.Equal(t, 33*time.Millisecond, decoder.DurationFromFPS(30))
-}
-
 func TestDurationFromFPS_1(t *testing.T) {
 	t.Parallel()
-	require.Equal(t, 1000*time.Millisecond, decoder.DurationFromFPS(1))
+	// 1 FPS → 1 second per frame
+	d := decoder.DurationFromFPS(1)
+	require.Equal(t, 1000*time.Millisecond, d)
+}
+
+func TestDurationFromFPS_30(t *testing.T) {
+	t.Parallel()
+	// 30 FPS → 33.33ms per frame. Integer division gives 33ms.
+	// This is a known precision loss in the implementation (1000/30 = 33).
+	// The test documents the actual behavior.
+	d := decoder.DurationFromFPS(30)
+	require.Equal(t, 33*time.Millisecond, d,
+		"DurationFromFPS uses integer division: 1000/30 = 33ms (not 33.33ms)")
+}
+
+func TestDurationFromFPS_60(t *testing.T) {
+	t.Parallel()
+	// 60 FPS → 16.66ms. Integer division: 1000/60 = 16ms.
+	d := decoder.DurationFromFPS(60)
+	require.Equal(t, 16*time.Millisecond, d,
+		"DurationFromFPS uses integer division: 1000/60 = 16ms")
+}
+
+func TestDurationFromFPS_Negative(t *testing.T) {
+	t.Parallel()
+	// Negative FPS should return 0 (same as fps <= 0)
+	require.Equal(t, time.Duration(0), decoder.DurationFromFPS(-1))
 }
 
 // ---------------------------------------------------------------------------
-// VideoWithName option
+// Options
 // ---------------------------------------------------------------------------
 
 func TestVideoWithName(t *testing.T) {
@@ -150,7 +168,7 @@ func TestVideoWithName(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Step — key frame produces image
+// Step — keyframe produces image
 // ---------------------------------------------------------------------------
 
 func TestStep_Video_KeyFrame_ProducesImage(t *testing.T) {
@@ -174,6 +192,8 @@ func TestStep_Video_KeyFrame_ProducesImage(t *testing.T) {
 	case got, ok := <-d.Images():
 		require.True(t, ok)
 		require.NotNil(t, got)
+		// Image bounds must match what the inner decoder returned
+		require.Equal(t, img.Bounds(), got.Bounds())
 	case <-time.After(time.Second):
 		t.Fatal("timeout waiting for image")
 	}
@@ -182,7 +202,7 @@ func TestStep_Video_KeyFrame_ProducesImage(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Step — non-key frame before first key frame is skipped
+// Step — non-keyframe before first keyframe is skipped
 // ---------------------------------------------------------------------------
 
 func TestStep_Video_NonKeyFrame_BeforeKey_Skipped(t *testing.T) {
@@ -251,8 +271,10 @@ func TestStep_Video_DecodeError_DecoderRestarted(t *testing.T) {
 	par := mockVideoCodecParams(ctrl, gomedia.H264)
 
 	inner := mocks.NewMockInnerVideoDecoder(ctrl)
+	// Init called twice: once for initial start, once for restart after error
 	inner.EXPECT().Init(par).Return(nil).Times(2)
 	inner.EXPECT().Decode(gomock.Any()).Return(nil, errors.New("decode error"))
+	// Close called twice: once on error, once on restart
 	inner.EXPECT().Close().Times(2)
 
 	d := decoder.NewVideo(1, 30, makeVideoFactory(inner))
@@ -294,14 +316,13 @@ func TestStep_Video_InitError_NoImage(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Step — unknown codec type: no image, error handled gracefully
+// Step — unknown codec type: no image, handled gracefully
 // ---------------------------------------------------------------------------
 
 func TestStep_Video_UnknownCodecType_NoImage(t *testing.T) {
 	t.Parallel()
 	ctrl := gomock.NewController(t)
 
-	// CodecType(0) has no String() case → returns "UNKNOWN"
 	par := mocks.NewMockVideoCodecParameters(ctrl)
 	par.EXPECT().Type().Return(gomedia.CodecType(0)).AnyTimes()
 
@@ -320,7 +341,7 @@ func TestStep_Video_UnknownCodecType_NoImage(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Step — FPS throttle: Feed is called when frame arrives within rate window
+// Step — FPS throttle: Feed called instead of Decode within rate window
 // ---------------------------------------------------------------------------
 
 func TestStep_Video_FPSThrottle_FeedCalled(t *testing.T) {
@@ -332,13 +353,13 @@ func TestStep_Video_FPSThrottle_FeedCalled(t *testing.T) {
 
 	inner := mocks.NewMockInnerVideoDecoder(ctrl)
 	inner.EXPECT().Init(par).Return(nil)
-	// First packet decoded normally (lastFrameTime is zero)
+	// First packet: Decode produces an image
 	inner.EXPECT().Decode(gomock.Any()).Return(img, nil)
-	// Second packet arrives immediately — within the 990ms window for fps=1
+	// Second packet arrives immediately — within throttle window → Feed is called
 	inner.EXPECT().Feed(gomock.Any()).Return(nil)
 	inner.EXPECT().Close()
 
-	// fps=1 → frameDuration=1000ms; second packet within 990ms triggers Feed
+	// fps=1 → frameDuration=1000ms; second packet arrives within 990ms → Feed
 	d := decoder.NewVideo(2, 1, makeVideoFactory(inner))
 	d.Decode()
 
@@ -351,11 +372,12 @@ func TestStep_Video_FPSThrottle_FeedCalled(t *testing.T) {
 		t.Fatal("timeout waiting for first image")
 	}
 
-	// Send second packet immediately — must be throttled
+	// Second packet immediately — must be throttled (Feed, not Decode)
 	d.Packets() <- mockKeyPkt(ctrl, par)
 
 	select {
 	case <-time.After(50 * time.Millisecond):
+		// Expected: no image because Feed was called, not Decode
 	case img2 := <-d.Images():
 		t.Fatalf("unexpected image on throttled frame: %v", img2)
 	}
@@ -365,7 +387,7 @@ func TestStep_Video_FPSThrottle_FeedCalled(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Step — FPS channel: same value sent is a no-op
+// FPS channel: same value is no-op
 // ---------------------------------------------------------------------------
 
 func TestStep_Video_FPS_SameValue_NoOp(t *testing.T) {
@@ -373,10 +395,8 @@ func TestStep_Video_FPS_SameValue_NoOp(t *testing.T) {
 	d := decoder.NewVideo(1, 30, nil)
 	d.Decode()
 
-	// Sending the same FPS value should not trigger any inner decoder calls.
 	d.FPS() <- 30
 
-	// Give the goroutine time to process the fps message.
 	select {
 	case <-time.After(50 * time.Millisecond):
 	case img := <-d.Images():
@@ -388,7 +408,7 @@ func TestStep_Video_FPS_SameValue_NoOp(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Step — FPS change to zero: stops the running inner decoder
+// FPS=0 stops decoder
 // ---------------------------------------------------------------------------
 
 func TestStep_Video_FPS_ZeroStopsDecoder(t *testing.T) {
@@ -401,14 +421,11 @@ func TestStep_Video_FPS_ZeroStopsDecoder(t *testing.T) {
 	inner := mocks.NewMockInnerVideoDecoder(ctrl)
 	inner.EXPECT().Init(par).Return(nil)
 	inner.EXPECT().Decode(gomock.Any()).Return(img, nil)
-	// Close is called once when fps=0 triggers stopDecoder.
-	// Release calls stopDecoder again but InnerVideoDecoder is nil by then.
 	inner.EXPECT().Close()
 
 	d := decoder.NewVideo(1, 30, makeVideoFactory(inner))
 	d.Decode()
 
-	// Start the inner decoder by sending a key frame.
 	d.Packets() <- mockKeyPkt(ctrl, par)
 	select {
 	case _, ok := <-d.Images():
@@ -417,11 +434,51 @@ func TestStep_Video_FPS_ZeroStopsDecoder(t *testing.T) {
 		t.Fatal("timeout waiting for image")
 	}
 
-	// Send fps=0 — must stop the inner decoder.
+	// FPS=0 must stop the inner decoder
 	d.FPS() <- 0
-
-	// Give the goroutine time to process the fps change.
 	time.Sleep(50 * time.Millisecond)
+
+	d.Close()
+}
+
+// ---------------------------------------------------------------------------
+// Multiple keyframes: all produce images (when within FPS budget)
+// ---------------------------------------------------------------------------
+
+func TestStep_Video_MultipleKeyframes(t *testing.T) {
+	t.Parallel()
+	ctrl := gomock.NewController(t)
+
+	par := mockVideoCodecParams(ctrl, gomedia.H264)
+	img := image.NewRGBA(image.Rect(0, 0, 10, 10))
+
+	inner := mocks.NewMockInnerVideoDecoder(ctrl)
+	inner.EXPECT().Init(par).Return(nil)
+	// All packets decoded (fps=0 means no limit... wait, fps=0 disables.
+	// Use high FPS so throttle window is tiny)
+	inner.EXPECT().Decode(gomock.Any()).Return(img, nil).Times(3)
+	inner.EXPECT().Close()
+
+	// fps=1000 → frameDuration=1ms, so no throttling
+	d := decoder.NewVideo(3, 1000, makeVideoFactory(inner))
+	d.Decode()
+
+	for range 3 {
+		d.Packets() <- mockKeyPkt(ctrl, par)
+		// Small delay to ensure lastFrameTime advances past frameDuration
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	received := 0
+	for range 3 {
+		select {
+		case <-d.Images():
+			received++
+		case <-time.After(time.Second):
+			t.Fatalf("timeout waiting for image %d", received+1)
+		}
+	}
+	require.Equal(t, 3, received)
 
 	d.Close()
 }

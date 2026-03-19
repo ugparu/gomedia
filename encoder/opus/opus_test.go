@@ -4,6 +4,7 @@ package opus
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -113,7 +114,7 @@ func TestInit_SampleRates(t *testing.T) {
 
 	rates := []uint64{8000, 16000, 24000, 32000, 48000}
 	for _, sr := range rates {
-		t.Run("rate", func(t *testing.T) {
+		t.Run(fmt.Sprintf("%dHz", sr), func(t *testing.T) {
 			t.Parallel()
 			enc := NewOpusEncoder()
 			defer enc.Close()

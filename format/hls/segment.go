@@ -62,7 +62,7 @@ func newSegment(
 		fragments:          []*fragment{newFragment(0, id, targetFragmentDuration, codecPars, mediaName, log)},
 		finished:           make(chan struct{}),
 		duration:           0,
-		time:               time.Now(),
+		time:               time.Now().UTC(),
 		cacheEntry:         "",
 		curFragment:        nil,
 		manifestEntry:      "",

@@ -129,8 +129,28 @@ const (
 	SliceI
 )
 
+// nal2rbsp removes emulation prevention bytes from a NAL unit to produce the
+// Raw Byte Sequence Payload (RBSP). Per ITU-T H.265 §7.4.2.2, a byte 0x03 is
+// an emulation prevention byte only when it appears in the pattern
+// 00 00 03 XX where XX ∈ {0x00, 0x01, 0x02, 0x03}.
 func nal2rbsp(nal []byte) []byte {
-	return bytes.ReplaceAll(nal, []byte{0x0, 0x0, 0x3}, []byte{0x0, 0x0})
+	if len(nal) == 0 {
+		return nal
+	}
+	rbsp := make([]byte, 0, len(nal))
+	for i := 0; i < len(nal); i++ {
+		if i+2 < len(nal) &&
+			nal[i] == 0x00 && nal[i+1] == 0x00 && nal[i+2] == 0x03 {
+			// Check if there is a following byte in {0x00, 0x01, 0x02, 0x03}
+			if i+3 < len(nal) && nal[i+3] <= 0x03 { //nolint:mnd // ITU-T H.265 §7.4.2.2
+				rbsp = append(rbsp, 0x00, 0x00)
+				i += 2 // skip the two 0x00 bytes and the 0x03; loop increment handles +1
+				continue
+			}
+		}
+		rbsp = append(rbsp, nal[i])
+	}
+	return rbsp
 }
 
 type SliceHeader struct {
@@ -171,12 +191,13 @@ func ParseSliceHeaderComplete(packet []byte) (header SliceHeader, err error) {
 		return
 	}
 
+	// ITU-T H.265 Table 7-7: slice_type 0=B, 1=P, 2=I
 	switch u {
-	case 0, 3, 5, 8: //nolint:mnd // These values correspond to P slice types
-		header.SliceType = SliceP
-	case 1, 6: //nolint:mnd // These values correspond to B slice types
+	case 0: //nolint:mnd // B slice
 		header.SliceType = SliceB
-	case 2, 4, 7, 9: //nolint:mnd // These values correspond to I slice types
+	case 1: //nolint:mnd // P slice
+		header.SliceType = SliceP
+	case 2: //nolint:mnd // I slice
 		header.SliceType = SliceI
 	default:
 		err = fmt.Errorf("h265parser: slice_type=%d invalid", u)
