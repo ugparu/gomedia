@@ -169,9 +169,8 @@ type HLS interface {
 
 // HLSStreamer represents an HLS streamer for several inputs.
 type HLSStreamer interface {
-	Writer                                 // HLSStreamer extends Writer.
-	HLS                                    // HLSStreamer extends HLS.
-	SegmentDuration() chan<- time.Duration // SegmentDuration returns the segment duration channel for changing generating segment duration.
+	Writer // HLSStreamer extends Writer.
+	HLS    // HLSStreamer extends HLS.
 }
 
 // WebRTCCodec represents a codec configuration for WebRTC streaming.

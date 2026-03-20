@@ -47,9 +47,9 @@ type hlsWriter struct {
 	segmentDuration time.Duration
 	id              uint64
 
-	inpPktCh            chan gomedia.Packet
-	segmentDurationChan chan time.Duration
-	rmSrcCh             chan string
+	inpPktCh chan gomedia.Packet
+	addSrcCh chan string
+	rmSrcCh  chan string
 
 	muxerIDs     map[uint8]gomedia.HLSMuxer
 	muxerURLs    map[string]gomedia.HLSMuxer
@@ -71,9 +71,9 @@ func New(id uint64, segCnt uint8, segDur time.Duration, chanSize int, partHoldBa
 		segmentDuration: segDur,
 		id:              id,
 
-		inpPktCh:            make(chan gomedia.Packet, chanSize),
-		segmentDurationChan: make(chan time.Duration, chanSize),
-		rmSrcCh:             make(chan string, chanSize),
+		inpPktCh: make(chan gomedia.Packet, chanSize),
+		addSrcCh: make(chan string, chanSize),
+		rmSrcCh:  make(chan string, chanSize),
 
 		muxerIDs:     map[uint8]gomedia.HLSMuxer{},
 		muxerURLs:    make(map[string]gomedia.HLSMuxer),
@@ -164,33 +164,32 @@ func (hlsw *hlsWriter) removeSrc(url string) error {
 }
 
 func (hlsw *hlsWriter) recalcManifest() (err error) {
-	clear(hlsw.muxerIDs)
-
-	for i := len(hlsw.sortedURLs) - 1; i >= 1; i-- {
-		var oldResolution uint
-		if hlsw.codPars[hlsw.sortedURLs[i-1]].VideoCodecParameters != nil {
-			oldResolution = hlsw.codPars[hlsw.sortedURLs[i-1]].VideoCodecParameters.Width() *
-				hlsw.codPars[hlsw.sortedURLs[i-1]].VideoCodecParameters.Height()
+	slices.SortFunc(hlsw.sortedURLs, func(a, b string) int {
+		var resA, resB uint
+		if p := hlsw.codPars[a]; p != nil && p.VideoCodecParameters != nil {
+			resA = p.VideoCodecParameters.Width() * p.VideoCodecParameters.Height()
 		}
-		var newResolution uint
-		if hlsw.codPars[hlsw.sortedURLs[i]].VideoCodecParameters != nil {
-			newResolution = hlsw.codPars[hlsw.sortedURLs[i]].VideoCodecParameters.Width() *
-				hlsw.codPars[hlsw.sortedURLs[i]].VideoCodecParameters.Height()
+		if p := hlsw.codPars[b]; p != nil && p.VideoCodecParameters != nil {
+			resB = p.VideoCodecParameters.Width() * p.VideoCodecParameters.Height()
 		}
-
-		if oldResolution > newResolution {
-			hlsw.sortedURLs[i-1], hlsw.sortedURLs[i] = hlsw.sortedURLs[i], hlsw.sortedURLs[i-1]
-		} else {
-			break
+		if resA < resB {
+			return -1
 		}
-	}
+		if resA > resB {
+			return 1
+		}
+		return 0
+	})
 
 	var builder strings.Builder
 	if _, err = builder.WriteString(fmt.Sprintf("#EXTM3U\n#EXT-X-VERSION:%d\n", hlsw.version)); err != nil {
 		return
 	}
+
 	hlsw.mu.Lock()
 	defer hlsw.mu.Unlock()
+
+	clear(hlsw.muxerIDs)
 
 	index := uint8(0)
 	for _, url := range hlsw.sortedURLs {
@@ -234,6 +233,8 @@ func (hlsw *hlsWriter) Step(stopCh <-chan struct{}) (err error) {
 	select {
 	case <-stopCh:
 		return &lifecycle.BreakError{}
+	case <-hlsw.addSrcCh:
+		// Sources are auto-created on first packet via checkCodPar.
 	case url := <-hlsw.rmSrcCh:
 		return hlsw.removeSrc(url)
 	case inpPkt := <-hlsw.inpPktCh:
@@ -267,13 +268,14 @@ func (hlsw *hlsWriter) Step(stopCh <-chan struct{}) (err error) {
 		if err != nil {
 			return err
 		}
-	case hlsw.segmentDuration = <-hlsw.segmentDurationChan:
 	}
 	return nil
 }
 
 // getMasterPlaylist returns the master playlist string stored in the innerHLS instance.
 func (hlsw *hlsWriter) GetMasterPlaylist() (string, error) {
+	hlsw.mu.RLock()
+	defer hlsw.mu.RUnlock()
 	return hlsw.master, nil
 }
 
@@ -365,15 +367,10 @@ func (hlsw *hlsWriter) Packets() chan<- gomedia.Packet {
 	return hlsw.inpPktCh
 }
 
-// Packets returns the channel for sending media packets using the innerHLS instance of outerHLS.
-func (hlsw *hlsWriter) SegmentDuration() chan<- time.Duration {
-	return hlsw.segmentDurationChan
-}
-
 func (hlsw *hlsWriter) RemoveSource() chan<- string {
 	return hlsw.rmSrcCh
 }
 
 func (hlsw *hlsWriter) AddSource() chan<- string {
-	return nil
+	return hlsw.addSrcCh
 }

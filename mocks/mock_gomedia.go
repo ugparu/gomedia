@@ -2241,20 +2241,6 @@ func (mr *MockHLSStreamerMockRecorder) RemoveSource() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveSource", reflect.TypeOf((*MockHLSStreamer)(nil).RemoveSource))
 }
 
-// SegmentDuration mocks base method.
-func (m *MockHLSStreamer) SegmentDuration() chan<- time.Duration {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "SegmentDuration")
-	ret0, _ := ret[0].(chan<- time.Duration)
-	return ret0
-}
-
-// SegmentDuration indicates an expected call of SegmentDuration.
-func (mr *MockHLSStreamerMockRecorder) SegmentDuration() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SegmentDuration", reflect.TypeOf((*MockHLSStreamer)(nil).SegmentDuration))
-}
-
 // Write mocks base method.
 func (m *MockHLSStreamer) Write() {
 	m.ctrl.T.Helper()
