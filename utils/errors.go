@@ -27,7 +27,7 @@ func (NoCodecDataError) Error() string {
 	return "No codec data"
 }
 
-// NoCodecDataError represents an error indicating that provided packet is nil.
+// NilPacketError represents an error indicating that the provided packet is nil.
 type NilPacketError struct {
 }
 

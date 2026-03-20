@@ -6,17 +6,21 @@ import (
 	"fmt"
 )
 
+// splineCacheSize is the number of samples reserved for spline interpolation context.
+// The cubic spline needs 4 points, but we cache 16 to allow lookahead across multiple steps.
+const splineCacheSize = 16
+
 // sample rate resampler.
 type Resampler struct {
 	channels int // Channels, L or LR
 	isr      int // Transform from this sample rate.
 	osr      int // Transform to this sample rate.
 
-	// Always cache 16samples.
+	// Always cache splineCacheSize samples.
 	lcache []int16 // For channel=0
 	rcache []int16 // For channel=1
 
-	// Total outputed samples.
+	// Total outputted samples.
 	lws uint64 // For channel=0
 	rws uint64 // For channel=1
 
@@ -68,9 +72,9 @@ func (v *Resampler) Resample(pcm []byte) (npcm []byte, err error) {
 
 	ms := len(pcm) * 1000 / (2 * v.channels * v.isr)
 
-	// Atleast 4samples when not init.
-	if nbSamles := len(pcm) / 2 / v.channels; nbSamles < 4 {
-		return nil, fmt.Errorf("invalid pcm, atleast 4samples, actual %vsamples", nbSamles)
+	// At least 4 samples when not init.
+	if nbSamples := len(pcm) / 2 / v.channels; nbSamples < 4 {
+		return nil, fmt.Errorf("invalid pcm, at least 4 samples, actual %v samples", nbSamples)
 	}
 
 	// Convert pcm to int16 values
@@ -146,12 +150,12 @@ func resampleMerge(left, right []int16) (npcm []byte) {
 
 // x is the position of output pcm.
 func resampleChannel(ipcm []int16, isr, osr int, written, org uint64) (opcm []int16, consumed int, err error) {
-	if len(ipcm) <= 16 {
+	if len(ipcm) <= splineCacheSize {
 		return nil, 0, nil
 	}
 
 	// The samples we can use to resample
-	available := len(ipcm) - 16
+	available := len(ipcm) - splineCacheSize
 	// The resample step between new samples
 	step := float64(isr) / float64(osr)
 	// The first position to sample

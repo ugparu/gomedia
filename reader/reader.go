@@ -15,7 +15,7 @@ import (
 
 // Constants for configuring the reader.
 const (
-	maxReconnectInternval = time.Second * 8
+	maxReconnectInterval = time.Second * 8
 )
 
 // Option is a functional option for configuring a reader.
@@ -160,6 +160,8 @@ func (rdr *reader) repackPackets(src string, stopCh <-chan struct{}) {
 				audioOffsetHandler.releaseLastPacket()
 				return
 			}
+		default:
+			pkt.Release()
 		}
 	}
 }
@@ -169,7 +171,7 @@ func (rdr *reader) repackPackets(src string, stopCh <-chan struct{}) {
 func (rdr *reader) handleReadError(dmx gomedia.Demuxer, src string, recInterval time.Duration,
 	stopCh <-chan struct{}, videoHandler, audioHandler *offsetHandler, readErr error) (time.Duration, gomedia.Demuxer) {
 	// Log only if we haven't reached the max reconnect interval yet
-	if recInterval < maxReconnectInternval {
+	if recInterval < maxReconnectInterval {
 		rdr.log.Warningf(rdr, "Packet read error: %s", readErr.Error())
 		rdr.log.Infof(rdr, "Restarting demuxer with %.fs interval", recInterval.Seconds())
 	}
@@ -187,13 +189,13 @@ func (rdr *reader) handleReadError(dmx gomedia.Demuxer, src string, recInterval 
 
 	rdr.log.Debug(rdr, "Creating new demuxer")
 	// Create a new demuxer and start it
-	dmx = rdr.newDmx(src)
+	dmx = rdr.newDmx(src, rdr.opts...)
 
 	rdr.log.Debug(rdr, "Starting demuxing")
 	par, err := dmx.Demux()
 	// Handle demux error
 	if err != nil {
-		if recInterval < maxReconnectInternval {
+		if recInterval < maxReconnectInterval {
 			rdr.log.Warningf(rdr, "Failed to start demuxer: %s", err.Error())
 		}
 		return rdr.updateReconnectInterval(recInterval), dmx
@@ -212,7 +214,7 @@ func (rdr *reader) handleReadError(dmx gomedia.Demuxer, src string, recInterval 
 // updateReconnectInterval increases the reconnect interval exponentially up to the maximum
 func (rdr *reader) updateReconnectInterval(current time.Duration) time.Duration {
 	// Only increase and log if we're below the maximum
-	if current >= maxReconnectInternval {
+	if current >= maxReconnectInterval {
 		return current
 	}
 
@@ -221,8 +223,8 @@ func (rdr *reader) updateReconnectInterval(current time.Duration) time.Duration 
 	newInterval := current * scaleFactor
 
 	// Check if we've exceeded the maximum after doubling
-	if newInterval >= maxReconnectInternval {
-		newInterval = maxReconnectInternval
+	if newInterval >= maxReconnectInterval {
+		newInterval = maxReconnectInterval
 		rdr.log.Infof(rdr, "Max reconnect interval reached. Further attempts will be silent")
 	}
 
@@ -253,8 +255,8 @@ func (rdr *reader) Step(stopCh <-chan struct{}) (err error) {
 	case src := <-rdr.removeURLCh:
 		rdr.log.Infof(rdr, "Removing URL %s", src)
 		rdr.mu.Lock()
-		if stopCh, ok := rdr.dmxStoppers[src]; ok {
-			close(stopCh)
+		if dmxStopCh, ok := rdr.dmxStoppers[src]; ok {
+			close(dmxStopCh)
 			delete(rdr.dmxStoppers, src)
 		}
 		rdr.mu.Unlock()
@@ -277,8 +279,9 @@ func (rdr *reader) Release() { //nolint: revive
 
 	rdr.log.Infof(rdr, "Closing reader")
 
-	for _, stopCh := range rdr.dmxStoppers {
+	for src, stopCh := range rdr.dmxStoppers {
 		close(stopCh)
+		delete(rdr.dmxStoppers, src)
 	}
 }
 
