@@ -133,6 +133,11 @@ func (dmx *Demuxer) probe() (err error) {
 
 	dmx.streams = []*Stream{}
 	for i, atrack := range moov.Tracks {
+		if atrack.Media == nil || atrack.Media.Info == nil || atrack.Media.Info.Sample == nil {
+			err = errors.New("mp4: sample table not found")
+			return
+		}
+
 		if atrack.Media.Info.Sample.SyncSample != nil && len(atrack.Media.Info.Sample.SyncSample.Entries) == 0 {
 			atrack.Media.Info.Sample.SyncSample = nil
 		}
@@ -141,14 +146,8 @@ func (dmx *Demuxer) probe() (err error) {
 		stream.trackAtom = atrack
 		stream.index = i
 		stream.demuxer = dmx
-
-		if atrack.Media != nil && atrack.Media.Info != nil && atrack.Media.Info.Sample != nil {
-			stream.sample = atrack.Media.Info.Sample
-			stream.timeScale = int64(atrack.Media.Header.TimeScale)
-		} else {
-			err = errors.New("mp4: sample table not found")
-			return
-		}
+		stream.sample = atrack.Media.Info.Sample
+		stream.timeScale = int64(atrack.Media.Header.TimeScale)
 
 		if avc1 := atrack.GetAVC1Conf(); avc1 != nil {
 			var res h264.CodecParameters

@@ -242,7 +242,7 @@ func (s *Stream) isSampleValid() bool {
 			return false
 		}
 	}
-	if s.sample.SampleSize.SampleSize != 0 {
+	if s.sample.SampleSize.SampleSize == 0 {
 		if s.sampleIndex >= len(s.sample.SampleSize.Entries) {
 			return false
 		}
