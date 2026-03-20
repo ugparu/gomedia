@@ -149,6 +149,13 @@ func main() {
 done:
 	dmx.Close()
 
+	// --- Calculate durations from timestamps for packets that have zero duration ---
+	fillDurations(captured)
+	for codec, pkts := range perCodec {
+		fillDurations(pkts)
+		perCodec[codec] = pkts
+	}
+
 	// --- Build and write parameters JSON from last received packets ---
 	pj := ParametersJSON{URL: *url}
 
@@ -218,6 +225,29 @@ done:
 			logrus.Fatalf("Failed to write packets: %v", err)
 		}
 		logrus.Infof("Wrote %d packets to %s", len(captured), *packetsFile)
+	}
+}
+
+// fillDurations calculates packet durations from consecutive timestamps within
+// the same stream. For each packet with a zero duration, it uses the difference
+// to the next packet's timestamp in that stream.
+func fillDurations(packets []PacketJSON) {
+	// Build per-stream index lists.
+	streams := map[uint8][]int{}
+	for i := range packets {
+		si := packets[i].StreamIndex
+		streams[si] = append(streams[si], i)
+	}
+
+	for _, indices := range streams {
+		for j := 0; j < len(indices)-1; j++ {
+			curr := indices[j]
+			next := indices[j+1]
+			dur := packets[next].TimestampNs - packets[curr].TimestampNs
+			if dur > 0 {
+				packets[curr].DurationNs = dur
+			}
+		}
 	}
 }
 
