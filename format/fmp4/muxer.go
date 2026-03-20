@@ -396,44 +396,6 @@ func (m *Muxer) processPackets(track *mp4io.TrackFrag, s *Stream) {
 	}
 }
 
-// createSegmentIndex creates segment index entries to reduce complexity
-func (m *Muxer) createSegmentIndex(s *Stream) mp4io.SegmentIndex {
-	// Safe conversion with validation for ReferenceID
-	streamIndex := int(s.StreamIndex())
-	refID := safeInt32Conversion(m.log, m, int64(streamIndex+1), "stream index")
-
-	// Safe conversion with validation for Timescale
-	timeScaleInt32 := safeInt32Conversion(m.log, m, s.timeScale, "timeScale")
-
-	referencedSize := safeInt32Conversion(m.log, m, int64(s.bufSize), "buffer size")
-
-	// Safe conversion for SubsegmentDuration
-	subsegmentDuration := safeInt32Conversion(m.log, m, s.timeToTS(s.duration), "subsegment duration")
-
-	return mp4io.SegmentIndex{
-		Version:     1,
-		Flags:       0,
-		ReferenceID: refID,
-		Timescale:   timeScaleInt32,
-		EarliestPT:  s.timeToTS(s.firstPacketTime),
-		FirstOffset: 0,
-		Entries: []mp4io.Reference{
-			{
-				ReferenceType:      0,
-				ReferencedSize:     referencedSize,
-				SubsegmentDuration: subsegmentDuration,
-				StartsWithSAP:      1,
-				SAPType:            0,
-				SAPDeltaTime:       0,
-			},
-		},
-		AtomPos: mp4io.AtomPos{
-			Offset: 0,
-			Size:   0,
-		},
-	}
-}
-
 // processDataOffsets processes data offsets for tracks to reduce complexity
 func (m *Muxer) processDataOffsets(moof *mp4io.MovieFrag, startMOOF int, out []byte, n int) int {
 	for i, s := range m.strs {
@@ -538,22 +500,21 @@ func (m *Muxer) GetMP4Fragment(idx int) buffer.PooledBuffer {
 
 	styp := mp4io.NewSegmentType()
 
-	var sidx []mp4io.SegmentIndex
-
-	bufSz := moof.Len() + styp.Len() + 8
-	for i, s := range m.strs {
-		bufSz += s.bufSize
-		sidx = append(sidx, m.createSegmentIndex(s))
-		bufSz += sidx[i].Len()
+	// SIDX boxes are omitted: they are not required for LL-HLS streaming
+	// (the manifest provides all timing information) and the previous
+	// per-track SIDX had incorrect FirstOffset values with multiple tracks,
+	// which could confuse some players.
+	var totalDataSize int
+	for _, s := range m.strs {
+		totalDataSize += s.bufSize
 	}
+
+	bufSz := moof.Len() + styp.Len() + 8 + totalDataSize //nolint:mnd // 8 = mdat box header
 
 	buf := buffer.Get(bufSz)
 
 	var n int
 	n += styp.Marshal(buf.Data())
-	for _, s := range sidx {
-		n += s.Marshal(buf.Data()[n:])
-	}
 
 	startMOOF := n
 	n += moof.Len()

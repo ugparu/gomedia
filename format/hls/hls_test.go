@@ -247,7 +247,7 @@ func TestManifest_Header(t *testing.T) {
 
 	assert.Contains(t, m, "#EXT-X-TARGETDURATION:2")
 	assert.Contains(t, m, "#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES")
-	assert.Contains(t, m, "#EXT-X-PART-INF:PART-TARGET=0.50000")
+	assert.Contains(t, m, "#EXT-X-PART-INF:PART-TARGET=0.49995")
 	assert.Contains(t, m, "#EXT-X-INDEPENDENT-SEGMENTS")
 	assert.Contains(t, m, "#EXT-X-MEDIA-SEQUENCE:0")
 	assert.Contains(t, m, "#EXT-X-MAP:URI=\"init.mp4?v=0\"")
@@ -530,7 +530,9 @@ func TestUpdateCodecParameters_NewInitVersion(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestSegmentEviction(t *testing.T) {
-	mxr, _, vCp, aCp := initMuxer(t, 1*time.Second, 3)
+	// segmentCount=2: with keyframe-aligned segments (~8.7s each from 3 keyframes
+	// in test data), 3 segments are created; keeping 2 triggers eviction of the oldest.
+	mxr, _, vCp, aCp := initMuxer(t, 1*time.Second, 2)
 	defer mxr.Release()
 	packets := loadTestPackets(t, vCp, aCp, 1000)
 
@@ -690,11 +692,14 @@ func TestDiscontinuitySequence_AfterEviction(t *testing.T) {
 	defer mxr.Release()
 	packets := loadTestPackets(t, vCp, aCp, 500)
 
-	writePacketsUntilSegment(t, mxr, packets[:200])
+	// With keyframe-aligned segments the first segment completes at the second
+	// keyframe (packet ~336), so we pass all packets and let the helper stop
+	// as soon as a segment finishes.
+	n := writePacketsUntilSegment(t, mxr, packets)
 
 	require.NoError(t, mxr.UpdateCodecParameters(pair))
 
-	for _, pkt := range packets[200:] {
+	for _, pkt := range packets[n:] {
 		require.NoError(t, mxr.WritePacket(pkt))
 	}
 

@@ -79,6 +79,9 @@ func newSegment(
 }
 
 // writePacket writes a multimedia packet to the current fragment of the segment.
+// Segment closure is NOT handled here — it is driven by the muxer at keyframe
+// boundaries to ensure each new segment starts with an independently decodable
+// frame (preventing video stalls in the player).
 func (element *segment) writePacket(packet gomedia.Packet) (err error) {
 	curFrag := element.curFragment
 	if err = curFrag.writePacket(packet); err != nil {
@@ -89,26 +92,41 @@ func (element *segment) writePacket(packet gomedia.Packet) (err error) {
 	case <-curFrag.finished:
 		element.duration += curFrag.duration
 		element.cacheEntry = fmt.Sprintf("%s%s", element.cacheEntry, curFrag.manifestEntry)
-		if element.duration >= element.targetDuration {
-			element.manifestEntry = fmt.Sprintf("%s#EXT-X-PROGRAM-DATE-TIME:%s\n#EXTINF:%.5f\nsegment/%d/%s.m4s\n",
-				element.cacheEntry, element.time.Format("2006-01-02T15:04:05.000000Z"), element.duration.Seconds(), element.id, element.mediaName)
-			return element.close()
-		} else {
-			newFragID := curFrag.id + 1
-			newFragment := newFragment(newFragID, element.id, element.targetFragDuration, element.codecPars, element.mediaName, element.log)
-			element.fragments = append(element.fragments, newFragment)
-			element.curFragment = element.fragments[newFragID]
 
-			// Update manifest entry with new fragment
-			newManifestEntry := fmt.Sprintf("%s%s",
-				element.cacheEntry,
-				element.fragments[newFragID].manifestEntry,
-			)
-			element.manifestEntry = newManifestEntry
-		}
+		newFragID := curFrag.id + 1
+		newFrag := newFragment(newFragID, element.id, element.targetFragDuration, element.codecPars, element.mediaName, element.log)
+		element.fragments = append(element.fragments, newFrag)
+		element.curFragment = newFrag
+		element.manifestEntry = fmt.Sprintf("%s%s", element.cacheEntry, newFrag.manifestEntry)
 	default:
 	}
 	return
+}
+
+// closeOnKeyframe finalizes the segment when the muxer triggers a keyframe
+// rotation. Any in-progress fragment is closed: if it contains video data it
+// becomes the last part of this segment; otherwise it is silently closed
+// (audio-only data remains in the segment's fMP4 but is not listed as a part).
+func (element *segment) closeOnKeyframe() {
+	curFrag := element.curFragment
+	select {
+	case <-curFrag.finished:
+		// Already closed and accounted for.
+	default:
+		if curFrag.duration > 0 {
+			_ = curFrag.close()
+			element.duration += curFrag.duration
+			element.cacheEntry += curFrag.manifestEntry
+		} else {
+			// Audio-only or empty fragment — close without manifest entry.
+			curFrag.duration = 0
+			close(curFrag.finished)
+		}
+	}
+
+	element.manifestEntry = fmt.Sprintf("%s#EXT-X-PROGRAM-DATE-TIME:%s\n#EXTINF:%.5f\nsegment/%d/%s.m4s\n",
+		element.cacheEntry, element.time.Format("2006-01-02T15:04:05.000000Z"), element.duration.Seconds(), element.id, element.mediaName)
+	_ = element.close()
 }
 
 // close finalizes the segment metadata and signals completion.

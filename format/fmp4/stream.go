@@ -33,10 +33,13 @@ type Stream struct {
 }
 
 func (s *Stream) timeToTS(tm time.Duration) int64 {
-	// Split into seconds and remainder to avoid int64 overflow on large durations
+	// Split into seconds and remainder to avoid int64 overflow on large durations.
+	// Use rounding (not truncation) to prevent systematic duration undercount
+	// that creates timeline gaps between fMP4 fragments — critical for A/V sync
+	// when both audio and video tracks are present.
 	sec := tm / time.Second
 	rem := tm % time.Second
-	return int64(sec)*s.timeScale + int64(rem)*s.timeScale/int64(time.Second)
+	return int64(sec)*s.timeScale + (int64(rem)*s.timeScale + int64(time.Second)/2) / int64(time.Second) //nolint:mnd
 }
 
 // safeInt16Conversion safely converts a uint value to int16 with validation

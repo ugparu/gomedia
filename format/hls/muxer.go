@@ -288,19 +288,31 @@ func (mxr *muxer) WritePacket(inpPkt gomedia.Packet) (err error) {
 
 	inpPkt.SetTimestamp(inpPkt.Timestamp() % mxr.maxTS)
 
+	// Rotate segment on video keyframe when target duration is met.
+	// This ensures every new segment starts with an independently decodable
+	// frame, preventing video stalls caused by missing reference frames.
+	if vPkt, isVideo := inpPkt.(gomedia.VideoPacket); isVideo && vPkt.IsKeyFrame() {
+		curSeg := mxr.getCurSegment()
+		if curSeg.duration >= mxr.segmentDuration {
+			curSeg.closeOnKeyframe()
+			newSegID := curSeg.id + 1
+			newSeg := newSegment(newSegID, mxr.fragmentDuration, mxr.segmentDuration, mxr.codecPars, mxr.mediaName, mxr.blockingTimeout, mxr.log)
+			newSeg.initVersion = mxr.initVersion
+			mxr.addSegment(newSeg)
+			mxr.evictOldSegments()
+		}
+	}
+
 	if err = mxr.getCurSegment().writePacket(inpPkt); err != nil {
 		return err
 	}
 
-	select {
-	case <-mxr.getCurSegment().finished:
-		// The current segment has finished, create a new one and update the segment list.
-		newSegID := mxr.getCurSegment().id + 1
-		newSeg := newSegment(newSegID, mxr.fragmentDuration, mxr.segmentDuration, mxr.codecPars, mxr.mediaName, mxr.blockingTimeout, mxr.log)
-		newSeg.initVersion = mxr.initVersion
-		mxr.addSegment(newSeg)
-		mxr.evictOldSegments()
-	default:
+	// Audio packets cannot close fragments or segments — only video packets
+	// advance fragment duration. The manifest is unchanged after an audio write,
+	// so skip the expensive rebuild and indexChan signal to avoid wasting CPU
+	// and falsely unblocking LL-HLS long-poll clients.
+	if _, isVideo := inpPkt.(gomedia.VideoPacket); !isVideo {
+		return nil
 	}
 
 	// Update the HLS manifest and signal the change.
