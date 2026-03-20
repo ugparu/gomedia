@@ -34,11 +34,6 @@ func (self HandlerRefer) marshal(b []byte) (n int) {
 	n += len(self.Type[:])
 	copy(b[n:], self.SubType[:])
 	n += len(self.SubType[:])
-	// 3 × uint32 reserved = 0
-	pio.PutU32BE(b[n:], 0)
-	pio.PutU32BE(b[n+4:], 0)
-	pio.PutU32BE(b[n+8:], 0)
-	n += hdlrReservedSize
 	copy(b[n:], self.Name[:])
 	n += len(self.Name[:])
 	return
@@ -49,7 +44,6 @@ func (self HandlerRefer) Len() (n int) {
 	n += 3
 	n += len(self.Type[:])
 	n += len(self.SubType[:])
-	n += hdlrReservedSize
 	n += len(self.Name[:])
 	return
 }
@@ -80,12 +74,15 @@ func (self *HandlerRefer) Unmarshal(b []byte, offset int) (n int, err error) {
 	}
 	copy(self.SubType[:], b[n:])
 	n += len(self.SubType)
-	// Skip 3 × uint32 reserved
-	if len(b) < n+hdlrReservedSize {
-		err = parseErr("Reserved", n+offset, err)
-		return
+	// ISO 14496-12 §8.4.3: 3 × uint32 reserved between SubType and Name.
+	// Files produced by older versions of this library omitted them, so only
+	// skip when the remaining data is large enough to contain both the
+	// reserved block and at least one byte of Name (or be exactly the
+	// reserved block with no name).
+	remaining := len(b) - n
+	if remaining >= hdlrReservedSize {
+		n += hdlrReservedSize
 	}
-	n += hdlrReservedSize
 	self.Name = b[n:]
 	n += len(b[n:])
 	return

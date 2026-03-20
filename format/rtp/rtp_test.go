@@ -596,11 +596,11 @@ func TestH264Demuxer_TimestampConversion(t *testing.T) {
 		expected time.Duration
 	}{
 		{0, 0},
-		{9000, 100 * time.Millisecond},        // 9000/90000 = 0.1s
-		{90000, 1 * time.Second},               // 1s
-		{45000, 500 * time.Millisecond},        // 0.5s
-		{900000, 10 * time.Second},             // 10s
-		{1, time.Millisecond / clockrate},      // minimal tick
+		{9000, 100 * time.Millisecond},    // 9000/90000 = 0.1s
+		{90000, 1 * time.Second},          // 1s
+		{45000, 500 * time.Millisecond},   // 0.5s
+		{900000, 10 * time.Second},        // 10s
+		{1, time.Millisecond / clockrate}, // minimal tick
 	}
 
 	for _, tc := range testCases {
@@ -664,7 +664,7 @@ func TestH265Demuxer_TimestampConversion(t *testing.T) {
 	nalHdr0 := nalType << 1 // F=0, type=1, layerID high bits=0
 	nalHdr1 := byte(0x01)   // layerID low=0, TID=1
 
-	rtpTS := uint32(9000) // 100ms at 90kHz
+	rtpTS := uint32(9000)                                     // 100ms at 90kHz
 	nalPayload1 := []byte{nalHdr0, nalHdr1, 0x80, 0xAA, 0xBB} // byte[2] bit7=1 → addPacket
 	nalPayload2 := []byte{nalHdr0, nalHdr1, 0x80, 0xCC, 0xDD} // second slice → flushes first
 
@@ -771,8 +771,8 @@ func TestAACDemuxer_AUHeader_SingleFrame(t *testing.T) {
 	// AU-header section: 2-byte length (in bits), then 2-byte AU-headers per frame
 	frameData := []byte{0xAA, 0xBB, 0xCC, 0xDD, 0xEE}
 	frameSize := len(frameData)
-	auHeadersLengthBits := uint16(16) // 1 header * 16 bits
-	auHeader := uint16(frameSize<<3) | 0 // 13-bit size << 3
+	auHeadersLengthBits := uint16(16)  // 1 header * 16 bits
+	auHeader := uint16(frameSize << 3) // 13-bit size << 3
 
 	payload := make([]byte, 4+frameSize)
 	binary.BigEndian.PutUint16(payload[0:2], auHeadersLengthBits)
@@ -910,8 +910,8 @@ func TestOpusDemuxer_ChannelMapping(t *testing.T) {
 	}{
 		{1, gomedia.ChMono},
 		{2, gomedia.ChStereo},
-		{0, gomedia.ChMono},   // default
-		{6, gomedia.ChMono},   // unsupported → default
+		{0, gomedia.ChMono}, // default
+		{6, gomedia.ChMono}, // unsupported → default
 	}
 
 	for _, tc := range testCases {
@@ -1015,7 +1015,7 @@ func TestPCMDemuxer_ReadPacket(t *testing.T) {
 	}
 
 	pcmData := bytes.Repeat([]byte{0x55}, 160) // 20ms of 8kHz A-law
-	rtpTS := uint32(8000)                       // 1s at 8kHz
+	rtpTS := uint32(8000)                      // 1s at 8kHz
 
 	frame := buildRTSPInterleavedRTP(0, 8, 1, rtpTS, 0x12345678, true, pcmData)
 	rdr := bytes.NewReader(frame)
@@ -1077,7 +1077,7 @@ func TestH264Muxer_WritePacket_SingleNAL(t *testing.T) {
 	// Verify RTSP interleaved header
 	output := buf.Bytes()
 	require.True(t, len(output) > rtspHeaderSize+rtpHeaderSize)
-	require.Equal(t, byte(0x24), output[0])     // RTSP magic
+	require.Equal(t, byte(0x24), output[0])      // RTSP magic
 	require.Equal(t, byte(0), output[1])         // channel
 	require.Equal(t, byte(0x80), output[4]&0xC0) // RTP version 2
 }
