@@ -19,7 +19,7 @@ jobs:
       - name: Install native dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libfdk-aac-dev libopus-dev libavcodec-dev libavutil-dev libswscale-dev
+          sudo apt-get install -y libfdk-aac-dev libopus-dev libavcodec-dev libavutil-dev libswscale-dev libavformat-dev libswresample-dev libopusfile-dev
 
       - name: Run tests with coverage
         run: go test -coverprofile=coverage.out ./... || true
