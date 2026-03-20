@@ -19,8 +19,12 @@ import (
 // Helpers
 // ---------------------------------------------------------------------------
 
-func makeVideoFactory(inner decoder.InnerVideoDecoder) func() decoder.InnerVideoDecoder {
-	return func() decoder.InnerVideoDecoder { return inner }
+func makeVideoFactory(inner decoder.InnerVideoDecoder) map[gomedia.CodecType]func() decoder.InnerVideoDecoder {
+	fn := func() decoder.InnerVideoDecoder { return inner }
+	return map[gomedia.CodecType]func() decoder.InnerVideoDecoder{
+		gomedia.H264: fn,
+		gomedia.H265: fn,
+	}
 }
 
 func mockVideoCodecParams(ctrl *gomock.Controller, ct gomedia.CodecType) *mocks.MockVideoCodecParameters {

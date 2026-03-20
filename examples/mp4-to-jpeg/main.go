@@ -21,8 +21,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	dcd := decoder.NewVideo(0, -1, func() decoder.InnerVideoDecoder {
-		return cpu.NewFFmpegCPUDecoder()
+	dcd := decoder.NewVideo(0, -1, map[gomedia.CodecType]func() decoder.InnerVideoDecoder{
+		gomedia.H264: cpu.NewFFmpegCPUDecoder,
+		gomedia.H265: cpu.NewFFmpegCPUDecoder,
 	})
 	dcd.Decode()
 

@@ -39,7 +39,10 @@ func main() {
 	reader.Read()
 	reader.AddURL() <- rtspURL
 
-	dcd := decoder.NewVideo(100, -1, rkmpp.NewFFmpegRKMPPDecoder)
+	dcd := decoder.NewVideo(100, -1, map[gomedia.CodecType]func() decoder.InnerVideoDecoder{
+		gomedia.H264: rkmpp.NewFFmpegRKMPPDecoder,
+		gomedia.H265: rkmpp.NewFFmpegRKMPPDecoder,
+	})
 	dcd.Decode()
 	defer dcd.Close()
 

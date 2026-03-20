@@ -3,6 +3,7 @@ package rtp
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"time"
 
@@ -84,7 +85,7 @@ func (d *h264Demuxer) processSTAPA(nalU []byte) error {
 	packet := nalU[1:]
 	for len(packet) >= 2 {
 		size := int(packet[0])<<8 | int(packet[1]) //nolint:mnd
-		if size+2 > len(packet) {
+		if size == 0 || size+2 > len(packet) {     //nolint:mnd // skip invalid zero-size NALs and truncated packets
 			break
 		}
 		naluTypefs := packet[2] & control1
@@ -107,6 +108,9 @@ func (d *h264Demuxer) processSTAPA(nalU []byte) error {
 
 // processLFUA handles FU-A NAL units
 func (d *h264Demuxer) processLFUA() error {
+	if d.end-d.offset < 2 { //nolint:mnd // FU-A requires at least FU indicator + FU header
+		return fmt.Errorf("H.264 FU-A packet too short: %d bytes", d.end-d.offset)
+	}
 	fuIndicator := d.payload.Data()[d.offset]
 	fuHeader := d.payload.Data()[d.offset+1]
 	isStart := fuHeader&0x80 != 0 //nolint:mnd
@@ -120,7 +124,9 @@ func (d *h264Demuxer) processLFUA() error {
 	}
 
 	if d.fuStarted {
-		d.BufferRTPPacket.Write(d.payload.Data()[d.offset+2 : d.end])
+		if d.offset+2 <= d.end { //nolint:mnd // skip FU indicator + FU header to reach payload
+			d.BufferRTPPacket.Write(d.payload.Data()[d.offset+2 : d.end])
+		}
 		if isEnd {
 			return d.finalizeFUAPacket()
 		}

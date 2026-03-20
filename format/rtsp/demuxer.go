@@ -183,7 +183,7 @@ func (dmx *innerRTSPDemuxer) findStreams() (params gomedia.CodecParametersPair, 
 				}
 				params.VideoCodecParameters = mjpegPair.VideoCodecParameters
 			default:
-				dmx.log.Debugf(dmx,"SDP video codec type %v not supported", i2.Type)
+				dmx.log.Debugf(dmx, "SDP video codec type %v not supported", i2.Type)
 			}
 		case audio:
 			dmx.audioIdx = int8(idx) //nolint:gosec
@@ -210,7 +210,7 @@ func (dmx *innerRTSPDemuxer) findStreams() (params gomedia.CodecParametersPair, 
 				}
 				params.AudioCodecParameters = opusPair.AudioCodecParameters
 			default:
-				dmx.log.Debugf(dmx,"SDP audio codec type %v not supported", i2.Type)
+				dmx.log.Debugf(dmx, "SDP audio codec type %v not supported", i2.Type)
 			}
 		}
 
@@ -258,7 +258,7 @@ func (dmx *innerRTSPDemuxer) ReadPacket() (packet gomedia.Packet, err error) {
 		header[0] = dmx.readBuffer.Data()[0]
 		if header[0] != rtspPacket && header[0] != rtpPacket {
 			if !desync {
-				dmx.log.Warningf(dmx,"RTSP packet reading desync: first symbol is %s. Trying to recover", string(header[0]))
+				dmx.log.Warningf(dmx, "RTSP packet reading desync: first symbol is %s. Trying to recover", string(header[0]))
 				desync = true
 			}
 			continue
@@ -288,12 +288,12 @@ func (dmx *innerRTSPDemuxer) ReadPacket() (packet gomedia.Packet, err error) {
 		case dmx.audioIdx:
 			targetDmx = dmx.audioDemuxer
 		default:
-			dmx.log.Warningf(dmx,"Unknown stream index %d. Possible desync", header[1])
+			dmx.log.Warningf(dmx, "Unknown stream index %d. Possible desync", header[1])
 		}
 
 		length := int32(binary.BigEndian.Uint16(header[2:]))
-		if length > 65535 || length < 12 {
-			dmx.log.Warningf(dmx,"RTSP client incorrect packet size %v. Possible desync", length)
+		if length < 12 {
+			dmx.log.Warningf(dmx, "RTSP client incorrect packet size %v. Possible desync", length)
 			return
 		}
 
@@ -345,7 +345,7 @@ func (dmx *innerRTSPDemuxer) ReadPacket() (packet gomedia.Packet, err error) {
 
 func (dmx *innerRTSPDemuxer) processRTSPPacket(header [headerSize]byte) (err error) {
 	if string(header[:]) != "RTSP" {
-		dmx.log.Warningf(dmx,"rtsp packet reading desync: first symbols are %s. Trying to recover", string(header[:]))
+		dmx.log.Warningf(dmx, "rtsp packet reading desync: first symbols are %s. Trying to recover", string(header[:]))
 		return
 	}
 
@@ -387,6 +387,7 @@ func (dmx *innerRTSPDemuxer) processRTSPPacket(header [headerSize]byte) (err err
 }
 
 func (dmx *innerRTSPDemuxer) Close() {
+	dmx.ticker.Stop()
 	dmx.client.Close()
 	dmx.readBuffer.Release()
 }

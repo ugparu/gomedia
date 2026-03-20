@@ -13,7 +13,7 @@ import (
 
 // JSON structures matching tests/data/h264/ files.
 type parametersJSON struct {
-	URL   string          `json:"url"`
+	URL   string           `json:"url"`
 	Video *videoParamsJSON `json:"video,omitempty"`
 }
 
@@ -53,7 +53,7 @@ func loadTestParameters(t *testing.T) (*CodecParameters, uint8) {
 	recordBytes, err := base64.StdEncoding.DecodeString(params.Video.Record)
 	require.NoError(t, err)
 
-	cp, err := NewCodecDataFromHevcDecoderConfRecord(recordBytes)
+	cp, err := NewCodecDataFromAVCDecoderConfRecord(recordBytes)
 	require.NoError(t, err)
 	cp.SetStreamIndex(params.Video.StreamIndex)
 	return &cp, params.Video.StreamIndex
@@ -111,7 +111,7 @@ func TestNewCodecDataFromHevcDecoderConfRecord_Valid(t *testing.T) {
 	recordBytes, err := base64.StdEncoding.DecodeString(params.Video.Record)
 	require.NoError(t, err)
 
-	cp, err := NewCodecDataFromHevcDecoderConfRecord(recordBytes)
+	cp, err := NewCodecDataFromAVCDecoderConfRecord(recordBytes)
 	require.NoError(t, err)
 	require.Equal(t, gomedia.H264, cp.Type())
 	require.Greater(t, cp.Width(), uint(0))
@@ -360,7 +360,7 @@ func TestAVCDecoderConfRecord_Len(t *testing.T) {
 		t.Parallel()
 		rec := AVCDecoderConfRecord{
 			SPS: [][]byte{{0x67, 0x64, 0x00, 0x1f, 0xac}}, // 5 bytes
-			PPS: [][]byte{{0x68, 0xee, 0x3c, 0x80}},        // 4 bytes
+			PPS: [][]byte{{0x68, 0xee, 0x3c, 0x80}},       // 4 bytes
 		}
 		// 7 + (2+5) + (2+4) = 20
 		require.Equal(t, 20, rec.Len())

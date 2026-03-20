@@ -27,7 +27,7 @@ type InnerVideoDecoder interface {
 type videoDecoder struct {
 	lifecycle.AsyncManager[*videoDecoder]
 	InnerVideoDecoder
-	newDecoderFn  func() InnerVideoDecoder
+	factory       map[gomedia.CodecType]func() InnerVideoDecoder
 	inpPktCh      chan gomedia.VideoPacket     // Channel for receiving multimedia packets.
 	outFrmCh      chan image.Image             // Channel for sending decoded video frames.
 	codecPar      gomedia.VideoCodecParameters // Video codec parameters.
@@ -51,11 +51,11 @@ func VideoWithLogger(l logger.Logger) VideoDecoderParam {
 	return func(dec *videoDecoder) { dec.log = l }
 }
 
-func NewVideo(chanSize int, fps int, newDecoderFn func() InnerVideoDecoder, params ...VideoDecoderParam) gomedia.VideoDecoder {
+func NewVideo(chanSize int, fps int, factory map[gomedia.CodecType]func() InnerVideoDecoder, params ...VideoDecoderParam) gomedia.VideoDecoder {
 	dec := &videoDecoder{
 		AsyncManager:      nil,
 		InnerVideoDecoder: nil,
-		newDecoderFn:      newDecoderFn,
+		factory:           factory,
 		inpPktCh:          make(chan gomedia.VideoPacket, chanSize),
 		outFrmCh:          make(chan image.Image, chanSize),
 		codecPar:          nil,
@@ -81,10 +81,6 @@ func (dec *videoDecoder) processPacket(inpPkt gomedia.VideoPacket, stopCh <-chan
 	dec.log.Tracef(dec, "Processing packet %v", inpPkt)
 
 	if inpPkt.CodecParameters() != dec.codecPar {
-		if inpPkt.CodecParameters().Type().String() == "UNKNOWN" {
-			return errors.New("unknown codec type")
-		}
-
 		dec.log.Infof(dec, "Changing codec parameters from %v to %v", dec.codecPar, inpPkt.CodecParameters())
 
 		dec.codecPar = inpPkt.CodecParameters()
@@ -139,7 +135,11 @@ func (dec *videoDecoder) startDecoder() (err error) {
 		return errors.New("can not start with empty video codec parameters")
 	}
 
-	dec.InnerVideoDecoder = dec.newDecoderFn()
+	decoderFn, ok := dec.factory[dec.codecPar.Type()]
+	if !ok {
+		return errors.New("unsupported video codec")
+	}
+	dec.InnerVideoDecoder = decoderFn()
 
 	if err = dec.InnerVideoDecoder.Init(dec.codecPar); err != nil {
 		return

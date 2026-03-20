@@ -10,66 +10,71 @@ import (
 
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/codec/mjpeg"
+	"github.com/ugparu/gomedia/utils/buffer"
 	"github.com/ugparu/gomedia/utils/sdp"
 )
 
 // MJPEG RTP header constants
 const (
-	mjpegHeaderSize   = 8    // Main JPEG header size
-	restartHeaderSize = 4    // Restart marker header size
-	qtableHeaderSize  = 4    // Quantization table header size
-	rtpJpegRestart    = 0x40 // Type 64-127 have restart markers
+	mjpegHeaderSize   = 8     // Main JPEG header size
+	restartHeaderSize = 4     // Restart marker header size
+	qtableHeaderSize  = 4     // Quantization table header size
+	jpegClockRate     = 90000 // 90kHz RTP clock for video
 )
 
-// Fragment represents a MJPEG fragment with its offset
+// mjpegFragment represents an MJPEG fragment with its byte offset in the frame
 type mjpegFragment struct {
 	fragOffset uint32
 	data       []byte
 }
 
+// cachedQTable stores quantization table data for reuse with Q values 128-254
+// (static mapping per RFC 2435)
+type cachedQTable struct {
+	precision uint8
+	data      []byte
+}
+
 // mjpegDemuxer handles MJPEG RTP demuxing according to RFC 2435
 type mjpegDemuxer struct {
 	*baseDemuxer
-	codec                *mjpeg.CodecParameters
-	packets              []*mjpeg.Packet
-	fragments            []mjpegFragment // Buffer for collecting fragments
-	timestamp            uint32
-	width                uint8
-	height               uint8
-	frameType            uint8
-	quality              uint8
-	markerBit            bool
-	lastTimestamp        uint32
-	frameHeaders         []byte // Buffered JPEG headers for current frame
-	firstPacketProcessed bool   // Flag to track if first packet was read in Demux
-	restartInterval      uint16 // Restart interval for DRI segment
+	codec           *mjpeg.CodecParameters
+	packets         []*mjpeg.Packet
+	fragments       []mjpegFragment
+	timestamp       uint32
+	width           uint8
+	height          uint8
+	frameType       uint8
+	quality         uint8
+	markerBit       bool
+	lastTimestamp   uint32
+	frameHeaders    []byte             // Reconstructed JPEG headers for current frame
+	restartInterval uint16             // DRI restart interval
+	qtablePrecision uint8              // Precision field from Q-table header
+	cachedQTables   map[uint8]cachedQTable // Cached tables for Q 128-254
 }
 
 // NewMJPEGDemuxer creates a new MJPEG RTP demuxer
 func NewMJPEGDemuxer(rdr io.Reader, sdp sdp.Media, index uint8, options ...DemuxerOption) gomedia.Demuxer {
 	return &mjpegDemuxer{
-		baseDemuxer:          newBaseDemuxer(rdr, sdp, index), // Using base demuxer pattern
-		packets:              []*mjpeg.Packet{},
-		fragments:            []mjpegFragment{},
-		codec:                nil,
-		markerBit:            false,
-		lastTimestamp:        0,
-		firstPacketProcessed: false,
-		restartInterval:      0,
+		baseDemuxer:   newBaseDemuxer(rdr, sdp, index, options...),
+		packets:       []*mjpeg.Packet{},
+		fragments:     []mjpegFragment{},
+		cachedQTables: make(map[uint8]cachedQTable),
 	}
 }
 
 // Demux returns the codec parameters for MJPEG
 func (d *mjpegDemuxer) Demux() (codecs gomedia.CodecParametersPair, err error) {
 	// Get framerate from SDP if available, otherwise default to 30
-	fps := uint(30) // Default framerate
+	fps := uint(30) //nolint:mnd // default framerate
 	if d.sdp.FPS > 0 {
 		fps = uint(d.sdp.FPS)
 	}
 
-	// Create initial codec parameters with default dimensions
-	// These will be updated when we receive the first packet with actual dimensions
-	d.codec = mjpeg.NewCodecParameters(320, 240, fps)
+	// Create initial codec parameters with default dimensions;
+	// updated when we receive the first packet with actual dimensions
+	d.codec = mjpeg.NewCodecParameters(320, 240, fps) //nolint:mnd // default dimensions
 	d.codec.SetStreamIndex(d.index)
 
 	codecs.VideoCodecParameters = d.codec
@@ -90,9 +95,8 @@ func (d *mjpegDemuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 		return
 	}
 
-	// Extract RTP marker bit from second byte of RTP header
-	// The marker bit is bit 0 of the second byte (payload[5])
-	d.markerBit = (d.baseDemuxer.payload.Data()[5] & 0x80) != 0
+	// Extract RTP marker bit (bit 7 of second RTP header byte)
+	d.markerBit = (d.baseDemuxer.payload.Data()[5] & 0x80) != 0 //nolint:mnd
 
 	// Parse MJPEG RTP payload
 	if err = d.parseMJPEGPacket(); err != nil {
@@ -114,11 +118,11 @@ func (d *mjpegDemuxer) parseMJPEGPacket() error {
 		return errors.New("incomplete MJPEG header")
 	}
 
-	// Parse main JPEG header (8 bytes)
+	// Parse main JPEG header (8 bytes, present in every fragment)
 	headerData := d.payload.Data()[d.offset : d.offset+mjpegHeaderSize]
 
 	// typeSpecific := headerData[0]
-	fragOffset := binary.BigEndian.Uint32([]byte{0, headerData[1], headerData[2], headerData[3]})
+	fragOffset := binary.BigEndian.Uint32([]byte{0, headerData[1], headerData[2], headerData[3]}) //nolint:mnd // 24-bit fragment offset
 	mjpegType := headerData[4]
 	quality := headerData[5]
 	width := headerData[6]
@@ -126,33 +130,32 @@ func (d *mjpegDemuxer) parseMJPEGPacket() error {
 
 	d.offset += mjpegHeaderSize
 
-	// Check for restart marker header (types 64-127)
-	if mjpegType >= 64 && mjpegType <= 127 {
+	// Restart marker header (types 64-127, present in every fragment)
+	if mjpegType >= 64 && mjpegType <= 127 { //nolint:mnd
 		if d.end-d.offset < restartHeaderSize {
 			return errors.New("incomplete restart marker header")
 		}
 
 		restartData := d.payload.Data()[d.offset : d.offset+restartHeaderSize]
-		restartInterval := binary.BigEndian.Uint16(restartData[0:2])
-		// F bit is bit 7 of byte 2, L bit is bit 6 of byte 2
-		fBit := (restartData[2] & 0x80) != 0
-
-		// If F bit is 0, this is the first fragment and restart interval is valid
-		if !fBit {
-			d.restartInterval = restartInterval
-		}
+		d.restartInterval = binary.BigEndian.Uint16(restartData[0:2])
+		// Bytes 2-3 contain F, L, and Restart Count fields used for partial
+		// decoding of restart intervals. We reassemble full frames using
+		// fragment offsets, so these fields are not needed.
 
 		d.offset += restartHeaderSize
 	}
 
-	// Check for quantization table header (Q values 128-255)
+	// Quantization table header (Q 128-255, only in first packet per RFC 2435 Section 3.1.8)
 	var qtableData []byte
-	if quality >= 128 {
+	var qtablePrecision uint8
+	if quality >= 128 && fragOffset == 0 { //nolint:mnd
 		if d.end-d.offset < qtableHeaderSize {
 			return errors.New("incomplete quantization table header")
 		}
 
 		qtableHeader := d.payload.Data()[d.offset : d.offset+qtableHeaderSize]
+		// MBZ := qtableHeader[0] // Must be zero
+		qtablePrecision = qtableHeader[1]
 		qtableLength := binary.BigEndian.Uint16(qtableHeader[2:4])
 
 		d.offset += qtableHeaderSize
@@ -161,9 +164,26 @@ func (d *mjpegDemuxer) parseMJPEGPacket() error {
 			if d.end-d.offset < int(qtableLength) {
 				return errors.New("incomplete quantization table data")
 			}
-			qtableData = d.payload.Data()[d.offset : d.offset+int(qtableLength)]
+			qtableData = make([]byte, qtableLength)
+			copy(qtableData, d.payload.Data()[d.offset:d.offset+int(qtableLength)])
 			d.offset += int(qtableLength)
+
+			// Cache tables for Q 128-254 (static mapping per RFC 2435)
+			if quality < 255 { //nolint:mnd
+				d.cachedQTables[quality] = cachedQTable{
+					precision: qtablePrecision,
+					data:      qtableData,
+				}
+			}
+		} else if quality < 255 { //nolint:mnd
+			// Length=0: use previously cached tables for this Q value
+			if cached, ok := d.cachedQTables[quality]; ok {
+				qtableData = cached.data
+				qtablePrecision = cached.precision
+			}
 		}
+		// Q=255 with Length=0 is invalid per RFC; silently fall through
+		// to computed tables as a best-effort degradation.
 	}
 
 	// Handle frame fragmentation with proper ordering
@@ -176,26 +196,27 @@ func (d *mjpegDemuxer) parseMJPEGPacket() error {
 		d.height = height
 		d.frameType = mjpegType
 		d.quality = quality
+		d.qtablePrecision = qtablePrecision
 
 		// Update codec parameters with actual frame dimensions
 		if d.codec != nil {
-			actualWidth := uint(width) * 8
-			actualHeight := uint(height) * 8
+			actualWidth := uint(width) * 8  //nolint:mnd // width is in 8-pixel blocks
+			actualHeight := uint(height) * 8 //nolint:mnd // height is in 8-pixel blocks
 			if actualWidth != d.codec.Width() || actualHeight != d.codec.Height() {
 				d.codec = mjpeg.NewCodecParameters(actualWidth, actualHeight, d.codec.FPS())
 				d.codec.SetStreamIndex(d.index)
 			}
 		}
 
-		// Generate JPEG headers and store them for this frame
-		// Note: we're not using restartInterval in headers since we don't insert restart markers
-		d.frameHeaders = d.reconstructJPEGHeaders(mjpegType, width, height, quality, qtableData)
+		// Generate JPEG headers for this frame
+		d.frameHeaders = reconstructJPEGHeaders(mjpegType, width, height, quality,
+			d.restartInterval, qtablePrecision, qtableData)
 	} else {
 		// Continuation of existing frame
 		if d.lastTimestamp != d.baseDemuxer.timestamp {
-			// New frame with different timestamp, discard old fragments and start fresh
+			// New frame with different timestamp but no start fragment - discard
 			d.fragments = d.fragments[:0]
-			return nil // Skip this fragment as we don't have the start
+			return nil
 		}
 	}
 
@@ -236,63 +257,83 @@ func (d *mjpegDemuxer) assembleFrame() error {
 		return nil
 	}
 
-	// Assemble the frame data
-	var frameData bytes.Buffer
+	// Calculate total size for allocation
+	totalSize := len(d.frameHeaders)
+	for _, frag := range d.fragments {
+		totalSize += len(frag.data)
+	}
+	totalSize += 2 //nolint:mnd // space for potential EOI marker
 
-	// Write JPEG headers first
-	frameData.Write(d.frameHeaders)
+	// Allocate from ring buffer or fall back to heap
+	var data []byte
+	var handle *buffer.SlotHandle
 
-	// Write all fragment data in order
+	if d.ring != nil {
+		data, handle = d.ring.Alloc(totalSize)
+	}
+	if data == nil {
+		data = make([]byte, totalSize)
+	}
+
+	// Write JPEG headers
+	off := copy(data, d.frameHeaders)
+
+	// Write all fragment data in order, checking for gaps
 	expectedOffset := uint32(0)
 	for _, frag := range d.fragments {
 		if frag.fragOffset != expectedOffset {
 			// Gap in fragments, discard frame
 			d.fragments = d.fragments[:0]
+			handle.Release() // no-op if nil
 			return nil
 		}
-		frameData.Write(frag.data)
+		off += copy(data[off:], frag.data)
 		expectedOffset += uint32(len(frag.data))
 	}
 
 	// Add EOI marker if not present
-	frameBytes := frameData.Bytes()
-	if len(frameBytes) < 2 || frameBytes[len(frameBytes)-2] != 0xFF || frameBytes[len(frameBytes)-1] != 0xD9 {
-		frameData.Write([]byte{0xFF, 0xD9}) // EOI marker
+	if off < 2 || data[off-2] != 0xFF || data[off-1] != 0xD9 { //nolint:mnd // EOI = FF D9
+		data[off] = 0xFF
+		data[off+1] = 0xD9 //nolint:mnd // EOI marker
+		off += 2            //nolint:mnd
 	}
+	data = data[:off]
 
 	// Create MJPEG packet
-	ts := (time.Duration(d.timestamp) * time.Second) / time.Duration(90000) // 90kHz timestamp
+	ts := (time.Duration(d.timestamp) * time.Second) / time.Duration(jpegClockRate)
 
 	packet := mjpeg.NewPacket(
 		true, // MJPEG frames are always keyframes
 		ts,
 		time.Now(),
-		frameData.Bytes(),
-		"", // URL not needed here
+		data,
+		"",
 		d.codec,
 	)
+	packet.Slot = handle // nil for heap-backed packets; Release() is a no-op
 
 	d.packets = append(d.packets, packet)
-	d.fragments = d.fragments[:0] // Clear fragments buffer
-	d.restartInterval = 0         // Reset restart interval for next frame
+	d.fragments = d.fragments[:0]
+	d.restartInterval = 0
 
 	return nil
 }
 
-// reconstructJPEGHeaders reconstructs JPEG headers according to RFC 2435
-func (d *mjpegDemuxer) reconstructJPEGHeaders(mjpegType, width, height, quality uint8, qtableData []byte) []byte {
+// reconstructJPEGHeaders reconstructs JPEG headers according to RFC 2435 Appendix B
+func reconstructJPEGHeaders(mjpegType, width, height, quality uint8,
+	restartInterval uint16, precision uint8, qtableData []byte) []byte {
 	var headers bytes.Buffer
 
 	// SOI marker
-	headers.Write([]byte{0xFF, 0xD8})
+	headers.Write([]byte{0xFF, 0xD8}) //nolint:mnd
 
-	// APP0 JFIF segment for better compatibility
-	headers.Write(d.createAPP0Segment())
+	// APP0 JFIF segment for compatibility
+	headers.Write(createAPP0Segment())
 
 	// Quantization tables
-	if quality >= 128 && len(qtableData) > 0 {
-		// Use provided quantization tables
-		headers.Write(qtableData)
+	if quality >= 128 && len(qtableData) > 0 { //nolint:mnd
+		// Wrap raw table data from RTP Q-table header in DQT segments
+		headers.Write(createDQTFromRawTables(precision, qtableData))
 	} else {
 		// Generate standard quantization tables based on quality factor
 		lqt, cqt := generateQuantizationTables(quality)
@@ -301,25 +342,25 @@ func (d *mjpegDemuxer) reconstructJPEGHeaders(mjpegType, width, height, quality 
 	}
 
 	// Add DRI segment if restart interval is present
-	if d.restartInterval > 0 {
-		headers.Write(d.createDRISegment(d.restartInterval))
+	if restartInterval > 0 {
+		headers.Write(createDRISegment(restartInterval))
 	}
 
-	// SOF (Start of Frame)
-	headers.Write(d.createSOFSegment(mjpegType, width, height))
+	// SOF0 (Start of Frame - Baseline DCT)
+	headers.Write(createSOFSegment(mjpegType, width, height))
 
-	// Huffman tables - all 4 standard tables
-	headers.Write(d.createHuffmanTables())
+	// Huffman tables - all 4 standard tables (ITU-T T.81 Annex K)
+	headers.Write(createHuffmanTables())
 
 	// SOS (Start of Scan)
-	headers.Write(d.createSOSSegment())
+	headers.Write(createSOSSegment())
 
 	return headers.Bytes()
 }
 
 // createAPP0Segment creates a standard JFIF APP0 segment
-func (d *mjpegDemuxer) createAPP0Segment() []byte {
-	segment := make([]byte, 18)
+func createAPP0Segment() []byte {
+	segment := make([]byte, 18) //nolint:mnd
 	segment[0] = 0xFF
 	segment[1] = 0xE0                      // APP0
 	segment[2] = 0x00                      // Length MSB
@@ -338,9 +379,10 @@ func (d *mjpegDemuxer) createAPP0Segment() []byte {
 }
 
 // generateQuantizationTables generates standard JPEG quantization tables
+// using the algorithm from RFC 2435 Appendix A (MakeTables procedure)
 func generateQuantizationTables(quality uint8) ([]byte, []byte) {
-	// Standard JPEG quantization tables from RFC 2435
-	jpegLumaQuantizer := []int{
+	// Standard JPEG quantization tables (JPEG Annex K, Tables K.1 and K.2)
+	jpegLumaQuantizer := [64]int{ //nolint:mnd
 		16, 11, 10, 16, 24, 40, 51, 61,
 		12, 12, 14, 19, 26, 58, 60, 55,
 		14, 13, 16, 24, 40, 57, 69, 56,
@@ -351,7 +393,7 @@ func generateQuantizationTables(quality uint8) ([]byte, []byte) {
 		72, 92, 95, 98, 112, 100, 103, 99,
 	}
 
-	jpegChromaQuantizer := []int{
+	jpegChromaQuantizer := [64]int{ //nolint:mnd
 		17, 18, 24, 47, 99, 99, 99, 99,
 		18, 21, 26, 66, 99, 99, 99, 99,
 		24, 26, 56, 99, 99, 99, 99, 99,
@@ -362,36 +404,36 @@ func generateQuantizationTables(quality uint8) ([]byte, []byte) {
 		99, 99, 99, 99, 99, 99, 99, 99,
 	}
 
-	// Calculate scale factor
+	// Calculate scale factor per RFC 2435
 	var scaleFactor int
 	if quality < 1 {
-		scaleFactor = 5000
-	} else if quality > 99 {
+		scaleFactor = 5000 //nolint:mnd
+	} else if quality > 99 { //nolint:mnd
 		scaleFactor = 1
-	} else if quality < 50 {
-		scaleFactor = 5000 / int(quality)
+	} else if quality < 50 { //nolint:mnd
+		scaleFactor = 5000 / int(quality) //nolint:mnd
 	} else {
-		scaleFactor = 200 - 2*int(quality)
+		scaleFactor = 200 - 2*int(quality) //nolint:mnd
 	}
 
 	// Scale and clamp quantization tables
-	lqt := make([]byte, 64)
-	cqt := make([]byte, 64)
+	lqt := make([]byte, 64) //nolint:mnd
+	cqt := make([]byte, 64) //nolint:mnd
 
-	for i := 0; i < 64; i++ {
-		lq := (jpegLumaQuantizer[i]*scaleFactor + 50) / 100
-		cq := (jpegChromaQuantizer[i]*scaleFactor + 50) / 100
+	for i := 0; i < 64; i++ { //nolint:mnd
+		lq := (jpegLumaQuantizer[i]*scaleFactor + 50) / 100 //nolint:mnd
+		cq := (jpegChromaQuantizer[i]*scaleFactor + 50) / 100 //nolint:mnd
 
 		if lq < 1 {
 			lq = 1
-		} else if lq > 255 {
-			lq = 255
+		} else if lq > 255 { //nolint:mnd
+			lq = 255 //nolint:mnd
 		}
 
 		if cq < 1 {
 			cq = 1
-		} else if cq > 255 {
-			cq = 255
+		} else if cq > 255 { //nolint:mnd
+			cq = 255 //nolint:mnd
 		}
 
 		lqt[i] = byte(lq)
@@ -401,70 +443,112 @@ func generateQuantizationTables(quality uint8) ([]byte, []byte) {
 	return lqt, cqt
 }
 
-// createDQTSegment creates a Define Quantization Table segment
+// createDQTSegment creates a Define Quantization Table segment for 8-bit coefficients
 func createDQTSegment(table []byte, tableID uint8) []byte {
-	segment := make([]byte, 69) // 2 + 2 + 1 + 64
+	// 2(marker) + 67(Lq: 2 length + 1 PqTq + 64 table data)
+	segment := make([]byte, 69) //nolint:mnd
 	segment[0] = 0xFF
 	segment[1] = 0xDB // DQT
 	segment[2] = 0x00 // Length MSB
-	segment[3] = 0x43 // Length LSB (67 bytes)
+	segment[3] = 0x43 // Length LSB (67 = 2 + 1 + 64)
 	segment[4] = tableID
 	copy(segment[5:], table)
 	return segment
 }
 
+// createDQTFromRawTables wraps raw quantization table coefficients from the RTP
+// Q-table header into JPEG DQT marker segments. The precision field is a bitmask
+// indicating coefficient size per table: 0 = 8-bit (64 bytes), 1 = 16-bit (128 bytes).
+// MSB corresponds to the first table (RFC 2435 Section 3.1.8).
+func createDQTFromRawTables(precision uint8, tableData []byte) []byte {
+	var result bytes.Buffer
+	offset := 0
+	tableID := uint8(0)
+
+	for offset < len(tableData) && tableID < 4 { //nolint:mnd
+		is16bit := (precision & (1 << (7 - tableID))) != 0 //nolint:mnd
+
+		coeffSize := 64 //nolint:mnd // 8-bit: 64 bytes per table
+		if is16bit {
+			coeffSize = 128 //nolint:mnd // 16-bit: 128 bytes per table
+		}
+
+		if offset+coeffSize > len(tableData) {
+			break
+		}
+
+		// PqTq byte: upper nibble = precision (0 or 1), lower nibble = table destination ID
+		pqTq := tableID
+		if is16bit {
+			pqTq |= 0x10 //nolint:mnd
+		}
+
+		lq := uint16(2 + 1 + coeffSize) //nolint:mnd // Lq includes the 2-byte length field itself
+		segment := make([]byte, 2+int(lq))
+		segment[0] = 0xFF
+		segment[1] = 0xDB // DQT
+		binary.BigEndian.PutUint16(segment[2:4], lq)
+		segment[4] = pqTq
+		copy(segment[5:], tableData[offset:offset+coeffSize])
+
+		result.Write(segment)
+		offset += coeffSize
+		tableID++
+	}
+
+	return result.Bytes()
+}
+
 // createDRISegment creates a Define Restart Interval segment
-func (d *mjpegDemuxer) createDRISegment(restartInterval uint16) []byte {
-	segment := make([]byte, 6)
+func createDRISegment(restartInterval uint16) []byte {
+	segment := make([]byte, 6) //nolint:mnd
 	segment[0] = 0xFF
 	segment[1] = 0xDD // DRI marker
 	segment[2] = 0x00 // Length MSB
-	segment[3] = 0x04 // Length LSB (4 bytes)
+	segment[3] = 0x04 // Length LSB (4 = 2 + 2)
 	binary.BigEndian.PutUint16(segment[4:6], restartInterval)
 	return segment
 }
 
-// createSOFSegment creates a Start of Frame segment with corrected sampling factors
-func (d *mjpegDemuxer) createSOFSegment(mjpegType, width, height uint8) []byte {
-	segment := make([]byte, 19)
+// createSOFSegment creates a Start of Frame (Baseline DCT) segment with
+// sampling factors determined by the RFC 2435 Type field
+func createSOFSegment(mjpegType, width, height uint8) []byte {
+	segment := make([]byte, 19) //nolint:mnd
 	segment[0] = 0xFF
 	segment[1] = 0xC0 // SOF0
 	segment[2] = 0x00 // Length MSB
-	segment[3] = 0x11 // Length LSB (17 bytes)
-	segment[4] = 0x08 // 8-bit precision
+	segment[3] = 0x11 // Length LSB (17 = 2 + 1 + 2 + 2 + 1 + 3*3)
+	segment[4] = 0x08 // 8-bit sample precision
 
-	// Height and width in pixels
-	actualHeight := uint16(height) * 8
-	actualWidth := uint16(width) * 8
+	// Height and width in pixels (RTP values are in 8-pixel blocks)
+	actualHeight := uint16(height) * 8 //nolint:mnd
+	actualWidth := uint16(width) * 8   //nolint:mnd
 	binary.BigEndian.PutUint16(segment[5:7], actualHeight)
 	binary.BigEndian.PutUint16(segment[7:9], actualWidth)
 
-	segment[9] = 0x03 // Number of components
+	segment[9] = 0x03 // Number of components (Y, Cb, Cr)
 
-	// Component 1 (Y) - correct sampling factors according to RFC 2435
-	segment[10] = 0x01 // Component ID
-
-	// Fix sampling factors according to RFC 2435 Type mapping
-	mjpegTypeBase := mjpegType & 0x3F // Lower 6 bits determine the type
+	// Component 1 (Y) - sampling factors per RFC 2435 Type mapping
+	segment[10] = 0x01                    // Component ID
+	mjpegTypeBase := mjpegType & 0x3F     //nolint:mnd // lower 6 bits determine the base type
 	switch mjpegTypeBase {
-	case 0: // 4:2:2 format
+	case 0: // 4:2:2 subsampling
 		segment[11] = 0x21 // hsamp=2, vsamp=1
-	case 1: // 4:2:0 format
+	case 1: // 4:2:0 subsampling
 		segment[11] = 0x22 // hsamp=2, vsamp=2
-	case 2: // 4:4:4 or grayscale format
+	case 2: // 4:4:4 or grayscale //nolint:mnd
 		segment[11] = 0x11 // hsamp=1, vsamp=1
-	default: // Default to 4:2:0
-		segment[11] = 0x22 // hsamp=2, vsamp=2
+	default: // default to 4:2:0
+		segment[11] = 0x22
 	}
-
 	segment[12] = 0x00 // Quantization table 0
 
-	// Component 2 (U)
+	// Component 2 (Cb)
 	segment[13] = 0x02 // Component ID
 	segment[14] = 0x11 // hsamp=1, vsamp=1
 	segment[15] = 0x01 // Quantization table 1
 
-	// Component 3 (V)
+	// Component 3 (Cr)
 	segment[16] = 0x03 // Component ID
 	segment[17] = 0x11 // hsamp=1, vsamp=1
 	segment[18] = 0x01 // Quantization table 1
@@ -473,13 +557,13 @@ func (d *mjpegDemuxer) createSOFSegment(mjpegType, width, height uint8) []byte {
 }
 
 // createHuffmanTables creates all 4 standard JPEG Huffman tables (ITU-T T.81 Annex K)
-func (d *mjpegDemuxer) createHuffmanTables() []byte {
+func createHuffmanTables() []byte {
 	var tables bytes.Buffer
 
 	// Luma DC table (Table K.3)
 	lumDCCodeLens := []byte{0, 1, 5, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0}
 	lumDCSymbols := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}
-	tables.Write(d.createDHTSegment(lumDCCodeLens, lumDCSymbols, 0, 0))
+	tables.Write(createDHTSegment(lumDCCodeLens, lumDCSymbols, 0, 0))
 
 	// Luma AC table (Table K.5)
 	lumACCodeLens := []byte{0, 2, 1, 3, 3, 2, 4, 3, 5, 5, 4, 4, 0, 0, 1, 0x7d}
@@ -506,12 +590,12 @@ func (d *mjpegDemuxer) createHuffmanTables() []byte {
 		0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8,
 		0xf9, 0xfa,
 	}
-	tables.Write(d.createDHTSegment(lumACCodeLens, lumACSymbols, 0, 1))
+	tables.Write(createDHTSegment(lumACCodeLens, lumACSymbols, 0, 1))
 
 	// Chroma DC table (Table K.4)
 	chrDCCodeLens := []byte{0, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0}
 	chrDCSymbols := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}
-	tables.Write(d.createDHTSegment(chrDCCodeLens, chrDCSymbols, 1, 0))
+	tables.Write(createDHTSegment(chrDCCodeLens, chrDCSymbols, 1, 0))
 
 	// Chroma AC table (Table K.6)
 	chrACCodeLens := []byte{0, 2, 1, 2, 4, 4, 3, 4, 7, 5, 4, 4, 0, 1, 2, 0x77}
@@ -538,48 +622,49 @@ func (d *mjpegDemuxer) createHuffmanTables() []byte {
 		0xea, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8,
 		0xf9, 0xfa,
 	}
-	tables.Write(d.createDHTSegment(chrACCodeLens, chrACSymbols, 1, 1))
+	tables.Write(createDHTSegment(chrACCodeLens, chrACSymbols, 1, 1))
 
 	return tables.Bytes()
 }
 
-// createDHTSegment creates a Define Huffman Table segment
-func (d *mjpegDemuxer) createDHTSegment(codeLens, symbols []byte, tableID, tableClass uint8) []byte {
-	length := 3 + len(codeLens) + len(symbols)
-	segment := make([]byte, 2+2+length)
+// createDHTSegment creates a Define Huffman Table segment.
+// Lh includes the 2-byte length field itself per JPEG spec.
+func createDHTSegment(codeLens, symbols []byte, tableID, tableClass uint8) []byte {
+	lh := 2 + 1 + len(codeLens) + len(symbols) // Lh includes itself (2) + TcTh (1) + data
+	segment := make([]byte, 2+lh)               // 2(marker) + Lh
 	segment[0] = 0xFF
 	segment[1] = 0xC4 // DHT
-	binary.BigEndian.PutUint16(segment[2:4], uint16(length))
-	segment[4] = (tableClass << 4) | tableID
+	binary.BigEndian.PutUint16(segment[2:4], uint16(lh))
+	segment[4] = (tableClass << 4) | tableID //nolint:mnd
 	copy(segment[5:], codeLens)
 	copy(segment[5+len(codeLens):], symbols)
 	return segment
 }
 
 // createSOSSegment creates a Start of Scan segment with correct Huffman table references
-func (d *mjpegDemuxer) createSOSSegment() []byte {
-	segment := make([]byte, 14)
+func createSOSSegment() []byte {
+	segment := make([]byte, 14) //nolint:mnd
 	segment[0] = 0xFF
 	segment[1] = 0xDA // SOS
 	segment[2] = 0x00 // Length MSB
-	segment[3] = 0x0C // Length LSB (12 bytes)
+	segment[3] = 0x0C // Length LSB (12 = 2 + 1 + 3*2 + 3)
 	segment[4] = 0x03 // Number of components
 
 	// Component 1 (Y) - use Luma DC/AC tables (0/0)
 	segment[5] = 0x01 // Component ID
 	segment[6] = 0x00 // DC table 0, AC table 0
 
-	// Component 2 (U) - use Chroma DC/AC tables (1/1)
+	// Component 2 (Cb) - use Chroma DC/AC tables (1/1)
 	segment[7] = 0x02 // Component ID
 	segment[8] = 0x11 // DC table 1, AC table 1
 
-	// Component 3 (V) - use Chroma DC/AC tables (1/1)
+	// Component 3 (Cr) - use Chroma DC/AC tables (1/1)
 	segment[9] = 0x03  // Component ID
 	segment[10] = 0x11 // DC table 1, AC table 1
 
-	segment[11] = 0x00 // Start of spectral selection
-	segment[12] = 0x3F // End of spectral selection
-	segment[13] = 0x00 // Successive approximation
+	segment[11] = 0x00 // Start of spectral selection (Ss)
+	segment[12] = 0x3F // End of spectral selection (Se = 63)
+	segment[13] = 0x00 // Successive approximation (Ah=0, Al=0)
 
 	return segment
 }

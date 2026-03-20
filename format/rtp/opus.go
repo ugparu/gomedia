@@ -56,8 +56,12 @@ func (d *opusDemuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 		buf = make([]byte, needed)
 	}
 	copy(buf, d.payload.Data()[d.offset:d.end])
+	duration, durErr := opus.PacketDuration(buf)
+	if durErr != nil {
+		duration = 20 * time.Millisecond //nolint:mnd // fallback to default Opus frame duration per RFC 6716 §2.1.4
+	}
 	p := opus.NewPacket(buf, (time.Duration(d.timestamp)*time.Second)/time.Duration(d.sdp.TimeScale), "", time.Now(),
-		d.CodecParameters, 20*time.Millisecond)
+		d.CodecParameters, duration)
 	p.Slot = handle
 	pkt = p
 	return

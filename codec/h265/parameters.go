@@ -15,7 +15,7 @@ type CodecParameters struct {
 	SPSInfo    SPSInfo
 }
 
-func NewCodecDataFromAVCDecoderConfRecord(record []byte) (codecPar CodecParameters, err error) {
+func NewCodecDataFromHEVCDecoderConfRecord(record []byte) (codecPar CodecParameters, err error) {
 	codecPar.Record = record
 	if _, err = (&codecPar.RecordInfo).Unmarshal(record); err != nil {
 		return

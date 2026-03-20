@@ -84,29 +84,19 @@ func (d *baseDemuxer) Demux() (codecs gomedia.CodecParametersPair, err error) {
 }
 
 func (d *baseDemuxer) ReadPacket() (pkt gomedia.Packet, err error) {
-	var n int
-	if n, err = d.rdr.Read(d.payload.Data()[:rtspHeaderSize]); err != nil {
+	if _, err = io.ReadFull(d.rdr, d.payload.Data()[:rtspHeaderSize]); err != nil {
 		return
 	}
 
-	if n < rtspHeaderSize-1 {
-		err = io.EOF
-		return
-	}
-
-	length := int32(binary.BigEndian.Uint16(d.payload.Data()[2:]))
-	if length > 65535 || length < 12 {
+	length := int(binary.BigEndian.Uint16(d.payload.Data()[2:])) //nolint:mnd // RTSP interleaved frame length field at bytes 2-3 per RFC 2326 §10.12
+	if length < rtpHeaderSize {
 		return nil, fmt.Errorf("RTP incorrect packet size %v", length)
 	}
 	length += rtspHeaderSize
 
 	d.payload.Resize(int(length))
-	if n, err = d.rdr.Read(d.payload.Data()[rtspHeaderSize:]); err != nil {
+	if _, err = io.ReadFull(d.rdr, d.payload.Data()[rtspHeaderSize:]); err != nil {
 		return nil, err
-	}
-	if n < rtspHeaderSize {
-		err = io.EOF
-		return
 	}
 
 	if d.isRTCPPacket() {

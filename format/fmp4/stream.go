@@ -16,7 +16,7 @@ const (
 	defaultDPI          = 72
 	defaultDepth        = 24
 	maxInt16Value       = 32767 // Maximum value for int16
-	bytesPerSampleScale = 4     // Used in SampleSize calculation
+	bytesPerSampleScale = 8     // Converts bytes to bits for SampleSize per ISO 14496-12 §12.2.3
 )
 
 type Stream struct {

@@ -13,7 +13,7 @@ import (
 
 // JSON structures matching tests/data/hevc/ files.
 type parametersJSON struct {
-	URL   string          `json:"url"`
+	URL   string           `json:"url"`
 	Video *videoParamsJSON `json:"video,omitempty"`
 }
 
@@ -54,7 +54,7 @@ func loadTestParameters(t *testing.T) (*CodecParameters, uint8) {
 	recordBytes, err := base64.StdEncoding.DecodeString(params.Video.Record)
 	require.NoError(t, err)
 
-	cp, err := NewCodecDataFromAVCDecoderConfRecord(recordBytes)
+	cp, err := NewCodecDataFromHEVCDecoderConfRecord(recordBytes)
 	require.NoError(t, err)
 	cp.SetStreamIndex(params.Video.StreamIndex)
 	return &cp, params.Video.StreamIndex
@@ -168,9 +168,9 @@ func TestHEVCDecoderConfRecord_Len(t *testing.T) {
 	t.Run("with_nalus", func(t *testing.T) {
 		t.Parallel()
 		rec := HEVCDecoderConfRecord{
-			VPS: [][]byte{{0x40, 0x01}},        // 2 bytes
-			SPS: [][]byte{{0x42, 0x01, 0x00}},   // 3 bytes
-			PPS: [][]byte{{0x44, 0x01}},          // 2 bytes
+			VPS: [][]byte{{0x40, 0x01}},       // 2 bytes
+			SPS: [][]byte{{0x42, 0x01, 0x00}}, // 3 bytes
+			PPS: [][]byte{{0x44, 0x01}},       // 2 bytes
 		}
 		// 23 + 3*(1 type + 2 count) + (2 + 2) + (2 + 3) + (2 + 2)
 		// Each NAL array: 1 byte type + 2 byte count + 2 byte length + data
@@ -231,7 +231,7 @@ func TestNewCodecDataFromAVCDecoderConfRecord_Valid(t *testing.T) {
 func TestNewCodecDataFromAVCDecoderConfRecord_TooShort(t *testing.T) {
 	t.Parallel()
 
-	_, err := NewCodecDataFromAVCDecoderConfRecord([]byte{0x01, 0x02})
+	_, err := NewCodecDataFromHEVCDecoderConfRecord([]byte{0x01, 0x02})
 	require.Error(t, err)
 }
 
@@ -243,7 +243,7 @@ func TestNewCodecDataFromAVCDecoderConfRecord_EmptyRecord(t *testing.T) {
 	// or fail at the SPS/PPS/VPS presence check.
 	b := make([]byte, 30)
 	b[0] = 0x01 // version
-	_, err := NewCodecDataFromAVCDecoderConfRecord(b)
+	_, err := NewCodecDataFromHEVCDecoderConfRecord(b)
 	require.Error(t, err, "must reject record with no VPS/SPS/PPS")
 }
 
@@ -405,17 +405,17 @@ func TestIsKey(t *testing.T) {
 
 	// Non-key types
 	nonKeyTypes := []byte{
-		0,                            // TRAIL_N
-		NalUnitCodedSliceTrailR,      // 1
-		NalUnitCodedSliceTsaN,        // 2
-		NalUnitCodedSliceTsaR,        // 3
-		NalUnitCodedSliceRaslR,       // 9
-		15,                           // last VCL before BLA range
-		NalUnitReservedIrapVcl22,     // 22 — reserved, NOT key
-		NalUnitVps,                   // 32
-		NalUnitSps,                   // 33
-		NalUnitPps,                   // 34
-		NalUnitAccessUnitDelimiter,   // 35
+		0,                          // TRAIL_N
+		NalUnitCodedSliceTrailR,    // 1
+		NalUnitCodedSliceTsaN,      // 2
+		NalUnitCodedSliceTsaR,      // 3
+		NalUnitCodedSliceRaslR,     // 9
+		15,                         // last VCL before BLA range
+		NalUnitReservedIrapVcl22,   // 22 — reserved, NOT key
+		NalUnitVps,                 // 32
+		NalUnitSps,                 // 33
+		NalUnitPps,                 // 34
+		NalUnitAccessUnitDelimiter, // 35
 	}
 	for _, typ := range nonKeyTypes {
 		require.False(t, IsKey(typ), "type %d should NOT be a key frame", typ)

@@ -47,7 +47,7 @@ func (d *h265Demuxer) addPacket(nalU []byte, isKeyFrame bool) {
 
 	pkt := h265.NewPacket(
 		isKeyFrame,
-		time.Duration(d.timestamp/clockrate)*time.Millisecond,
+		time.Duration(d.timestamp)*time.Millisecond/time.Duration(clockrate),
 		time.Now(),
 		data,
 		"",
@@ -178,6 +178,9 @@ func (d *h265Demuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 		case 39:
 		case 48:
 		case h265.NalFU:
+			if len(nal) < 3 { //nolint:mnd // FU requires 2-byte NAL header + 1-byte FU header
+				continue
+			}
 			fuNal := nal[2:]
 			isStart := fuNal[0]&0x80 != 0 //nolint:mnd
 			isEnd := fuNal[0]&0x40 != 0   //nolint:mnd
@@ -197,7 +200,7 @@ func (d *h265Demuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 				d.BufferRTPPacket.Write(fuNal)
 				pktData := d.BufferRTPPacket.Bytes()
 
-				if pktData[2]>>7&1 == 1 {
+				if len(pktData) > 2 && pktData[2]>>7&1 == 1 { //nolint:mnd // byte [2] is first payload byte after 2-byte NAL header
 					d.addPacket(pktData, d.bufferHasKey)
 				} else {
 					d.appendToPacket(pktData, d.bufferHasKey)
@@ -207,7 +210,7 @@ func (d *h265Demuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 				d.BufferRTPPacket.Write(fuNal)
 			}
 		default:
-			if nal[2]>>7&1 == 1 {
+			if len(nal) > 2 && nal[2]>>7&1 == 1 { //nolint:mnd // byte [2] is first payload byte after 2-byte NAL header
 				d.addPacket(nal, h265.IsKey(naluType))
 			} else {
 				d.appendToPacket(nal, false)

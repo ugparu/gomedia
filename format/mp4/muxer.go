@@ -101,7 +101,7 @@ func (mux *Muxer) newStream(codec gomedia.CodecParameters) (err error) {
 	stream.trackAtom.Media = new(mp4io.Media)
 	stream.trackAtom.Media.Header = &mp4io.MediaHeader{
 		Version:    0,
-		Flags:      trackFlags,
+		Flags:      0,
 		CreateTime: now,
 		ModifyTime: now,
 		TimeScale:  int32(stream.timeScale), //nolint: gosec
@@ -116,7 +116,7 @@ func (mux *Muxer) newStream(codec gomedia.CodecParameters) (err error) {
 	stream.trackAtom.Media.Handler = &mp4io.HandlerRefer{
 		Version: 0,
 		Flags:   0,
-		Type:    [4]byte([]byte("mhlr")),
+		Type:    [4]byte{}, // pre_defined = 0 per ISO 14496-12 §8.4.3
 		SubType: [4]byte([]byte("vide")),
 		Name:    []byte("VideoHandler"),
 		AtomPos: mp4io.AtomPos{
@@ -125,12 +125,10 @@ func (mux *Muxer) newStream(codec gomedia.CodecParameters) (err error) {
 		},
 	}
 	stream.trackAtom.Media.Info = &mp4io.MediaInfo{
-		Sound: new(mp4io.SoundMediaInfo),
-		Video: new(mp4io.VideoMediaInfo),
 		Data: &mp4io.DataInfo{
 			Refer: &mp4io.DataRefer{
 				Version: 0,
-				Flags:   trackFlags,
+				Flags:   0,
 				Url: &mp4io.DataReferUrl{
 					Version: 0,
 					Flags:   0x000001, //nolint: mnd
@@ -162,9 +160,12 @@ func (mux *Muxer) newStream(codec gomedia.CodecParameters) (err error) {
 	switch codec.Type() {
 	case gomedia.H264, gomedia.H265, gomedia.MJPEG:
 		stream.sample.SyncSample = new(mp4io.SyncSample)
+		stream.trackAtom.Media.Info.Video = new(mp4io.VideoMediaInfo)
 		vPar, _ := codec.(gomedia.VideoCodecParameters)
 		stream.trackAtom.Header.TrackWidth = float64(vPar.Width())
 		stream.trackAtom.Header.TrackHeight = float64(vPar.Height())
+	case gomedia.AAC:
+		stream.trackAtom.Media.Info.Sound = new(mp4io.SoundMediaInfo)
 	}
 	stream.muxer = mux
 	mux.streams = append(mux.streams, stream)
@@ -239,7 +240,11 @@ func (mux *Muxer) Mux(streams gomedia.CodecParametersPair) (err error) {
 
 // WritePacket writes a media packet to the muxer.
 func (mux *Muxer) WritePacket(pkt gomedia.Packet) (err error) {
-	return mux.streams[pkt.StreamIndex()].writePacket(pkt)
+	idx := int(pkt.StreamIndex())
+	if idx >= len(mux.streams) {
+		return fmt.Errorf("mp4: stream index %d out of range (have %d streams)", idx, len(mux.streams))
+	}
+	return mux.streams[idx].writePacket(pkt)
 }
 
 // WriteTrailer completes the MP4 file by writing the trailer and necessary metadata.
@@ -282,11 +287,7 @@ func (mux *Muxer) WriteTrailer() (err error) {
 	}
 	mdatSize -= 40
 
-	if _, err = mux.writer.Seek(40, 0); err != nil { //nolint: mnd
-		return
-	}
-
-	if _, err = mux.writer.Seek(48, 0); err != nil { //nolint: mnd
+	if _, err = mux.writer.Seek(48, 0); err != nil { //nolint: mnd // ftyp(32) + free(8) + mdat_tag(8) = 48
 		return
 	}
 	tagHdr := make([]byte, 8)              //nolint: mnd

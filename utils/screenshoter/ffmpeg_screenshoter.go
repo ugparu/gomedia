@@ -57,7 +57,11 @@ func (screenshoter *ffmpegScreenshoter) Screenshot(url string) ([]byte, error) {
 	screenshotReader.Read()
 
 	// Create a new video decoder with CPU acceleration and the specified buffer size.
-	screenshotDecoder := decoder.NewVideo(bufSize, -1, cpu.NewFFmpegCPUDecoder)
+	screenshotDecoder := decoder.NewVideo(bufSize, -1, map[gomedia.CodecType]func() decoder.InnerVideoDecoder{
+		gomedia.H264:  cpu.NewFFmpegCPUDecoder,
+		gomedia.H265:  cpu.NewFFmpegCPUDecoder,
+		gomedia.MJPEG: cpu.NewFFmpegCPUDecoder,
+	})
 	defer screenshotDecoder.Close()
 
 	screenshotDecoder.Decode()

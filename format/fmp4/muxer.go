@@ -276,8 +276,11 @@ func (m *Muxer) GetInit() buffer.PooledBuffer {
 }
 
 func (m *Muxer) WritePacket(pkt gomedia.Packet) error {
-	stream := m.strs[pkt.StreamIndex()]
-	return stream.writePacket(pkt)
+	idx := int(pkt.StreamIndex())
+	if idx >= len(m.strs) {
+		return fmt.Errorf("fmp4: stream index %d out of range (have %d streams)", idx, len(m.strs))
+	}
+	return m.strs[idx].writePacket(pkt)
 }
 
 // processMuxer handles the common processing of streams within GetMP4Fragment

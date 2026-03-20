@@ -69,7 +69,7 @@ func loadTestCodecPair(t *testing.T) (gomedia.CodecParametersPair, *h264.CodecPa
 
 	recordBytes, err := base64.StdEncoding.DecodeString(params.Video.Record)
 	require.NoError(t, err)
-	videoCp, err := h264.NewCodecDataFromHevcDecoderConfRecord(recordBytes)
+	videoCp, err := h264.NewCodecDataFromAVCDecoderConfRecord(recordBytes)
 	require.NoError(t, err)
 	videoCp.SetStreamIndex(params.Video.StreamIndex)
 

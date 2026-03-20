@@ -82,9 +82,12 @@ func (c *client) establishConnection(rawURL string) (err error) {
 	if err != nil {
 		return err
 	}
-	username := l.User.Username()
-	password, _ := l.User.Password()
-	l.User = nil
+	var username, password string
+	if l.User != nil {
+		username = l.User.Username()
+		password, _ = l.User.Password()
+		l.User = nil
+	}
 
 	// If the port is not specified, set it to the default RTSP port (554).
 	if l.Port() == "" {
@@ -131,7 +134,7 @@ func (c *client) establishConnection(rawURL string) (err error) {
 	}
 
 	// Log a debug message indicating successful RTSP session setup.
-	c.log.Debug(c,"RTSP session set up")
+	c.log.Debug(c, "RTSP session set up")
 
 	return nil
 }
@@ -172,7 +175,7 @@ func (c *client) request(method rtspMethod,
 
 	// Set write deadline for the connection.
 	if err = c.conn.SetWriteDeadline(time.Now().Add(readWriteTimeout)); err != nil {
-		return
+		return nil, err
 	}
 
 	// Write the request to the connection.
@@ -211,7 +214,7 @@ func (c *client) request(method rtspMethod,
 	for {
 		// Set read deadline for the connection.
 		if err = c.conn.SetReadDeadline(time.Now().Add(readWriteTimeout)); err != nil {
-			return
+			return nil, err
 		}
 
 		// Read a line from the response.
@@ -310,7 +313,7 @@ func (c *client) supportsPublish() bool {
 // options sends an RTSP OPTIONS request to the server and updates the supported methods.
 func (c *client) options() (err error) {
 	// Log debug information.
-	c.log.Debug(c,"Processing options request")
+	c.log.Debug(c, "Processing options request")
 
 	// Send OPTIONS request and retrieve response.
 	resp, err := c.request(options, nil, c.control, nil, false)
@@ -320,7 +323,7 @@ func (c *client) options() (err error) {
 
 	// Parse and update supported methods from the response.
 	if val, ok := resp["Public"]; ok {
-		c.log.Debugf(c,"Supported methods: %s", val)
+		c.log.Debugf(c, "Supported methods: %s", val)
 		for m := range strings.SplitSeq(val, ",") {
 			c.methods[rtspMethod(strings.TrimSpace(m))] = true
 		}
@@ -332,7 +335,7 @@ func (c *client) options() (err error) {
 // describe sends an RTSP DESCRIBE request to the server and parses the SDP information from the response.
 func (c *client) describe() (sdps []sdp.Media, err error) {
 	// Log debug information.
-	c.log.Debug(c,"Processing describe request")
+	c.log.Debug(c, "Processing describe request")
 
 	// Send DESCRIBE request with "Accept" header specifying "application/sdp".
 	resp, err := c.request(describe, map[string]string{"Accept": "application/sdp"}, c.control, nil, false)
@@ -359,7 +362,7 @@ func (c *client) describe() (sdps []sdp.Media, err error) {
 	defer sdpBuffer.Release()
 
 	if err = c.conn.SetReadDeadline(time.Now().Add(readWriteTimeout)); err != nil {
-		return
+		return nil, err
 	}
 	if _, err = io.ReadFull(c.connRW, sdpBuffer.Data()); err != nil {
 		return nil, err
@@ -372,13 +375,13 @@ func (c *client) describe() (sdps []sdp.Media, err error) {
 // setup sends an RTSP SETUP request to the server and retrieves the interleaved channel information.
 func (c *client) setup(chTMP int, uri string, mode string) (streamIdx int, err error) {
 	// Log debug information.
-	c.log.Debug(c,"Processing setup request")
+	c.log.Debug(c, "Processing setup request")
 
 	// Configure the "Transport" header with interleaved channel information.
 	headers := map[string]string{"Transport": fmt.Sprintf("RTP/AVP/TCP;unicast;interleaved=%d-%d;mode=%s", chTMP, chTMP+1, mode)}
 
-	c.log.Debugf(c,"Setting up stream with URI: %s", uri)
-	c.log.Debugf(c,"Headers: %+v", headers)
+	c.log.Debugf(c, "Setting up stream with URI: %s", uri)
+	c.log.Debugf(c, "Headers: %+v", headers)
 
 	// Send SETUP request with specified headers and URI.
 	resp, err := c.request(setup, headers, uri, nil, false)
@@ -421,7 +424,7 @@ func (c *client) setup(chTMP int, uri string, mode string) (streamIdx int, err e
 // play sends an RTSP PLAY request to the server to initiate streaming.
 func (c *client) play() (err error) {
 	// Log debug information.
-	c.log.Debug(c,"Processing play request")
+	c.log.Debug(c, "Processing play request")
 
 	// Send PLAY request to the server.
 	if _, err = c.request(play, nil, c.control, nil, false); err != nil {
@@ -434,7 +437,7 @@ func (c *client) play() (err error) {
 // announce sends an RTSP ANNOUNCE request with the provided SDP session and media descriptions.
 func (c *client) announce(sess sdp.Session, medias []sdp.Media) (err error) {
 	// Log debug information.
-	c.log.Debug(c,"Processing announce request")
+	c.log.Debug(c, "Processing announce request")
 
 	bodyStr := sdp.Generate(sess, medias)
 	body := []byte(bodyStr)
@@ -454,7 +457,7 @@ func (c *client) announce(sess sdp.Session, medias []sdp.Media) (err error) {
 // record sends an RTSP RECORD request to start recording on the server.
 func (c *client) record() (err error) {
 	// Log debug information.
-	c.log.Debug(c,"Processing record request")
+	c.log.Debug(c, "Processing record request")
 
 	if _, err = c.request(record, nil, c.control, nil, false); err != nil {
 		return err
@@ -463,10 +466,10 @@ func (c *client) record() (err error) {
 	return nil
 }
 
-// ping sends an RTSP GET_PARAMETER request to keep the connection alive.
+// ping sends an RTSP OPTIONS request to keep the connection alive.
 func (c *client) ping() (err error) {
 	// Log debug information.
-	c.log.Debug(c,"Processing ping request")
+	c.log.Debug(c, "Processing ping request")
 
 	// Send GET_PARAMETER request to the server (no response expected).
 	if _, err = c.request(options, nil, c.control, nil, true); err != nil {
@@ -491,7 +494,7 @@ func (c *client) Read(buf []byte) (err error) {
 	if len(buf) > 0 {
 		// Set the read deadline for the connection.
 		if err = c.conn.SetReadDeadline(time.Now().Add(readWriteTimeout)); err != nil {
-			return
+			return err
 		}
 
 		if _, err = io.ReadFull(c.connRW, buf); err != nil {
@@ -511,13 +514,13 @@ func (c *client) Close() {
 		if err := c.conn.SetDeadline(time.Now().Add(readWriteTimeout)); err == nil {
 			// Send TEARDOWN request to gracefully close the connection (no response expected).
 			if _, err = c.request(teardown, nil, c.control, nil, true); err != nil {
-				c.log.Debugf(c,"Teardown error: %v", err)
+				c.log.Debugf(c, "Teardown error: %v", err)
 			}
 		}
 
 		// Close the underlying TCP connection.
 		if err := c.conn.Close(); err != nil {
-			c.log.Debugf(c,"Connection close error: %v", err)
+			c.log.Debugf(c, "Connection close error: %v", err)
 		}
 	}
 }

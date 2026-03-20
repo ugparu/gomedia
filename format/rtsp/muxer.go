@@ -48,7 +48,7 @@ func NewMuxer(url string, log logger.Logger) gomedia.Muxer {
 // Mux initializes the muxer with stream parameters and performs the publish workflow:
 // OPTIONS (via establishConnection) -> ANNOUNCE -> SETUP (per track) -> RECORD.
 func (m *Muxer) Mux(streams gomedia.CodecParametersPair) (err error) {
-	m.log.Debugf(m,"Muxing streams: %+v", streams)
+	m.log.Debugf(m, "Muxing streams: %+v", streams)
 
 	if err = m.client.establishConnection(m.url); err != nil {
 		return err
@@ -58,21 +58,21 @@ func (m *Muxer) Mux(streams gomedia.CodecParametersPair) (err error) {
 		return errors.New("rtsp: server does not support ANNOUNCE and RECORD (publishing)")
 	}
 
-	m.log.Debugf(m,"Converting codec parameters to SDP medias")
+	m.log.Debugf(m, "Converting codec parameters to SDP medias")
 	m.medias, err = codecParamsToSDPMedias(streams)
 	if err != nil {
 		return err
 	}
 
-	m.log.Debugf(m,"SDP medias: %+v", m.medias)
+	m.log.Debugf(m, "SDP medias: %+v", m.medias)
 
 	if len(m.medias) == 0 {
 		return errors.New("rtsp: no video or audio streams to publish")
 	}
 
-	m.log.Debugf(m,"Creating SDP session")
+	m.log.Debugf(m, "Creating SDP session")
 	sess := sdp.Session{URI: m.client.control}
-	m.log.Debugf(m,"Announcing streams")
+	m.log.Debugf(m, "Announcing streams")
 	if err = m.client.announce(sess, m.medias); err != nil {
 		return err
 	}
@@ -89,20 +89,20 @@ func (m *Muxer) Mux(streams gomedia.CodecParametersPair) (err error) {
 		if media.AVType == video && streams.VideoCodecParameters != nil {
 			switch v := streams.VideoCodecParameters.(type) {
 			case *h264.CodecParameters:
-				m.log.Debugf(m,"Creating H264 RTP muxer on channel %d", ch)
+				m.log.Debugf(m, "Creating H264 RTP muxer on channel %d", ch)
 				m.videoMuxer = rtp.NewH264Muxer(m.client.conn, media, uint8(ch), v, 0, m.log) //nolint:gosec
 			case *h265.CodecParameters:
-				m.log.Debugf(m,"Creating H265 RTP muxer on channel %d", ch)
+				m.log.Debugf(m, "Creating H265 RTP muxer on channel %d", ch)
 				m.videoMuxer = rtp.NewH265Muxer(m.client.conn, media, uint8(ch), v, 0, m.log) //nolint:gosec
 			default:
-				m.log.Debugf(m,"RTP muxer for codec %T not implemented yet", streams.VideoCodecParameters)
+				return fmt.Errorf("RTP muxer for video codec %T not implemented", streams.VideoCodecParameters)
 			}
 		}
 
 		chTMP += 2
 	}
 
-	m.log.Debugf(m,"Recording streams")
+	m.log.Debugf(m, "Recording streams")
 	if err = m.client.record(); err != nil {
 		return err
 	}

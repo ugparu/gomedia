@@ -100,7 +100,10 @@ func runSession(id int, rtspURL string, maxFrames, timeout int, verbose, noAudio
 		fmt.Printf("\n%s========================================\n", prefix)
 		fmt.Printf("%sInitializing RKMPP hardware decoder...\n", prefix)
 		fmt.Printf("%s========================================\n", prefix)
-		dcd := decoder.NewVideo(100, -1, rkmpp.NewFFmpegRKMPPDecoder)
+		dcd := decoder.NewVideo(100, -1, map[gomedia.CodecType]func() decoder.InnerVideoDecoder{
+			gomedia.H264: rkmpp.NewFFmpegRKMPPDecoder,
+			gomedia.H265: rkmpp.NewFFmpegRKMPPDecoder,
+		})
 		dcd.Decode()
 
 		fmt.Printf("%s✓ RKMPP decoder initialized\n", prefix)

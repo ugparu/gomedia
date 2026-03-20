@@ -23,6 +23,8 @@ func (self HandlerRefer) Marshal(b []byte) (n int) {
 	pio.PutU32BE(b[0:], uint32(n))
 	return
 }
+const hdlrReservedSize = 12 // 3 × uint32 reserved per ISO 14496-12 §8.4.3
+
 func (self HandlerRefer) marshal(b []byte) (n int) {
 	pio.PutU8(b[n:], self.Version)
 	n += 1
@@ -32,6 +34,11 @@ func (self HandlerRefer) marshal(b []byte) (n int) {
 	n += len(self.Type[:])
 	copy(b[n:], self.SubType[:])
 	n += len(self.SubType[:])
+	// 3 × uint32 reserved = 0
+	pio.PutU32BE(b[n:], 0)
+	pio.PutU32BE(b[n+4:], 0)
+	pio.PutU32BE(b[n+8:], 0)
+	n += hdlrReservedSize
 	copy(b[n:], self.Name[:])
 	n += len(self.Name[:])
 	return
@@ -42,6 +49,7 @@ func (self HandlerRefer) Len() (n int) {
 	n += 3
 	n += len(self.Type[:])
 	n += len(self.SubType[:])
+	n += hdlrReservedSize
 	n += len(self.Name[:])
 	return
 }
@@ -72,6 +80,12 @@ func (self *HandlerRefer) Unmarshal(b []byte, offset int) (n int, err error) {
 	}
 	copy(self.SubType[:], b[n:])
 	n += len(self.SubType)
+	// Skip 3 × uint32 reserved
+	if len(b) < n+hdlrReservedSize {
+		err = parseErr("Reserved", n+offset, err)
+		return
+	}
+	n += hdlrReservedSize
 	self.Name = b[n:]
 	n += len(b[n:])
 	return

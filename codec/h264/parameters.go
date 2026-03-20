@@ -50,7 +50,7 @@ func NewCodecDataFromSPSAndPPS(sps, pps []byte) (codecPar CodecParameters, err e
 	return
 }
 
-func NewCodecDataFromHevcDecoderConfRecord(record []byte) (codecPar CodecParameters, err error) {
+func NewCodecDataFromAVCDecoderConfRecord(record []byte) (codecPar CodecParameters, err error) {
 	codecPar.Record = record
 	if _, err = (&codecPar.RecordInfo).Unmarshal(record); err != nil {
 		return

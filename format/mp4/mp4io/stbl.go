@@ -133,8 +133,17 @@ func (self *SampleTable) Unmarshal(b []byte, offset int) (n int, err error) {
 		case STCO:
 			{
 				atom := &ChunkOffset{}
-				if _, err = atom.Unmarshal(b[n:n+size], offset+n); err != nil {
+				if _, err = atom.UnmarshalSTCO(b[n:n+size], offset+n); err != nil {
 					err = parseErr("stco", n+offset, err)
+					return
+				}
+				self.ChunkOffset = atom
+			}
+		case CO64:
+			{
+				atom := &ChunkOffset{}
+				if _, err = atom.UnmarshalCO64(b[n:n+size], offset+n); err != nil {
+					err = parseErr("co64", n+offset, err)
 					return
 				}
 				self.ChunkOffset = atom

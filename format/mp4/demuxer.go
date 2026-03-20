@@ -46,7 +46,9 @@ func (dmx *Demuxer) Demux() (params gomedia.CodecParametersPair, err error) {
 }
 
 func (dmx *Demuxer) Close() {
-	dmx.r.Close()
+	if dmx.r != nil {
+		dmx.r.Close()
+	}
 }
 
 func (dmx *Demuxer) ReadPacket() (pkt gomedia.Packet, err error) {
@@ -151,7 +153,7 @@ func (dmx *Demuxer) probe() (err error) {
 
 		if avc1 := atrack.GetAVC1Conf(); avc1 != nil {
 			var res h264.CodecParameters
-			if res, err = h264.NewCodecDataFromHevcDecoderConfRecord(avc1.Data); err != nil {
+			if res, err = h264.NewCodecDataFromAVCDecoderConfRecord(avc1.Data); err != nil {
 				return err
 			}
 			res.SetStreamIndex(uint8(i)) //nolint:gosec
@@ -162,7 +164,7 @@ func (dmx *Demuxer) probe() (err error) {
 		}
 		if hv1 := atrack.GetHV1Conf(); hv1 != nil {
 			var res h265.CodecParameters
-			if res, err = h265.NewCodecDataFromAVCDecoderConfRecord(hv1.Data); err != nil {
+			if res, err = h265.NewCodecDataFromHEVCDecoderConfRecord(hv1.Data); err != nil {
 				return err
 			}
 			res.SetStreamIndex(uint8(i)) //nolint:gosec

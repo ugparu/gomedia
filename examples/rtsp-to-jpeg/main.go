@@ -35,8 +35,9 @@ func main() {
 		log.Errorf(log, "No video stream found in RTSP source")
 	}
 
-	dcd := decoder.NewVideo(100, -1, func() decoder.InnerVideoDecoder {
-		return cuda.NewFFmpegCUDADecoder()
+	dcd := decoder.NewVideo(100, -1, map[gomedia.CodecType]func() decoder.InnerVideoDecoder{
+		gomedia.H264: cuda.NewFFmpegCUDADecoder,
+		gomedia.H265: cuda.NewFFmpegCUDADecoder,
 	}, decoder.VideoWithLogger(log))
 	dcd.Decode()
 
