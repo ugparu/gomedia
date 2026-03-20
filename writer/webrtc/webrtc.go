@@ -2,9 +2,7 @@ package webrtc
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"errors"
-	"net/http"
 	"net/url"
 	"strings"
 	"sync"
@@ -25,6 +23,11 @@ func WithLogger(l logger.Logger) Option {
 	return func(w *webRTCWriter) { w.log = l }
 }
 
+// WithSignalingHandler overrides the default data channel signaling protocol.
+func WithSignalingHandler(h SignalingHandler) Option {
+	return func(w *webRTCWriter) { w.signaling = h }
+}
+
 type webRTCWriter struct {
 	lifecycle.AsyncManager[*webRTCWriter]
 	log              logger.Logger
@@ -38,6 +41,7 @@ type webRTCWriter struct {
 	rmSrcCh          chan string
 	addSrcCh         chan string
 	name             string
+	signaling        SignalingHandler
 }
 
 // New creates a new Streamer with the given channel size.
@@ -52,6 +56,7 @@ func New(chanSize int, targetDuration time.Duration, opts ...Option) gomedia.Web
 			streams:        map[string]*stream{},
 			pendingPeers:   map[*peerTrack]bool{},
 			targetDuration: targetDuration,
+			signaling:      nil, // set after options
 		},
 		sources:          []string{},
 		peersChan:        make(chan *gomedia.WebRTCPeer, chanSize),
@@ -62,11 +67,13 @@ func New(chanSize int, targetDuration time.Duration, opts ...Option) gomedia.Web
 		rmSrcCh:          make(chan string, chanSize),
 		addSrcCh:         make(chan string, chanSize),
 		name:             "WEBRTC_WRITER",
+		signaling:        &DefaultSignalingHandler{},
 	}
 	for _, o := range opts {
 		o(wr)
 	}
 	wr.streams.log = wr.log
+	wr.streams.signaling = wr.signaling
 	wr.AsyncManager = lifecycle.NewFailSafeAsyncManager(wr, wr.log)
 	return wr
 }
@@ -225,25 +232,16 @@ func (element *webRTCWriter) checkCodecParameters(addr string, codecPar gomedia.
 
 // buildAvailableStreamsMessage builds the setAvailableStreams message with current resolutions.
 func (element *webRTCWriter) buildAvailableStreamsMessage() ([]byte, error) {
-	reqMsg := &codecReq{
-		Token:   "",
-		Command: "setAvailableStreams",
-		Message: codec{
-			Type:        "video",
-			Resolutions: []resolution{},
-		},
-	}
-
+	resolutions := make([]gomedia.Resolution, 0, len(element.streams.sortedURLs))
 	for _, url := range element.streams.sortedURLs {
-		reqMsg.Message.Resolutions = append(reqMsg.Message.Resolutions, resolution{
+		resolutions = append(resolutions, gomedia.Resolution{
 			URL:    url,
 			Width:  int(element.streams.streams[url].codecPar.Width()),  //nolint:gosec
 			Height: int(element.streams.streams[url].codecPar.Height()), //nolint:gosec
 			Codec:  element.streams.streams[url].codecPar.VideoCodecParameters.Type().String(),
 		})
 	}
-
-	return json.Marshal(reqMsg)
+	return element.signaling.BuildAvailableStreams(resolutions)
 }
 
 // sendAvailableStreamsToPeer sends setAvailableStreams message to a single peer.
@@ -406,20 +404,16 @@ func (element *webRTCWriter) addConnection(inpPeer *gomedia.WebRTCPeer, targetUR
 		d.OnMessage(func(msg webrtc.DataChannelMessage) {
 			element.log.Infof(element, "Message from data channel '%s': '%s'", d.Label(), string(msg.Data))
 
-			req := &dataChanReq{
-				Token:   "",
-				Command: "",
-				Message: "",
-			}
-
-			if err = json.Unmarshal(msg.Data, req); err != nil {
-				element.log.Errorf(element, "Can not process data channel msg: %v", err)
+			token, targetURL, parseErr := element.signaling.ParseMessage(msg.Data)
+			if parseErr != nil {
+				element.log.Errorf(element, "Can not process data channel msg: %v", parseErr)
+				return
 			}
 
 			newPeerURL := &peerURL{
 				peerTrack: pt,
-				Token:     req.Token,
-				URL:       req.Message,
+				Token:     token,
+				URL:       targetURL,
 			}
 
 			if element.streams.Exists(newPeerURL.URL) {
@@ -427,21 +421,15 @@ func (element *webRTCWriter) addConnection(inpPeer *gomedia.WebRTCPeer, targetUR
 				return
 			}
 
-			respMsg := &resp{
-				Token:   newPeerURL.Token,
-				Status:  http.StatusNotFound,
-				Message: "Not Found",
-			}
-			var respBytes []byte
-			respBytes, err = json.Marshal(respMsg)
-			if err != nil {
-				element.log.Errorf(element, "Can not send response to data channel: %v", err)
+			respBytes, marshalErr := element.signaling.BuildErrorResponse(token)
+			if marshalErr != nil {
+				element.log.Errorf(element, "Can not send response to data channel: %v", marshalErr)
 				return
 			}
 
 			if newPeerURL.DataChannel != nil {
-				if err = newPeerURL.DataChannel.Send(respBytes); err != nil {
-					element.log.Errorf(element, "Can not send response to data channel: %v", err)
+				if sendErr := newPeerURL.DataChannel.Send(respBytes); sendErr != nil {
+					element.log.Errorf(element, "Can not send response to data channel: %v", sendErr)
 					return
 				}
 			}

@@ -107,9 +107,32 @@ type streamState struct {
 // Option is a functional option for configuring a segmenter.
 type Option func(*segmenter)
 
+// PathFunc generates the subdirectory and filename for a new segment.
+type PathFunc func(startTime time.Time, streamIdx int) (dir, filename string)
+
 // WithLogger sets the logger for the segmenter.
 func WithLogger(l logger.Logger) Option {
 	return func(s *segmenter) { s.log = l }
+}
+
+// WithPathFunc overrides the default segment path generation logic.
+func WithPathFunc(f PathFunc) Option {
+	return func(s *segmenter) { s.pathFunc = f }
+}
+
+// WithPreBufferDuration overrides the default event mode pre-buffer duration (targetDuration / 2).
+func WithPreBufferDuration(d time.Duration) Option {
+	return func(s *segmenter) { s.preBufferDuration = d }
+}
+
+// WithMaxEventDuration overrides the default max event recording duration (1 minute).
+func WithMaxEventDuration(d time.Duration) Option {
+	return func(s *segmenter) { s.maxEventDuration = d }
+}
+
+// WithDirPermissions overrides the default directory permissions (0750).
+func WithDirPermissions(perm os.FileMode) Option {
+	return func(s *segmenter) { s.dirPerm = perm }
 }
 
 type segmenter struct {
@@ -129,6 +152,10 @@ type segmenter struct {
 	rmSrcCh           chan string
 	addSrcCh          chan string
 
+	pathFunc          PathFunc
+	preBufferDuration time.Duration
+	maxEventDuration  time.Duration
+	dirPerm           os.FileMode
 	// Per-URL stream state management
 	sources   []string                // ordered list of registered URLs
 	streams   map[string]*streamState // map of URL to stream state
@@ -209,16 +236,30 @@ func New(dest string, segSize time.Duration, recordMode gomedia.RecordMode, chan
 		sources:           []string{},
 		streams:           make(map[string]*streamState),
 		streamsMu:         sync.RWMutex{},
+		pathFunc: func(startTime time.Time, streamIdx int) (string, string) {
+			dir := fmt.Sprintf("%d/%d/%d/", startTime.Year(), startTime.Month(), startTime.Day())
+			name := fmt.Sprintf("%d_%s.mp4", streamIdx, startTime.Format("2006-01-02T15:04:05"))
+			return dir, name
+		},
 	}
 	for _, o := range opts {
 		o(newArch)
+	}
+	if newArch.preBufferDuration == 0 {
+		newArch.preBufferDuration = newArch.targetDuration / 2
+	}
+	if newArch.maxEventDuration == 0 {
+		newArch.maxEventDuration = time.Minute
+	}
+	if newArch.dirPerm == 0 {
+		newArch.dirPerm = 0o750
 	}
 	newArch.AsyncManager = lifecycle.NewFailSafeAsyncManager(newArch, newArch.log)
 	return newArch
 }
 
 // createFile creates a file ensuring parent directories exist
-func createFile(path string) (*os.File, error) {
+func (s *segmenter) createFile(path string) (*os.File, error) {
 	f, err := os.Create(path)
 	if err == nil {
 		return f, nil
@@ -230,7 +271,7 @@ func createFile(path string) (*os.File, error) {
 
 	// Create parent directory
 	dir := filepath.Dir(path)
-	if err = os.MkdirAll(dir, os.ModePerm); err != nil { //nolint:mnd
+	if err = os.MkdirAll(dir, s.dirPerm); err != nil {
 		return nil, err
 	}
 
@@ -250,8 +291,7 @@ func (s *segmenter) openNewSegment(url string, stream *streamState, startTime ti
 		return errors.New("URL not found in sources")
 	}
 
-	folder := fmt.Sprintf("%d/%d/%d/", startTime.Year(), startTime.Month(), startTime.Day())
-	name := fmt.Sprintf("%d_%s.mp4", streamIdx, startTime.Format("2006-01-02T15:04:05"))
+	folder, name := s.pathFunc(startTime, streamIdx)
 
 	stream.activeFile = &activeFile{
 		packets:   make([]gomedia.Packet, 0),
@@ -280,7 +320,7 @@ func (s *segmenter) flushSegment(stream *streamState, stopChan <-chan struct{}) 
 
 	filename := fmt.Sprintf("%s%s%s", s.dest, af.folder, af.name)
 
-	f, err := createFile(filename)
+	f, err := s.createFile(filename)
 	if err != nil {
 		for _, p := range af.packets {
 			p.Release()
@@ -440,7 +480,7 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 			// Create new stream state
 			stream = &streamState{
 				activeFile:   nil,
-				ringBuf:      newRingBuffer(s.targetDuration / 2), //nolint:mnd
+				ringBuf:      newRingBuffer(s.preBufferDuration),
 				seenKeyframe: false,
 				codecPar:     gomedia.CodecParametersPair{SourceID: url, AudioCodecParameters: nil, VideoCodecParameters: nil},
 			}
@@ -553,7 +593,7 @@ func (s *segmenter) handleEventMode(url string, stream *streamState, stopCh <-ch
 func (s *segmenter) handleEventModeActiveFile(url string, stream *streamState, stopCh <-chan struct{}, pkt gomedia.Packet, isKeyframe bool) error {
 	// Check if we should close the file (event saved and enough time passed)
 	shouldClose := isKeyframe && s.eventSaved &&
-		(time.Since(s.lastEvent) >= s.targetDuration/2 || stream.activeFile.duration >= time.Minute) //nolint:mnd
+		(time.Since(s.lastEvent) >= s.targetDuration/2 || stream.activeFile.duration >= s.maxEventDuration)
 
 	if shouldClose {
 		if err := s.flushSegment(stream, stopCh); err != nil {

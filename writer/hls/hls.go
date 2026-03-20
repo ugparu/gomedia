@@ -34,6 +34,11 @@ func WithMediaName(name string) Option {
 	return func(h *hlsWriter) { h.mediaName = name }
 }
 
+// WithVersion overrides the default HLS protocol version (7).
+func WithVersion(v int) Option {
+	return func(h *hlsWriter) { h.version = v }
+}
+
 // hlsWriter is a struct representing an HLS (HTTP Live Streaming) writer.
 type hlsWriter struct {
 	lifecycle.AsyncManager[*hlsWriter]
@@ -55,6 +60,7 @@ type hlsWriter struct {
 	indexName    string
 	mediaName    string
 	partHoldBack float64
+	version      int
 }
 
 func New(id uint64, segCnt uint8, segDur time.Duration, chanSize int, partHoldBack float64, opts ...Option) gomedia.HLSStreamer {
@@ -78,6 +84,7 @@ func New(id uint64, segCnt uint8, segDur time.Duration, chanSize int, partHoldBa
 		indexName:    "index.m3u8",
 		mediaName:    "media",
 		partHoldBack: partHoldBack,
+		version:      7,
 	}
 
 	for _, o := range opts {
@@ -131,7 +138,7 @@ func (hlsw *hlsWriter) checkCodPar(url string, codecPar gomedia.CodecParameters)
 			return
 		}
 	} else {
-		mux = hls.NewHLSMuxer(hlsw.segmentDuration, hlsw.segmentCount, hlsw.partHoldBack, hlsw.log, hls.WithMediaName(hlsw.mediaName))
+		mux = hls.NewHLSMuxer(hlsw.segmentDuration, hlsw.segmentCount, hlsw.partHoldBack, hlsw.log, hls.WithMediaName(hlsw.mediaName), hls.WithVersion(hlsw.version))
 		if err = mux.Mux(*par); err != nil {
 			return
 		}
@@ -179,7 +186,7 @@ func (hlsw *hlsWriter) recalcManifest() (err error) {
 	}
 
 	var builder strings.Builder
-	if _, err = builder.WriteString("#EXTM3U\n#EXT-X-VERSION:7\n"); err != nil {
+	if _, err = builder.WriteString(fmt.Sprintf("#EXTM3U\n#EXT-X-VERSION:%d\n", hlsw.version)); err != nil {
 		return
 	}
 	hlsw.mu.Lock()

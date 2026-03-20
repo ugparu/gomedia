@@ -42,6 +42,7 @@ type segment struct {
 	discontinuity      bool                        // True if this segment starts after a codec change.
 	initVersion        int                         // Init segment version this segment belongs to.
 	mediaName          string                      // Base filename used in manifest URIs (e.g. "media").
+	blockingTimeout    time.Duration               // Timeout for blocking fragment requests.
 	log                logger.Logger
 }
 
@@ -52,6 +53,7 @@ func newSegment(
 	targetDuration time.Duration,
 	codecPars gomedia.CodecParametersPair,
 	mediaName string,
+	blockingTimeout time.Duration,
 	log logger.Logger,
 ) *segment {
 	seg := &segment{
@@ -67,6 +69,7 @@ func newSegment(
 		curFragment:        nil,
 		manifestEntry:      "",
 		mediaName:          mediaName,
+		blockingTimeout:    blockingTimeout,
 		cachedMp4:          nil,
 		log:                log,
 	}
@@ -178,8 +181,7 @@ func (element *segment) getFragment(ctx context.Context, id uint8) buffer.Pooled
 		return nil
 	}
 
-	const timeout = time.Second * 3
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	ctx, cancel := context.WithTimeout(ctx, element.blockingTimeout)
 	defer cancel()
 
 	frag := element.fragments[id]

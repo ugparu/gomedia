@@ -1,10 +1,8 @@
 package webrtc
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/ugparu/gomedia"
@@ -27,6 +25,7 @@ type sortedStreams struct {
 	pendingPeers   map[*peerTrack]bool // Peers waiting for a stream (when last stream was removed)
 	targetDuration time.Duration
 	videoCodecType gomedia.CodecType
+	signaling      SignalingHandler
 }
 
 // Exists checks if a stream URL exists in the sortedStreams.
@@ -395,27 +394,11 @@ func (ss *sortedStreams) moveTrackToStream(str *stream, pu *peerURL, peerBuf []g
 	// Add to current stream
 	str.tracks[pu.peerTrack] = true
 
-	// Send setStreamUrl notification with token (if any) after moving the track
+	// Send stream moved notification with token (if any) after moving the track
 	if pu.peerTrack != nil && pu.peerTrack.DataChannel != nil {
-		var bytes []byte
-		var err error
-		if pu.Token == "" {
-			reqMsg := &dataChanReq{
-				Token:   pu.Token,
-				Command: "setStreamUrl",
-				Message: pu.URL,
-			}
-			bytes, err = json.Marshal(reqMsg)
-		} else {
-			respMsg := &resp{
-				Token:   pu.Token,
-				Status:  http.StatusOK,
-				Message: "Ok",
-			}
-			bytes, err = json.Marshal(respMsg)
-		}
+		bytes, err := ss.signaling.BuildStreamMoved(pu.Token, pu.URL)
 		if err != nil {
-			ss.log.Errorf(ss, "Failed to marshal setStreamUrl notification: %v", err)
+			ss.log.Errorf(ss, "Failed to marshal stream moved notification: %v", err)
 			return
 		}
 
@@ -425,9 +408,9 @@ func (ss *sortedStreams) moveTrackToStream(str *stream, pu *peerURL, peerBuf []g
 			// Peer already closed
 			return
 		default:
-			ss.log.Infof(ss, "Sending setStreamUrl message %s", bytes)
+			ss.log.Infof(ss, "Sending stream moved message %s", bytes)
 			if err = pu.peerTrack.DataChannel.Send(bytes); err != nil {
-				ss.log.Errorf(ss, "Failed to send setStreamUrl notification: %v", err)
+				ss.log.Errorf(ss, "Failed to send stream moved notification: %v", err)
 			}
 		}
 	}
@@ -493,13 +476,7 @@ func (ss *sortedStreams) seedTrack(str *stream, peer *peerTrack) error {
 
 	str.tracks[peer] = true
 
-	startReq := &dataChanReq{
-		Token:   "",
-		Command: "startStream",
-		Message: "",
-	}
-
-	bytes, err := json.Marshal(startReq)
+	bytes, err := ss.signaling.BuildStreamStarted()
 	if err != nil {
 		return err
 	}

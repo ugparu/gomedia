@@ -20,8 +20,7 @@ import (
 // Constants defining fragment and part parameters.
 const (
 	fragmentDuration = time.Millisecond * 495
-	partTarget       = .5
-	maxTS            = time.Hour
+	maxTS            = time.Hour // default max timestamp before wrap-around
 )
 
 type segments struct {
@@ -73,6 +72,26 @@ func WithMediaName(name string) MuxerOption {
 	return func(m *muxer) { m.mediaName = name }
 }
 
+// WithFragmentDuration overrides the default fragment duration (495ms) used for LL-HLS partial segments.
+func WithFragmentDuration(d time.Duration) MuxerOption {
+	return func(m *muxer) { m.fragmentDuration = d }
+}
+
+// WithMaxTimestamp overrides the default max timestamp (1 hour) before wrap-around.
+func WithMaxTimestamp(d time.Duration) MuxerOption {
+	return func(m *muxer) { m.maxTS = d }
+}
+
+// WithBlockingTimeout overrides the default timeout (3s) for blocking HLS requests.
+func WithBlockingTimeout(d time.Duration) MuxerOption {
+	return func(m *muxer) { m.blockingTimeout = d }
+}
+
+// WithVersion overrides the default HLS protocol version (7).
+func WithVersion(v int) MuxerOption {
+	return func(m *muxer) { m.version = v }
+}
+
 // muxer is an implementation of the HLS interface.
 type muxer struct {
 	lifecycle.Manager[*muxer] // Embedding lifecycle.Manager to manage lifecycle functions.
@@ -83,6 +102,9 @@ type muxer struct {
 	discontinuitySequence int64                               // Discontinuity sequence number (incremented when a discontinuity segment is evicted).
 	segmentDuration       time.Duration                       // Target duration for each segment.
 	fragmentDuration      time.Duration                       // Target duration for each fragment.
+	maxTS                 time.Duration                       // Max timestamp before wrap-around.
+	blockingTimeout       time.Duration                       // Timeout for blocking HLS requests.
+	version               int                                 // HLS protocol version.
 	manifest              atomic.Value                        // Stores the HLS manifest (string).
 	indexChan             chan struct{}                       // Channel for signaling index changes.
 	header                string                              // Initial part of the HLS playlist.
@@ -108,25 +130,29 @@ func NewHLSMuxer(segmentDuration time.Duration, segmentCount uint8, partHoldBack
 		mediaSequence:    0,
 		segmentDuration:  segmentDuration,
 		fragmentDuration: fragmentDuration,
+		maxTS:            maxTS,
+		blockingTimeout:  time.Second * 3,
+		version:          7,
 		manifest:         atomic.Value{}, //nolint:govet // initialized with Store("") below
 		indexChan:        make(chan struct{}),
-		header: fmt.Sprintf(`#EXTM3U
-#EXT-X-VERSION:7
-#EXT-X-TARGETDURATION:%d
-#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,PART-HOLD-BACK=%.5f
-#EXT-X-PART-INF:PART-TARGET=%.5f
-#EXT-X-INDEPENDENT-SEGMENTS
-`, int(math.Ceil(segmentDuration.Seconds())), partHoldBack, partTarget),
-		codecPars:      gomedia.CodecParametersPair{AudioCodecParameters: nil, VideoCodecParameters: nil, SourceID: ""},
-		initVersion:    0,
-		initCache:      make(map[int]gomedia.CodecParametersPair),
-		initBytesCache: make(map[int][]byte),
-		mediaName:      "media",
+		codecPars:        gomedia.CodecParametersPair{AudioCodecParameters: nil, VideoCodecParameters: nil, SourceID: ""},
+		initVersion:      0,
+		initCache:        make(map[int]gomedia.CodecParametersPair),
+		initBytesCache:   make(map[int][]byte),
+		mediaName:        "media",
 	}
 	newHLS.manifest.Store("")
 	for _, o := range opts {
 		o(newHLS)
 	}
+	partTarget := newHLS.fragmentDuration.Seconds() * 1.01
+	newHLS.header = fmt.Sprintf(`#EXTM3U
+#EXT-X-VERSION:%d
+#EXT-X-TARGETDURATION:%d
+#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,PART-HOLD-BACK=%.5f
+#EXT-X-PART-INF:PART-TARGET=%.5f
+#EXT-X-INDEPENDENT-SEGMENTS
+`, newHLS.version, int(math.Ceil(segmentDuration.Seconds())), partHoldBack, partTarget)
 	newHLS.Manager = lifecycle.NewDefaultManager(newHLS, log)
 	return newHLS
 }
@@ -148,7 +174,7 @@ func (mxr *muxer) Mux(codecPars gomedia.CodecParametersPair) (err error) {
 		mxr.initVersion = 0
 		mxr.initCache[0] = codecPars
 		// Create a new segment and set it as the current segment.
-		newSeg := newSegment(0, mxr.fragmentDuration, mxr.segmentDuration, codecPars, mxr.mediaName, mxr.log)
+		newSeg := newSegment(0, mxr.fragmentDuration, mxr.segmentDuration, codecPars, mxr.mediaName, mxr.blockingTimeout, mxr.log)
 		newSeg.initVersion = mxr.initVersion
 		mxr.addSegment(newSeg)
 
@@ -195,7 +221,7 @@ func (mxr *muxer) UpdateCodecParameters(codecPars gomedia.CodecParametersPair) e
 	mxr.initMu.Unlock()
 
 	newSegID := curSeg.id + 1
-	newSeg := newSegment(newSegID, mxr.fragmentDuration, mxr.segmentDuration, codecPars, mxr.mediaName, mxr.log)
+	newSeg := newSegment(newSegID, mxr.fragmentDuration, mxr.segmentDuration, codecPars, mxr.mediaName, mxr.blockingTimeout, mxr.log)
 	newSeg.discontinuity = true
 	newSeg.initVersion = initVersion
 	mxr.addSegment(newSeg)
@@ -260,7 +286,7 @@ func (mxr *muxer) WritePacket(inpPkt gomedia.Packet) (err error) {
 		return &utils.NilPacketError{}
 	}
 
-	inpPkt.SetTimestamp(inpPkt.Timestamp() % maxTS)
+	inpPkt.SetTimestamp(inpPkt.Timestamp() % mxr.maxTS)
 
 	if err = mxr.getCurSegment().writePacket(inpPkt); err != nil {
 		return err
@@ -270,7 +296,7 @@ func (mxr *muxer) WritePacket(inpPkt gomedia.Packet) (err error) {
 	case <-mxr.getCurSegment().finished:
 		// The current segment has finished, create a new one and update the segment list.
 		newSegID := mxr.getCurSegment().id + 1
-		newSeg := newSegment(newSegID, mxr.fragmentDuration, mxr.segmentDuration, mxr.codecPars, mxr.mediaName, mxr.log)
+		newSeg := newSegment(newSegID, mxr.fragmentDuration, mxr.segmentDuration, mxr.codecPars, mxr.mediaName, mxr.blockingTimeout, mxr.log)
 		newSeg.initVersion = mxr.initVersion
 		mxr.addSegment(newSeg)
 		mxr.evictOldSegments()
@@ -338,8 +364,7 @@ func (mxr *muxer) GetIndexM3u8(ctx context.Context, needSeg int64, needPart int8
 		return "", waitErr
 	}
 
-	const timeout = time.Second * 3
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	ctx, cancel := context.WithTimeout(ctx, mxr.blockingTimeout)
 	defer cancel()
 
 	select {
