@@ -381,6 +381,7 @@ func (dmx *innerRTSPDemuxer) processRTSPPacket(header [headerSize]byte) (err err
 			if err = dmx.client.Read(dmx.readBuffer.Data()); err != nil {
 				return err
 			}
+			break
 		}
 	}
 	return nil

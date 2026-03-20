@@ -128,11 +128,23 @@ func (rgb *RGB) SubImage(r image.Rectangle) image.Image {
 
 // Clone returns a new RGB image that is a copy of the original RGB image.
 func (rgb *RGB) Clone() *RGB {
-	newSlice := make([]byte, bytesPerPix*rgb.Bounds().Dx()*rgb.Bounds().Dy())
-	copy(newSlice, rgb.Pix)
+	w := rgb.Bounds().Dx()
+	h := rgb.Bounds().Dy()
+	newStride := w * bytesPerPix
+	newSlice := make([]byte, newStride*h)
+	if newStride == rgb.Stride {
+		copy(newSlice, rgb.Pix)
+	} else {
+		// SubImage has a larger stride than its width — copy row by row.
+		for y := range h {
+			srcOff := y * rgb.Stride
+			dstOff := y * newStride
+			copy(newSlice[dstOff:dstOff+newStride], rgb.Pix[srcOff:srcOff+newStride])
+		}
+	}
 	return &RGB{
 		Pix:    newSlice,
-		Stride: rgb.Stride,
+		Stride: newStride,
 		Rect:   rgb.Rect,
 	}
 }
