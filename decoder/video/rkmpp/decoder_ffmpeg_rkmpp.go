@@ -8,7 +8,6 @@ package rkmpp
 //#include "decoder_rkmpp_native.h"
 import "C"
 import (
-	"image"
 	"unsafe"
 
 	"github.com/ugparu/gomedia"
@@ -25,6 +24,7 @@ type ffmpegRKMPPDecoder struct {
 	dcd         *C.NativeRkmppDecoder
 	headersSent bool
 	log         logger.Logger
+	pool        *rgb.FramePool
 }
 
 func NewFFmpegRKMPPDecoder() decoder.InnerVideoDecoder {
@@ -58,6 +58,8 @@ func (dcd *ffmpegRKMPPDecoder) Init(codecPar gomedia.VideoCodecParameters) (err 
 	if ret := C.init_rkmpp_decoder_native(dcd.dcd, codecID, width, height); ret < 0 {
 		return video.NewFFmpegError("can not init native rkmpp decoder", int(ret))
 	}
+
+	dcd.pool = rgb.NewFramePool(int(width), int(height))
 
 	return nil
 }
@@ -228,7 +230,7 @@ func (dcd *ffmpegRKMPPDecoder) Feed(pkt gomedia.VideoPacket) (err error) {
 	return nil
 }
 
-func (dcd *ffmpegRKMPPDecoder) Decode(pkt gomedia.VideoPacket) (image.Image, error) {
+func (dcd *ffmpegRKMPPDecoder) Decode(pkt gomedia.VideoPacket) (rgb.ReleasableImage, error) {
 	// Перед первым обычным пакетом отправляем VPS/SPS/PPS
 	if err := dcd.sendCodecHeaders(pkt.CodecParameters()); err != nil {
 		return nil, err
@@ -259,10 +261,7 @@ func (dcd *ffmpegRKMPPDecoder) Decode(pkt gomedia.VideoPacket) (image.Image, err
 		}
 	}
 
-	width := int(pkt.CodecParameters().Width())
-	height := int(pkt.CodecParameters().Height())
-
-	img := rgb.NewRGB(image.Rect(0, 0, width, height))
+	img := dcd.pool.Get()
 
 	if len(img.Pix) == 0 {
 		return nil, video.NewFFmpegError("empty image buffer", -1)

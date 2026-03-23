@@ -10,10 +10,10 @@
 package mocks
 
 import (
-	image "image"
 	reflect "reflect"
 
 	gomedia "github.com/ugparu/gomedia"
+	rgb "github.com/ugparu/gomedia/frame/rgb"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -54,10 +54,10 @@ func (mr *MockInnerVideoDecoderMockRecorder) Close() *gomock.Call {
 }
 
 // Decode mocks base method.
-func (m *MockInnerVideoDecoder) Decode(pkt gomedia.VideoPacket) (image.Image, error) {
+func (m *MockInnerVideoDecoder) Decode(pkt gomedia.VideoPacket) (rgb.ReleasableImage, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Decode", pkt)
-	ret0, _ := ret[0].(image.Image)
+	ret0, _ := ret[0].(rgb.ReleasableImage)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }

@@ -7,7 +7,6 @@ package cuda
 import "C"
 import (
 	"errors"
-	"image"
 	"unsafe"
 
 	"github.com/ugparu/gomedia"
@@ -17,7 +16,8 @@ import (
 )
 
 type ffmpegCUDADecoder struct {
-	dcd *C.cudaDecoder
+	dcd  *C.cudaDecoder
+	pool *rgb.FramePool
 }
 
 func NewFFmpegCUDADecoder() decoder.InnerVideoDecoder {
@@ -49,6 +49,10 @@ func (dcd *ffmpegCUDADecoder) Init(codecPar gomedia.VideoCodecParameters) (err e
 		return video.NewFFmpegError("can not init cuda decoder", int(ret))
 	}
 
+	w := int(dcd.dcd.frame_width)
+	h := int(dcd.dcd.frame_height)
+	dcd.pool = rgb.NewFramePool(w, h)
+
 	return
 }
 
@@ -64,12 +68,12 @@ func (dcd *ffmpegCUDADecoder) Feed(pkt gomedia.VideoPacket) error {
 	return nil
 }
 
-func (dcd *ffmpegCUDADecoder) Decode(pkt gomedia.VideoPacket) (image.Image, error) {
+func (dcd *ffmpegCUDADecoder) Decode(pkt gomedia.VideoPacket) (rgb.ReleasableImage, error) {
 	if err := video.PacketToFFmpeg(pkt, unsafe.Pointer(dcd.dcd.packet)); err != nil {
 		return nil, err
 	}
 
-	img := rgb.NewRGB(image.Rect(0, 0, int(dcd.dcd.frame_width), int(dcd.dcd.frame_height)))
+	img := dcd.pool.Get()
 	ret := C.decode_cuda_packet(dcd.dcd, (*C.uint8_t)(unsafe.Pointer(&img.Pix[0])))
 	if ret != 0 {
 		if ret == -999 {

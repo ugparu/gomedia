@@ -5,11 +5,11 @@ package decoder
 import (
 	"errors"
 	"fmt"
-	"image"
 	"runtime"
 	"time"
 
 	"github.com/ugparu/gomedia"
+	"github.com/ugparu/gomedia/frame/rgb"
 	"github.com/ugparu/gomedia/utils/lifecycle"
 	"github.com/ugparu/gomedia/utils/logger"
 )
@@ -19,7 +19,7 @@ var ErrNeedMoreData = errors.New("need more data to decode frame")
 type InnerVideoDecoder interface {
 	Init(codecPar gomedia.VideoCodecParameters) (err error)
 	Feed(pkt gomedia.VideoPacket) error
-	Decode(pkt gomedia.VideoPacket) (image.Image, error)
+	Decode(pkt gomedia.VideoPacket) (rgb.ReleasableImage, error)
 	Close()
 }
 
@@ -29,7 +29,7 @@ type videoDecoder struct {
 	InnerVideoDecoder
 	factory       map[gomedia.CodecType]func() InnerVideoDecoder
 	inpPktCh      chan gomedia.VideoPacket     // Channel for receiving multimedia packets.
-	outFrmCh      chan image.Image             // Channel for sending decoded video frames.
+	outFrmCh      chan rgb.ReleasableImage      // Channel for sending decoded video frames.
 	codecPar      gomedia.VideoCodecParameters // Video codec parameters.
 	fpsChan       chan int                     // Channel for sending frames per second.
 	targetFPS     int                          // Target frames per second.
@@ -57,7 +57,7 @@ func NewVideo(chanSize int, fps int, factory map[gomedia.CodecType]func() InnerV
 		InnerVideoDecoder: nil,
 		factory:           factory,
 		inpPktCh:          make(chan gomedia.VideoPacket, chanSize),
-		outFrmCh:          make(chan image.Image, chanSize),
+		outFrmCh:          make(chan rgb.ReleasableImage, chanSize),
 		codecPar:          nil,
 		fpsChan:           make(chan int, chanSize),
 		targetFPS:         fps,
@@ -107,7 +107,7 @@ func (dec *videoDecoder) processPacket(inpPkt gomedia.VideoPacket, stopCh <-chan
 		return dec.InnerVideoDecoder.Feed(inpPkt)
 	}
 
-	var img image.Image
+	var img rgb.ReleasableImage
 	if img, err = dec.InnerVideoDecoder.Decode(inpPkt); err != nil {
 		if err.Error() == ErrNeedMoreData.Error() {
 			return nil
@@ -258,7 +258,7 @@ func (dec *videoDecoder) Packets() chan<- gomedia.VideoPacket {
 	return dec.inpPktCh
 }
 
-func (dec *videoDecoder) Images() <-chan image.Image {
+func (dec *videoDecoder) Images() <-chan rgb.ReleasableImage {
 	return dec.outFrmCh
 }
 

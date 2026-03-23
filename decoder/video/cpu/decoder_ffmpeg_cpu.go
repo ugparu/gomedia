@@ -4,7 +4,6 @@ package cpu
 //#include "decoder_ffmpeg_cpu.h"
 import "C"
 import (
-	"image"
 	"unsafe"
 
 	"github.com/ugparu/gomedia"
@@ -14,7 +13,8 @@ import (
 )
 
 type ffmpegCPUDecoder struct {
-	dcd *C.cpuDecoder
+	dcd  *C.cpuDecoder
+	pool *rgb.FramePool
 }
 
 func NewFFmpegCPUDecoder() decoder.InnerVideoDecoder {
@@ -36,6 +36,10 @@ func (dcd *ffmpegCPUDecoder) Init(codecPar gomedia.VideoCodecParameters) (err er
 		return video.NewFFmpegError("can not init cpu decoder", int(ret))
 	}
 
+	w := int(dcd.dcd.rgb_frame.width)
+	h := int(dcd.dcd.rgb_frame.height)
+	dcd.pool = rgb.NewFramePool(w, h)
+
 	return
 }
 
@@ -51,12 +55,12 @@ func (dcd *ffmpegCPUDecoder) Feed(pkt gomedia.VideoPacket) (err error) {
 	return nil
 }
 
-func (dcd *ffmpegCPUDecoder) Decode(pkt gomedia.VideoPacket) (image.Image, error) {
+func (dcd *ffmpegCPUDecoder) Decode(pkt gomedia.VideoPacket) (rgb.ReleasableImage, error) {
 	if err := video.PacketToFFmpeg(pkt, unsafe.Pointer(dcd.dcd.packet)); err != nil {
 		return nil, err
 	}
 
-	img := rgb.NewRGB(image.Rect(0, 0, int(dcd.dcd.rgb_frame.width), int(dcd.dcd.rgb_frame.height)))
+	img := dcd.pool.Get()
 	ret := C.decode_cpu_packet(dcd.dcd, (*C.uint8_t)(unsafe.Pointer(&img.Pix[0])))
 	if ret != 0 {
 		if ret > 0 {

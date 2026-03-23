@@ -4,8 +4,9 @@ package gomedia
 
 import (
 	"context"
-	"image"
 	"time"
+
+	"github.com/ugparu/gomedia/frame/rgb"
 )
 
 // CodecParameters defines the interface for multimedia codec configuration.
@@ -123,7 +124,7 @@ type Decoder[P Packet] interface {
 // VideoDecoder specializes Decoder for video packet processing.
 type VideoDecoder interface {
 	Decoder[VideoPacket]        // Inherits Decoder methods for VideoPacket.
-	Images() <-chan image.Image // Channel providing decoded video frames.
+	Images() <-chan rgb.ReleasableImage // Channel providing decoded video frames.
 	FPS() chan<- int            // Channel to set frames per second.
 }
 

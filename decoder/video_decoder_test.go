@@ -12,6 +12,7 @@ import (
 
 	"github.com/ugparu/gomedia"
 	decoder "github.com/ugparu/gomedia/decoder"
+	"github.com/ugparu/gomedia/frame/rgb"
 	"github.com/ugparu/gomedia/mocks"
 )
 
@@ -49,8 +50,8 @@ func mockNonKeyPkt(ctrl *gomock.Controller, par gomedia.VideoCodecParameters) *m
 	return pkt
 }
 
-func drainImages(d gomedia.VideoDecoder) []image.Image {
-	var out []image.Image
+func drainImages(d gomedia.VideoDecoder) []rgb.ReleasableImage {
+	var out []rgb.ReleasableImage
 	for img := range d.Images() {
 		out = append(out, img)
 	}
@@ -180,7 +181,7 @@ func TestStep_Video_KeyFrame_ProducesImage(t *testing.T) {
 	ctrl := gomock.NewController(t)
 
 	par := mockVideoCodecParams(ctrl, gomedia.H264)
-	img := image.NewRGBA(image.Rect(0, 0, 10, 10))
+	img := rgb.NewRGB(image.Rect(0, 0, 10, 10))
 
 	inner := mocks.NewMockInnerVideoDecoder(ctrl)
 	inner.EXPECT().Init(par).Return(nil)
@@ -353,7 +354,7 @@ func TestStep_Video_FPSThrottle_FeedCalled(t *testing.T) {
 	ctrl := gomock.NewController(t)
 
 	par := mockVideoCodecParams(ctrl, gomedia.H264)
-	img := image.NewRGBA(image.Rect(0, 0, 10, 10))
+	img := rgb.NewRGB(image.Rect(0, 0, 10, 10))
 
 	inner := mocks.NewMockInnerVideoDecoder(ctrl)
 	inner.EXPECT().Init(par).Return(nil)
@@ -420,7 +421,7 @@ func TestStep_Video_FPS_ZeroStopsDecoder(t *testing.T) {
 	ctrl := gomock.NewController(t)
 
 	par := mockVideoCodecParams(ctrl, gomedia.H264)
-	img := image.NewRGBA(image.Rect(0, 0, 10, 10))
+	img := rgb.NewRGB(image.Rect(0, 0, 10, 10))
 
 	inner := mocks.NewMockInnerVideoDecoder(ctrl)
 	inner.EXPECT().Init(par).Return(nil)
@@ -454,7 +455,7 @@ func TestStep_Video_MultipleKeyframes(t *testing.T) {
 	ctrl := gomock.NewController(t)
 
 	par := mockVideoCodecParams(ctrl, gomedia.H264)
-	img := image.NewRGBA(image.Rect(0, 0, 10, 10))
+	img := rgb.NewRGB(image.Rect(0, 0, 10, 10))
 
 	inner := mocks.NewMockInnerVideoDecoder(ctrl)
 	inner.EXPECT().Init(par).Return(nil)

@@ -4,10 +4,10 @@ package rkmpp
 
 import (
 	"errors"
-	"image"
 
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/decoder"
+	"github.com/ugparu/gomedia/frame/rgb"
 )
 
 var errRKMPPNotSupported = errors.New("rkmpp decoder is only supported on linux/arm64")
@@ -28,7 +28,7 @@ func (dcd *ffmpegRKMPPDecoder) Feed(pkt gomedia.VideoPacket) error {
 	return errRKMPPNotSupported
 }
 
-func (dcd *ffmpegRKMPPDecoder) Decode(pkt gomedia.VideoPacket) (image.Image, error) {
+func (dcd *ffmpegRKMPPDecoder) Decode(pkt gomedia.VideoPacket) (rgb.ReleasableImage, error) {
 	return nil, errRKMPPNotSupported
 }
 

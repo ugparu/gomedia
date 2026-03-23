@@ -11,11 +11,11 @@ package mocks
 
 import (
 	context "context"
-	image "image"
 	reflect "reflect"
 	time "time"
 
 	gomedia "github.com/ugparu/gomedia"
+	rgb "github.com/ugparu/gomedia/frame/rgb"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -1558,10 +1558,10 @@ func (mr *MockVideoDecoderMockRecorder) FPS() *gomock.Call {
 }
 
 // Images mocks base method.
-func (m *MockVideoDecoder) Images() <-chan image.Image {
+func (m *MockVideoDecoder) Images() <-chan rgb.ReleasableImage {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Images")
-	ret0, _ := ret[0].(<-chan image.Image)
+	ret0, _ := ret[0].(<-chan rgb.ReleasableImage)
 	return ret0
 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"sync"
 )
 
 const (
@@ -43,12 +44,72 @@ func (Model) Convert(c color.Color) color.Color {
 	return Color{byte(r >> byteSize), byte(g >> byteSize), byte(b >> byteSize)}
 }
 
+// ReleasableImage extends image.Image with a Release method for pool-backed
+// frames. Consumers must call Release exactly once when done with the frame.
+type ReleasableImage interface {
+	image.Image
+	Release()
+	// GetRGB returns the underlying *RGB for direct pixel access, avoiding
+	// the per-pixel interface boxing caused by At().
+	GetRGB() *RGB
+}
+
+// FramePool is a resolution-specific pool for RGB frames. Create one per
+// decoder instance at Init() time.
+type FramePool struct {
+	pool sync.Pool
+	size int // expected Pix length (bytesPerPix * w * h)
+	w, h int
+}
+
+// NewFramePool creates a frame pool for the given resolution.
+func NewFramePool(w, h int) *FramePool {
+	size := bytesPerPix * w * h
+	return &FramePool{
+		pool: sync.Pool{New: func() any {
+			return &RGB{Pix: make([]byte, size)}
+		}},
+		size: size,
+		w:    w,
+		h:    h,
+	}
+}
+
+// Get returns a pooled RGB frame with Pix, Stride, and Rect pre-set.
+func (p *FramePool) Get() *RGB {
+	img := p.pool.Get().(*RGB)
+	img.Stride = p.w * bytesPerPix
+	img.Rect = image.Rect(0, 0, p.w, p.h)
+	img.pool = p
+	return img
+}
+
+// Put returns a frame to the pool. Called by RGB.Release().
+func (p *FramePool) Put(img *RGB) {
+	img.pool = nil
+	p.pool.Put(img)
+}
+
 // RGB represents an RGB image.
 type RGB struct {
 	Pix    []byte
 	Stride int
 	Rect   image.Rectangle
+	pool   *FramePool // nil = heap-allocated (not pooled)
 }
+
+// Release returns the frame to its pool. No-op for heap-allocated frames.
+func (rgb *RGB) Release() {
+	if rgb == nil {
+		return
+	}
+	if rgb.pool != nil {
+		rgb.pool.Put(rgb)
+	}
+}
+
+// GetRGB returns the underlying *RGB for direct pixel access.
+func (rgb *RGB) GetRGB() *RGB { return rgb }
 
 // NewRGB creates a new RGB image with the specified rectangle.
 func NewRGB(r image.Rectangle) *RGB {
@@ -77,6 +138,16 @@ func (rgb *RGB) PixOffset(x, y int) int {
 // Opaque reports whether the RGB image is opaque.
 func (*RGB) Opaque() bool {
 	return true
+}
+
+// RGBAt returns the RGB color at (x, y) without interface boxing.
+func (rgb *RGB) RGBAt(x, y int) Color {
+	if !(image.Point{x, y}.In(rgb.Rect)) {
+		return Color{}
+	}
+	i := rgb.PixOffset(x, y)
+	s := rgb.Pix[i : i+3 : i+3]
+	return Color{s[0], s[1], s[2]}
 }
 
 // At returns the color at the specified pixel coordinates (x, y).
