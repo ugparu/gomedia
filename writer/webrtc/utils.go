@@ -83,13 +83,14 @@ func writeVideoPacketsToPeer(pt *peerTrack,
 	vt *webrtc.TrackLocalStaticSample, vBuf buffer.PooledBuffer, delay time.Duration) {
 	defer vBuf.Release()
 	last := time.Now()
+	naluBuf := make([][]byte, 0, 8) //nolint:mnd // typical frame has 1-5 NALUs
 	processPkt := func(pkt gomedia.VideoPacket) {
 		defer pkt.Release()
 
 		// Split NALUs and calculate total size
 		var nalus [][]byte
 		var nalusSize int
-		nalus, _ = nal.SplitNALUs(pkt.Data())
+		nalus, _ = nal.SplitNALUs(pkt.Data(), naluBuf)
 		for _, nalu := range nalus {
 			nalusSize += 4 + len(nalu) // start code (4 bytes) + nalu data
 		}

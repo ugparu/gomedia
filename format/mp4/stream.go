@@ -66,6 +66,8 @@ type Stream struct {
 	// Tracking for mmap support - where the packet data starts (after SPS/PPS/VPS for keyframes)
 	lastPacketDataOffset int64
 	lastPacketDataSize   int64
+
+	naluBuf [][]byte // Reusable buffer for SplitNALUs to avoid per-packet allocation.
 }
 
 // timeToTS converts a duration to a timestamp based on the stream's time scale.
@@ -338,7 +340,7 @@ func (s *Stream) readPacket(tm time.Duration, url string) (pkt gomedia.Packet, e
 		}
 		switch s.CodecParameters.Type() {
 		case gomedia.H264:
-			nalus, _ := nal.SplitNALUs(data)
+			nalus, _ := nal.SplitNALUs(data, s.naluBuf)
 			for _, nal := range nalus {
 				naluType := nal[0] & 0x1f //nolint: mnd
 				if naluType >= 1 && naluType <= 5 {
@@ -350,7 +352,7 @@ func (s *Stream) readPacket(tm time.Duration, url string) (pkt gomedia.Packet, e
 				}
 			}
 		case gomedia.H265:
-			nalus, _ := nal.SplitNALUs(data)
+			nalus, _ := nal.SplitNALUs(data, s.naluBuf)
 			h265Par, _ := s.CodecParameters.(*h265.CodecParameters)
 
 			for _, nal := range nalus {

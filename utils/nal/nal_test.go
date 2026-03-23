@@ -73,7 +73,7 @@ func TestSplitNALUs_AnnexB_3ByteStartCode(t *testing.T) {
 		0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x1E, // SPS
 		0x00, 0x00, 0x01, 0x68, 0xCE, 0x38, 0x80, // PPS
 	}
-	nalus, typ := SplitNALUs(b)
+	nalus, typ := SplitNALUs(b, nil)
 	assert.Equal(t, naluANNEXB, typ)
 	assert.Equal(t, 2, len(nalus))
 	assert.Equal(t, []byte{0x67, 0x42, 0x00, 0x1E}, nalus[0])
@@ -88,7 +88,7 @@ func TestSplitNALUs_AnnexB_4ByteStartCode(t *testing.T) {
 		0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xAA, 0xBB, 0xCC, // 4-byte SC + 5 bytes
 		0x00, 0x00, 0x00, 0x01, 0x68, 0xCE, 0xDD, // 4-byte SC + 3 bytes
 	}
-	nalus, typ := SplitNALUs(b)
+	nalus, typ := SplitNALUs(b, nil)
 	// Parser tries AVCC first (val4=1, reads 1-byte NALUs), which finds valid NALUs.
 	// This is correct: AVCC takes priority over ANNEXB when first 4 bytes form valid length.
 	assert.Equal(t, naluAVCC, typ)
@@ -101,7 +101,7 @@ func TestSplitNALUs_AnnexB_Mixed3And4ByteStartCodes(t *testing.T) {
 		0x00, 0x00, 0x01, 0x67, 0x42, 0xAA, // 3-byte SC + SPS
 		0x00, 0x00, 0x01, 0x68, 0xCE, // 3-byte SC + PPS
 	}
-	nalus, typ := SplitNALUs(b)
+	nalus, typ := SplitNALUs(b, nil)
 	assert.Equal(t, naluANNEXB, typ)
 	assert.Equal(t, 2, len(nalus))
 	assert.Equal(t, []byte{0x67, 0x42, 0xAA}, nalus[0])
@@ -110,7 +110,7 @@ func TestSplitNALUs_AnnexB_Mixed3And4ByteStartCodes(t *testing.T) {
 
 func TestSplitNALUs_AnnexB_SingleNALU(t *testing.T) {
 	b := []byte{0x00, 0x00, 0x01, 0x65, 0xAA, 0xBB, 0xCC}
-	nalus, typ := SplitNALUs(b)
+	nalus, typ := SplitNALUs(b, nil)
 	assert.Equal(t, naluANNEXB, typ)
 	assert.Equal(t, 1, len(nalus))
 	assert.Equal(t, []byte{0x65, 0xAA, 0xBB, 0xCC}, nalus[0])
@@ -123,7 +123,7 @@ func TestSplitNALUs_AnnexB_SingleNALU(t *testing.T) {
 func TestSplitNALUs_AVCC_SingleNALU(t *testing.T) {
 	// Length prefix (4 bytes big-endian) = 3, followed by 3 bytes of NALU data.
 	b := []byte{0x00, 0x00, 0x00, 0x03, 0x67, 0x42, 0x00}
-	nalus, typ := SplitNALUs(b)
+	nalus, typ := SplitNALUs(b, nil)
 	assert.Equal(t, naluAVCC, typ)
 	assert.Equal(t, 1, len(nalus))
 	assert.Equal(t, []byte{0x67, 0x42, 0x00}, nalus[0])
@@ -135,7 +135,7 @@ func TestSplitNALUs_AVCC_MultipleNALUs(t *testing.T) {
 		0x00, 0x00, 0x00, 0x02, 0x67, 0x42, // NALU 1 (2 bytes)
 		0x00, 0x00, 0x00, 0x03, 0x68, 0xCE, 0x38, // NALU 2 (3 bytes)
 	}
-	nalus, typ := SplitNALUs(b)
+	nalus, typ := SplitNALUs(b, nil)
 	assert.Equal(t, naluAVCC, typ)
 	assert.Equal(t, 2, len(nalus))
 	assert.Equal(t, []byte{0x67, 0x42}, nalus[0])
@@ -147,7 +147,7 @@ func TestSplitNALUs_AVCC_CorruptedStream(t *testing.T) {
 	// val4=5, len(b)=8, val4 <= len(b), so AVCC path is entered.
 	// _b = b[4:] = {0x67, 0x42, 0x00}, _val4=5 > len(_b)=3, so salvage.
 	b := []byte{0x00, 0x00, 0x00, 0x05, 0x67, 0x42, 0x00, 0xAA}
-	nalus, typ := SplitNALUs(b)
+	nalus, typ := SplitNALUs(b, nil)
 	assert.Equal(t, naluAVCC, typ)
 	assert.Equal(t, 1, len(nalus))
 	assert.Equal(t, []byte{0x67, 0x42, 0x00, 0xAA}, nalus[0])
@@ -159,7 +159,7 @@ func TestSplitNALUs_AVCC_CorruptedStream(t *testing.T) {
 
 func TestSplitNALUs_Raw_TooShort(t *testing.T) {
 	b := []byte{0x67, 0x42, 0x00}
-	nalus, typ := SplitNALUs(b)
+	nalus, typ := SplitNALUs(b, nil)
 	assert.Equal(t, naluRaw, typ)
 	assert.Equal(t, 1, len(nalus))
 	assert.Equal(t, b, nalus[0])
@@ -170,7 +170,7 @@ func TestSplitNALUs_Raw_NoStartCodeNoAVCC(t *testing.T) {
 	// First 4 bytes as uint32 = 0xDEADBEEF which is > len(b), so not AVCC.
 	// Not ANNEXB either (no 0x000001 prefix).
 	b := []byte{0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02}
-	nalus, typ := SplitNALUs(b)
+	nalus, typ := SplitNALUs(b, nil)
 	assert.Equal(t, naluRaw, typ)
 	assert.Equal(t, 1, len(nalus))
 	assert.Equal(t, b, nalus[0])
@@ -178,7 +178,7 @@ func TestSplitNALUs_Raw_NoStartCodeNoAVCC(t *testing.T) {
 
 func TestSplitNALUs_Empty(t *testing.T) {
 	b := []byte{}
-	nalus, typ := SplitNALUs(b)
+	nalus, typ := SplitNALUs(b, nil)
 	assert.Equal(t, naluRaw, typ)
 	assert.Equal(t, 1, len(nalus))
 }
@@ -193,7 +193,7 @@ func TestSplitNALUs_AnnexB_ConsecutiveStartCodes(t *testing.T) {
 		0x00, 0x00, 0x01,
 		0x00, 0x00, 0x01, 0xAA, 0xBB,
 	}
-	nalus, typ := SplitNALUs(b)
+	nalus, typ := SplitNALUs(b, nil)
 	assert.Equal(t, naluANNEXB, typ)
 	// First NALU is empty (skipped by parseANNEXB), second has data.
 	assert.Equal(t, 1, len(nalus))
@@ -206,7 +206,7 @@ func TestSplitNALUs_AVCC_ZeroLengthNALU(t *testing.T) {
 		0x00, 0x00, 0x00, 0x00, // length 0
 		0x00, 0x00, 0x00, 0x02, 0xAA, 0xBB, // length 2
 	}
-	nalus, typ := SplitNALUs(b)
+	nalus, typ := SplitNALUs(b, nil)
 	assert.Equal(t, naluAVCC, typ)
 	assert.GreaterOrEqual(t, len(nalus), 1)
 }
@@ -214,7 +214,7 @@ func TestSplitNALUs_AVCC_ZeroLengthNALU(t *testing.T) {
 func TestSplitNALUs_AVCC_ExactLength(t *testing.T) {
 	// Length exactly matches remaining bytes.
 	b := []byte{0x00, 0x00, 0x00, 0x04, 0x01, 0x02, 0x03, 0x04}
-	nalus, typ := SplitNALUs(b)
+	nalus, typ := SplitNALUs(b, nil)
 	assert.Equal(t, naluAVCC, typ)
 	assert.Equal(t, 1, len(nalus))
 	assert.Equal(t, []byte{0x01, 0x02, 0x03, 0x04}, nalus[0])
@@ -269,7 +269,7 @@ func TestSplitNALUs_RealH264(t *testing.T) {
 	for i, pkt := range packets {
 		data := decodeData(t, pkt.Data)
 		t.Run(fmt.Sprintf("pkt%d_kf%v", i, pkt.IsKeyframe), func(t *testing.T) {
-			nalus, typ := SplitNALUs(data)
+			nalus, typ := SplitNALUs(data, nil)
 
 			assert.Equal(t, naluAVCC, typ, "expected AVCC format")
 			require.GreaterOrEqual(t, len(nalus), 1, "expected at least 1 NALU")
@@ -303,7 +303,7 @@ func TestSplitNALUs_RealHEVC(t *testing.T) {
 	for i, pkt := range packets {
 		data := decodeData(t, pkt.Data)
 		t.Run(fmt.Sprintf("pkt%d_kf%v", i, pkt.IsKeyframe), func(t *testing.T) {
-			nalus, typ := SplitNALUs(data)
+			nalus, typ := SplitNALUs(data, nil)
 
 			assert.NotEqual(t, naluRaw, typ, "expected AVCC or ANNEXB, got raw")
 			require.GreaterOrEqual(t, len(nalus), 1, "expected at least 1 NALU")

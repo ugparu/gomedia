@@ -12,11 +12,14 @@ import (
 )
 
 // h264Muxer performs RTP packetization of H264 video on top of hxxxMuxer.
+const defaultNaluBufCap = 8 //nolint:mnd // typical frame has 1-5 NALUs
+
 type h264Muxer struct {
 	*hxxxMuxer
-	codec *h264.CodecParameters
-	sps   []byte
-	pps   []byte
+	codec   *h264.CodecParameters
+	sps     []byte
+	pps     []byte
+	naluBuf [][]byte
 }
 
 // NewH264Muxer constructs an RTP muxer for H264 video.
@@ -25,6 +28,7 @@ func NewH264Muxer(w io.Writer, media sdp.Media, channel uint8, codec *h264.Codec
 	m := &h264Muxer{
 		hxxxMuxer: newHxxxMuxer(base, mtu),
 		codec:     codec,
+		naluBuf:   make([][]byte, 0, defaultNaluBufCap),
 	}
 
 	// Prefer SPS/PPS from SDP if available, otherwise from codec parameters.
@@ -48,14 +52,12 @@ func (m *h264Muxer) WritePacket(pkt gomedia.VideoPacket) error {
 	ts := hp.Timestamp()
 	isKey := hp.IsKeyFrame()
 
-	var avccData []byte
-	avccData = append(avccData[:0], hp.Data()...)
-
-	if len(avccData) == 0 {
+	data := hp.Data()
+	if len(data) == 0 {
 		return nil
 	}
 
-	nals, _ := nal.SplitNALUs(avccData)
+	nals, _ := nal.SplitNALUs(data, m.naluBuf)
 	if len(nals) == 0 {
 		return nil
 	}
@@ -127,8 +129,9 @@ func (m *h264Muxer) WritePacket(pkt gomedia.VideoPacket) error {
 				fuHeader |= 0x40 // E bit
 			}
 
-			// Allocate buffer for FU-A payload: 2-byte FU headers + fragment data.
-			fuPayload := make([]byte, 2+fragSize)
+			// Reuse FU-A buffer: 2-byte FU headers + fragment data.
+			m.fuBuf.Resize(2 + fragSize)
+			fuPayload := m.fuBuf.Data()
 			fuPayload[0] = fuIndicator
 			fuPayload[1] = fuHeader
 			copy(fuPayload[2:], nalPayload[offset:offset+fragSize])

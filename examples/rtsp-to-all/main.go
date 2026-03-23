@@ -66,9 +66,13 @@ func main() {
 	log.Infof(log, "HLS writer initialized with: segments per playlist=1, fragment count=3, segment size=%v", segSize)
 
 	// Initialize WebRTC
-	webrtc.Init(2000, 2100, []string{"10.10.0.7"}, []pion.ICEServer{
+	err := webrtc.Init(2000, 2100, []string{"10.10.0.7"}, []pion.ICEServer{
 		{},
 	})
+	if err != nil {
+		log.Errorf(log, "Failed to initialize WebRTC: %v", err)
+		os.Exit(1)
+	}
 	webrtcWr = webrtc.New(100, time.Second*12)
 	webrtcWr.Write()
 	log.Infof(log, "WebRTC writer initialized")

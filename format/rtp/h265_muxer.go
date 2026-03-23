@@ -14,10 +14,11 @@ import (
 // h265Muxer performs RTP packetization of H265 video on top of hxxxMuxer.
 type h265Muxer struct {
 	*hxxxMuxer
-	codec *h265.CodecParameters
-	vps   []byte
-	sps   []byte
-	pps   []byte
+	codec   *h265.CodecParameters
+	vps     []byte
+	sps     []byte
+	pps     []byte
+	naluBuf [][]byte
 }
 
 // NewH265Muxer constructs an RTP muxer for H265 video.
@@ -26,6 +27,7 @@ func NewH265Muxer(w io.Writer, media sdp.Media, channel uint8, codec *h265.Codec
 	m := &h265Muxer{
 		hxxxMuxer: newHxxxMuxer(base, mtu),
 		codec:     codec,
+		naluBuf:   make([][]byte, 0, defaultNaluBufCap),
 	}
 
 	// Prefer VPS/SPS/PPS from SDP if available, otherwise from codec parameters.
@@ -52,14 +54,12 @@ func (m *h265Muxer) WritePacket(pkt gomedia.VideoPacket) error {
 	ts := hp.Timestamp()
 	isKey := hp.IsKeyFrame()
 
-	var avccData []byte
-	avccData = append(avccData[:0], hp.Data()...)
-
-	if len(avccData) == 0 {
+	data := hp.Data()
+	if len(data) == 0 {
 		return nil
 	}
 
-	nalus, _ := nal.SplitNALUs(avccData)
+	nalus, _ := nal.SplitNALUs(data, m.naluBuf)
 	if len(nalus) == 0 {
 		return nil
 	}
@@ -131,8 +131,9 @@ func (m *h265Muxer) WritePacket(pkt gomedia.VideoPacket) error {
 				fuHeader |= 0x40 // E bit
 			}
 
-			// Allocate buffer for FU payload: 2-byte FU indicator + 1-byte FU header + fragment data.
-			fuPayload := make([]byte, 3+fragSize)
+			// Reuse FU buffer: 2-byte FU indicator + 1-byte FU header + fragment data.
+			m.fuBuf.Resize(3 + fragSize)
+			fuPayload := m.fuBuf.Data()
 			fuPayload[0] = fuIndicator0
 			fuPayload[1] = fuIndicator1
 			fuPayload[2] = fuHeader

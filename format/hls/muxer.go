@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -114,6 +115,8 @@ type muxer struct {
 	initBytesCache        map[int][]byte                      // Cached generated init segment bytes per version.
 	initMu                sync.RWMutex                        // Protects codecPars, initVersion, initCache, initBytesCache.
 	mediaName             string                              // Base filename used in segment/fragment URIs (e.g. "media").
+	manifestBuilder       strings.Builder                     // Reusable builder for manifest generation.
+	manifestDirty         bool                                // True when manifest needs rebuild.
 }
 
 // NewHLSMuxer creates a new HLS muxer with the specified segment duration and segment count.
@@ -177,6 +180,7 @@ func (mxr *muxer) Mux(codecPars gomedia.CodecParametersPair) (err error) {
 		newSeg := newSegment(0, mxr.fragmentDuration, mxr.segmentDuration, codecPars, mxr.mediaName, mxr.blockingTimeout, mxr.log)
 		newSeg.initVersion = mxr.initVersion
 		mxr.addSegment(newSeg)
+		mxr.manifestDirty = true
 
 		return nil
 	}
@@ -300,11 +304,13 @@ func (mxr *muxer) WritePacket(inpPkt gomedia.Packet) (err error) {
 			newSeg.initVersion = mxr.initVersion
 			mxr.addSegment(newSeg)
 			mxr.evictOldSegments()
+			mxr.manifestDirty = true
 		}
 	}
 
-	if err = mxr.getCurSegment().writePacket(inpPkt); err != nil {
-		return err
+	changed, writeErr := mxr.getCurSegment().writePacket(inpPkt)
+	if writeErr != nil {
+		return writeErr
 	}
 
 	// Audio packets cannot close fragments or segments — only video packets
@@ -314,6 +320,16 @@ func (mxr *muxer) WritePacket(inpPkt gomedia.Packet) (err error) {
 	if _, isVideo := inpPkt.(gomedia.VideoPacket); !isVideo {
 		return nil
 	}
+
+	if changed {
+		mxr.manifestDirty = true
+	}
+
+	// Rebuild manifest only when something actually changed (fragment/segment boundary).
+	if !mxr.manifestDirty {
+		return nil
+	}
+	mxr.manifestDirty = false
 
 	// Update the HLS manifest and signal the change.
 	mxr.manifest.Store(mxr.updateIndexM3u8())
@@ -326,42 +342,51 @@ func (mxr *muxer) WritePacket(inpPkt gomedia.Packet) (err error) {
 	}
 }
 
-// updateIndexM3u8 generates and returns the updated HLS manifest.
+// updateIndexM3u8 rebuilds the HLS manifest into the reusable manifestBuilder.
 func (mxr *muxer) updateIndexM3u8() string {
-	var index strings.Builder
-	index.WriteString(mxr.header)
-	index.WriteString(fmt.Sprintf("#EXT-X-MEDIA-SEQUENCE:%d\n", mxr.mediaSequence))
+	mxr.manifestBuilder.Reset()
+	b := &mxr.manifestBuilder
+
+	b.WriteString(mxr.header)
+	b.WriteString("#EXT-X-MEDIA-SEQUENCE:")
+	b.WriteString(strconv.FormatInt(mxr.mediaSequence, 10))
+	b.WriteByte('\n')
+
 	if mxr.discontinuitySequence > 0 {
-		index.WriteString(fmt.Sprintf("#EXT-X-DISCONTINUITY-SEQUENCE:%d\n", mxr.discontinuitySequence))
+		b.WriteString("#EXT-X-DISCONTINUITY-SEQUENCE:")
+		b.WriteString(strconv.FormatInt(mxr.discontinuitySequence, 10))
+		b.WriteByte('\n')
 	}
 
 	curInitVersion := -1
 	for _, id := range mxr.segIDs {
-		segment, ok := mxr.getSegment(id)
+		seg, ok := mxr.getSegment(id)
 		if !ok {
 			mxr.log.Errorf(mxr, "Segment %d not found in map", id)
 			continue
 		}
 
-		if segment.manifestEntry == "" {
+		if seg.manifestEntry == "" {
 			mxr.log.Errorf(mxr, "Manifest entry for segment %d is nil", id)
 			continue
 		}
 
-		if segment.discontinuity {
-			index.WriteString("#EXT-X-DISCONTINUITY\n")
+		if seg.discontinuity {
+			b.WriteString("#EXT-X-DISCONTINUITY\n")
 		}
 
 		// Emit #EXT-X-MAP when init version changes (including the first segment).
-		if segment.initVersion != curInitVersion {
-			curInitVersion = segment.initVersion
-			index.WriteString(fmt.Sprintf("#EXT-X-MAP:URI=\"init.mp4?v=%d\"\n", curInitVersion))
+		if seg.initVersion != curInitVersion {
+			curInitVersion = seg.initVersion
+			b.WriteString("#EXT-X-MAP:URI=\"init.mp4?v=")
+			b.WriteString(strconv.Itoa(curInitVersion))
+			b.WriteString("\"\n")
 		}
 
-		index.WriteString(segment.manifestEntry)
+		b.WriteString(seg.manifestEntry)
 	}
 
-	return index.String()
+	return b.String()
 }
 
 // GetIndexM3u8 returns the HLS manifest based on the requested segment and part.

@@ -82,7 +82,8 @@ func newSegment(
 // Segment closure is NOT handled here — it is driven by the muxer at keyframe
 // boundaries to ensure each new segment starts with an independently decodable
 // frame (preventing video stalls in the player).
-func (element *segment) writePacket(packet gomedia.Packet) (err error) {
+// Returns true if a fragment was closed and the manifest needs rebuilding.
+func (element *segment) writePacket(packet gomedia.Packet) (changed bool, err error) {
 	curFrag := element.curFragment
 	if err = curFrag.writePacket(packet); err != nil {
 		return
@@ -91,13 +92,14 @@ func (element *segment) writePacket(packet gomedia.Packet) (err error) {
 	select {
 	case <-curFrag.finished:
 		element.duration += curFrag.duration
-		element.cacheEntry = fmt.Sprintf("%s%s", element.cacheEntry, curFrag.manifestEntry)
+		element.cacheEntry += curFrag.manifestEntry
 
 		newFragID := curFrag.id + 1
 		newFrag := newFragment(newFragID, element.id, element.targetFragDuration, element.codecPars, element.mediaName, element.log)
 		element.fragments = append(element.fragments, newFrag)
 		element.curFragment = newFrag
-		element.manifestEntry = fmt.Sprintf("%s%s", element.cacheEntry, newFrag.manifestEntry)
+		element.manifestEntry = element.cacheEntry + newFrag.manifestEntry
+		changed = true
 	default:
 	}
 	return

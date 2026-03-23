@@ -418,7 +418,7 @@ func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer
 				SDPFmtpLine:  "level-id=180;profile-id=2;tier-flag=0;tx-mode=SRST",
 				RTCPFeedback: videoRTCPFeedback,
 			},
-			PayloadType: 125, //nolint:mnd
+			PayloadType: 124, //nolint:mnd
 		},
 	} {
 		if err := m.RegisterCodec(codec, webrtc.RTPCodecTypeVideo); err != nil {

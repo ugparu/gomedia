@@ -34,8 +34,8 @@ func isStartCode(b []byte, pos int) (startCodeLength int, found bool) {
 }
 
 // parseANNEXB parses a byte slice in ANNEXB format and returns the NALUs.
-func parseANNEXB(b []byte, val3, val4 uint32) [][]byte {
-	var nalus [][]byte
+func parseANNEXB(b []byte, val3, val4 uint32, dst [][]byte) [][]byte {
+	nalus := dst
 	_val3 := val3
 	_val4 := val4
 	start := 0
@@ -73,10 +73,13 @@ func parseANNEXB(b []byte, val3, val4 uint32) [][]byte {
 
 // SplitNALUs splits a byte slice into Network Abstraction Layer Units (NALUs)
 // based on different formats (Raw, AVCC, or ANNEXB) and returns the NALUs and the format type.
-func SplitNALUs(b []byte) (nalus [][]byte, typ int) {
+// dst is an optional pre-allocated slice that will be reused to avoid allocations.
+func SplitNALUs(b []byte, dst [][]byte) (nalus [][]byte, typ int) {
+	nalus = dst[:0]
+
 	// If the byte slice is smaller than the minimum NALU size, consider it as a single raw NALU.
 	if len(b) < MinNaluSize {
-		return [][]byte{b}, naluRaw
+		return append(nalus, b), naluRaw
 	}
 
 	// Check for AVCC format.
@@ -84,7 +87,6 @@ func SplitNALUs(b []byte) (nalus [][]byte, typ int) {
 	if val4 <= uint32(len(b)) { //nolint:gosec
 		_val4 := val4
 		_b := b[MinNaluSize:]
-		nalus = [][]byte{}
 		for {
 			if _val4 > uint32(len(_b)) { //nolint:gosec
 				// For corrupted streams, try to salvage partial NALUs
@@ -118,10 +120,10 @@ func SplitNALUs(b []byte) (nalus [][]byte, typ int) {
 	// Check for ANNEXB format.
 	val3 := pio.U24BE(b)
 	if val3 == 1 || val4 == 1 {
-		nalus = parseANNEXB(b, val3, val4)
+		nalus = parseANNEXB(b, val3, val4, nalus)
 		return nalus, naluANNEXB
 	}
 
 	// If none of the formats match, consider it as a single raw NALU.
-	return [][]byte{b}, naluRaw
+	return append(nalus, b), naluRaw
 }

@@ -20,6 +20,7 @@ type h264Demuxer struct {
 	pps             []byte
 	codec           *h264.CodecParameters
 	packets         []*h264.Packet
+	naluBuf         [][]byte
 	fuStarted       bool
 	BufferRTPPacket *bytes.Buffer
 }
@@ -31,6 +32,7 @@ func NewH264Demuxer(rdr io.Reader, sdp sdp.Media, index uint8, options ...Demuxe
 		pps:             []byte{},
 		codec:           nil,
 		packets:         []*h264.Packet{},
+		naluBuf:         make([][]byte, 0, defaultNaluBufCap),
 		fuStarted:       false,
 		BufferRTPPacket: &bytes.Buffer{},
 	}
@@ -140,7 +142,7 @@ func (d *h264Demuxer) finalizeFUAPacket() error {
 	naluTypef := d.BufferRTPPacket.Bytes()[0] & control1
 
 	if naluTypef == 7 || naluTypef == 9 {
-		bufered, _ := nal.SplitNALUs(append([]byte{0, 0, 0, 1}, d.BufferRTPPacket.Bytes()...))
+		bufered, _ := nal.SplitNALUs(append([]byte{0, 0, 0, 1}, d.BufferRTPPacket.Bytes()...), d.naluBuf)
 		for _, v := range bufered {
 			naluTypefs := v[0] & control1
 			switch {
