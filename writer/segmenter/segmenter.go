@@ -3,6 +3,7 @@ package segmenter
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -11,16 +12,80 @@ import (
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/format/mp4"
 	"github.com/ugparu/gomedia/utils"
+	"github.com/ugparu/gomedia/utils/buffer"
 	"github.com/ugparu/gomedia/utils/lifecycle"
 	"github.com/ugparu/gomedia/utils/logger"
 )
 
-// activeFile writes packets to disk progressively as they arrive.
+const memBufInitSize = 512 * 1024 //nolint:mnd // 512KB initial buffer, covers ~1s of 4Mbps video
+
+// memWriteSeeker is an in-memory io.WriteSeeker backed by buffer.PooledBuffer.
+// All muxer writes go here; the buffer is flushed to disk in one write at segment close.
+type memWriteSeeker struct {
+	buf buffer.PooledBuffer
+	len int // logical length of written data (may differ from buf.Len after Resize)
+	pos int
+}
+
+func newMemWriteSeeker() *memWriteSeeker {
+	return &memWriteSeeker{buf: buffer.Get(memBufInitSize)}
+}
+
+func (m *memWriteSeeker) Write(p []byte) (int, error) {
+	end := m.pos + len(p)
+	if end > m.len {
+		if end > m.buf.Cap() {
+			m.buf.Resize(end)
+		} else if end > m.buf.Len() {
+			m.buf.Resize(end)
+		}
+		m.len = end
+	}
+	copy(m.buf.Data()[m.pos:], p)
+	m.pos = end
+	return len(p), nil
+}
+
+func (m *memWriteSeeker) Seek(offset int64, whence int) (int64, error) {
+	var newPos int64
+	switch whence {
+	case io.SeekStart:
+		newPos = offset
+	case io.SeekCurrent:
+		newPos = int64(m.pos) + offset
+	case io.SeekEnd:
+		newPos = int64(m.len) + offset
+	default:
+		return 0, errors.New("invalid whence")
+	}
+	if newPos < 0 {
+		return 0, errors.New("negative seek position")
+	}
+	m.pos = int(newPos)
+	return newPos, nil
+}
+
+// Bytes returns the accumulated data up to the logical length.
+func (m *memWriteSeeker) Bytes() []byte { return m.buf.Data()[:m.len] }
+
+// Len returns the logical length of written data.
+func (m *memWriteSeeker) Len() int { return m.len }
+
+// Reset resets the buffer for reuse, keeping the allocated capacity.
+func (m *memWriteSeeker) Reset() { m.len = 0; m.pos = 0 }
+
+// Release returns the underlying PooledBuffer to the pool.
+func (m *memWriteSeeker) Release() { m.buf.Release() }
+
+// ensure interface compliance at compile time.
+var _ io.WriteSeeker = (*memWriteSeeker)(nil)
+
+// activeFile accumulates packets in memory via the MP4 muxer.
 // The muxer holds one packet per stream internally (lastPacket);
 // we track those in lastPkts so they can be released after writePacket
 // consumes them or when the segment is closed.
 type activeFile struct {
-	file      *os.File
+	mem       *memWriteSeeker
 	muxer     *mp4.Muxer
 	startTime time.Time
 	folder    string
@@ -106,6 +171,7 @@ func (rb *ringBuffer) drain() []gomedia.Packet {
 type streamState struct {
 	activeFile   *activeFile                 // currently recording file for this URL
 	ringBuf      *ringBuffer                 // pre-buffer for event mode
+	mem          *memWriteSeeker             // reusable in-memory buffer for MP4 muxing
 	seenKeyframe bool                        // track first keyframe
 	eventSaved   bool                        // whether this stream has saved the current event
 	codecPar     gomedia.CodecParametersPair // codec parameters for this URL
@@ -287,8 +353,8 @@ func (s *segmenter) createFile(path string) (*os.File, error) {
 	return os.Create(path)
 }
 
-// openNewSegment creates a new file on disk and initializes the MP4 muxer.
-// Packets are written progressively via writePacket after this call.
+// openNewSegment initializes an in-memory MP4 muxer for a new segment.
+// No file is created on disk until the segment is closed via closeSegment.
 func (s *segmenter) openNewSegment(url string, stream *streamState, startTime time.Time) error {
 	if stream.codecPar.VideoCodecParameters == nil {
 		return errors.New("cannot open file with nil video codec parameters")
@@ -300,22 +366,19 @@ func (s *segmenter) openNewSegment(url string, stream *streamState, startTime ti
 	}
 
 	folder, name := s.pathFunc(startTime, streamIdx)
-	filename := filepath.Join(s.dest, folder, name)
 
-	f, err := s.createFile(filename)
-	if err != nil {
-		return err
+	if stream.mem == nil {
+		stream.mem = newMemWriteSeeker()
+	} else {
+		stream.mem.Reset()
 	}
-
-	muxer := mp4.NewMuxer(f)
-	if err = muxer.Mux(stream.codecPar); err != nil {
-		_ = f.Close()
-		_ = os.Remove(filename)
+	muxer := mp4.NewMuxer(stream.mem)
+	if err := muxer.Mux(stream.codecPar); err != nil {
 		return err
 	}
 
 	stream.activeFile = &activeFile{
-		file:      f,
+		mem:       stream.mem,
 		muxer:     muxer,
 		startTime: startTime,
 		folder:    folder,
@@ -328,8 +391,8 @@ func (s *segmenter) openNewSegment(url string, stream *streamState, startTime ti
 	return nil
 }
 
-// closeSegment finalizes the active segment: writes the MP4 trailer, closes the file,
-// and returns file info. All packet data has already been written progressively.
+// closeSegment finalizes the active segment: writes the MP4 trailer in memory,
+// then flushes the entire buffer to disk in a single write.
 // The returned *gomedia.FileInfo must be sent via sendFileInfo outside of any lock.
 // minDuration discards segments shorter than the threshold (use 0 to keep all).
 func (s *segmenter) closeSegment(stream *streamState, minDuration time.Duration) (*gomedia.FileInfo, error) {
@@ -341,12 +404,9 @@ func (s *segmenter) closeSegment(stream *streamState, minDuration time.Duration)
 	stream.activeFile = nil
 
 	if af.pktCount == 0 {
-		// Release any held packets, close file, remove empty file
 		for _, p := range af.lastPkts {
 			p.Release()
 		}
-		_ = af.file.Close()
-		_ = os.Remove(filepath.Join(s.dest, af.folder, af.name))
 		return nil, nil
 	}
 
@@ -357,12 +417,10 @@ func (s *segmenter) closeSegment(stream *streamState, minDuration time.Duration)
 		for _, p := range af.lastPkts {
 			p.Release()
 		}
-		_ = af.file.Close()
-		_ = os.Remove(filepath.Join(s.dest, af.folder, af.name))
 		return nil, nil
 	}
 
-	// WriteTrailer writes the remaining buffered packets and the moov atom.
+	// WriteTrailer writes the remaining buffered packets and the moov atom — all in memory.
 	err := af.muxer.WriteTrailer()
 
 	// Release the last held packets (consumed by WriteTrailer).
@@ -371,22 +429,29 @@ func (s *segmenter) closeSegment(stream *streamState, minDuration time.Duration)
 	}
 
 	if err != nil {
-		_ = af.file.Close()
 		return nil, err
 	}
 
-	actualSize, err := af.file.Seek(0, 1)
+	// Flush the entire MP4 to disk in a single write.
+	filename := filepath.Join(s.dest, af.folder, af.name)
+	f, err := s.createFile(filename)
 	if err != nil {
-		_ = af.file.Close()
 		return nil, err
 	}
-	_ = af.file.Close()
+
+	data := af.mem.Bytes()
+	if _, err = f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(filename)
+		return nil, err
+	}
+	_ = f.Close()
 
 	info := &gomedia.FileInfo{
 		Name:       af.folder + af.name,
 		Start:      af.startTime,
 		Stop:       af.startTime.Add(af.duration),
-		Size:       int(actualSize),
+		Size:       len(data),
 		URL:        stream.codecPar.SourceID,
 		Resolution: fmt.Sprintf("%dx%d", stream.codecPar.VideoCodecParameters.Width(), stream.codecPar.VideoCodecParameters.Height()),
 		Codec:      stream.codecPar.VideoCodecParameters.Type().String(),
