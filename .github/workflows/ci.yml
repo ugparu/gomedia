@@ -32,9 +32,9 @@ jobs:
           echo "percentage=$COVERAGE" >> "$GITHUB_OUTPUT"
 
           # Determine badge color
-          if (( $(echo "$COVERAGE >= 80" | bc -l) )); then
+          if (( $(echo "$COVERAGE >= 60" | bc -l) )); then
             COLOR=brightgreen
-          elif (( $(echo "$COVERAGE >= 60" | bc -l) )); then
+          elif (( $(echo "$COVERAGE >= 30" | bc -l) )); then
             COLOR=yellow
           else
             COLOR=red

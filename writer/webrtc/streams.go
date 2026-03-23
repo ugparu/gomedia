@@ -23,6 +23,7 @@ type sortedStreams struct {
 	sortedURLs     []string            // Sorted list of stream URLs based on their sizes.
 	streams        map[string]*stream  // Map of streams indexed by their URLs.
 	pendingPeers   map[*peerTrack]bool // Peers waiting for a stream (when last stream was removed)
+	failedPeers    []*peerTrack        // Peers that failed seeding and need full cleanup by the caller.
 	targetDuration time.Duration
 	videoCodecType gomedia.CodecType
 	signaling      SignalingHandler
@@ -194,10 +195,22 @@ func (ss *sortedStreams) Remove(removeURL string) {
 		for peer, seeded := range str.tracks {
 			ss.pendingPeers[peer] = seeded
 		}
+		for peer := range str.toAdd {
+			ss.pendingPeers[peer] = true
+		}
 	} else {
 		for track := range str.tracks {
 			if err := ss.Move(&peerURL{
 				peerTrack: track,
+				Token:     "",
+				URL:       changeURL,
+			}); err != nil {
+				ss.log.Error(ss, err.Error())
+			}
+		}
+		for peer := range str.toAdd {
+			if err := ss.Move(&peerURL{
+				peerTrack: peer,
 				Token:     "",
 				URL:       changeURL,
 			}); err != nil {
@@ -219,7 +232,7 @@ func (ss *sortedStreams) Insert(pt *peerTrack) (err error) {
 		str.tracks[pt] = false
 		return nil
 	} else if !ok {
-		return fmt.Errorf("unknown URL %w", err)
+		return fmt.Errorf("unknown URL: %s", pt.targetURL)
 	}
 
 	// No streams available - add to pending
@@ -421,7 +434,9 @@ func (ss *sortedStreams) processExistingTracks(str *stream, pkt gomedia.Packet) 
 	for peer, seeded := range str.tracks {
 		if !seeded {
 			if err := ss.seedTrack(str, peer); err != nil {
-				return err
+				ss.log.Errorf(ss, "Failed to seed peer, removing: %v", err)
+				delete(str.tracks, peer)
+				ss.failedPeers = append(ss.failedPeers, peer)
 			}
 		} else {
 			ss.bufferPacketForPeer(peer, pkt)

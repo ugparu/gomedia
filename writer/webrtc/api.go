@@ -25,8 +25,8 @@ func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer
 	Conf = webrtc.Configuration{
 		ICEServers:           iceServers,
 		ICETransportPolicy:   webrtc.ICETransportPolicyAll,
-		BundlePolicy:         webrtc.BundlePolicyBalanced,
-		RTCPMuxPolicy:        webrtc.RTCPMuxPolicyNegotiate,
+		BundlePolicy:         webrtc.BundlePolicyMaxBundle,
+		RTCPMuxPolicy:        webrtc.RTCPMuxPolicyRequire,
 		PeerIdentity:         "",
 		Certificates:         []webrtc.Certificate{},
 		ICECandidatePoolSize: 0,
@@ -42,7 +42,7 @@ func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer
 				MimeType:     webrtc.MimeTypeOpus,
 				ClockRate:    48000,
 				Channels:     2,
-				SDPFmtpLine:  "minptime=10;useinbandfec=1",
+				SDPFmtpLine:  "minptime=10;useinbandfec=1;stereo=1;sprop-stereo=1",
 				RTCPFeedback: nil,
 			},
 			PayloadType: 111,
@@ -79,7 +79,7 @@ func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer
 		},
 	} {
 		if err := m.RegisterCodec(codec, webrtc.RTPCodecTypeAudio); err != nil {
-			panic(err)
+			return err
 		}
 	}
 
@@ -198,16 +198,16 @@ func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer
 			},
 			PayloadType: 127,
 		},
-		// {
-		// 	RTPCodecCapability: webrtc.RTPCodecCapability{
-		// 		MimeType:     webrtc.MimeTypeRTX,
-		// 		ClockRate:    90000,
-		// 		Channels:     0,
-		// 		SDPFmtpLine:  "apt=127",
-		// 		RTCPFeedback: nil,
-		// 	},
-		// 	PayloadType: 125,
-		// },
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{
+				MimeType:     webrtc.MimeTypeRTX,
+				ClockRate:    90000,
+				Channels:     0,
+				SDPFmtpLine:  "apt=127",
+				RTCPFeedback: nil,
+			},
+			PayloadType: 125,
+		},
 
 		{
 			RTPCodecCapability: webrtc.RTPCodecCapability{
@@ -422,22 +422,14 @@ func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer
 		},
 	} {
 		if err := m.RegisterCodec(codec, webrtc.RTPCodecTypeVideo); err != nil {
-			panic(err)
+			return err
 		}
-	}
-
-	if err := m.RegisterCodec(webrtc.RTPCodecParameters{}, webrtc.RTPCodecTypeVideo); err != nil {
-		panic(err)
-	}
-
-	if err := m.RegisterCodec(webrtc.RTPCodecParameters{}, webrtc.RTPCodecTypeVideo); err != nil {
-		panic(err)
 	}
 
 	// Create a new interceptor.Registry
 	i := &interceptor.Registry{}
 	if err := webrtc.RegisterDefaultInterceptors(m, i); err != nil {
-		panic(err)
+		return err
 	}
 
 	// Create a new SettingEngine

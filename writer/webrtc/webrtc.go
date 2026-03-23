@@ -112,6 +112,18 @@ func (element *webRTCWriter) Step(stopCh <-chan struct{}) (err error) {
 		codecType := targetStream.codecPar.VideoCodecParameters.Type()
 		go element.addConnection(peer, peer.TargetURL, codecType)
 	case peerURL := <-element.changePeersChan:
+		if !element.streams.Exists(peerURL.URL) {
+			respBytes, marshalErr := element.signaling.BuildErrorResponse(peerURL.Token)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			if peerURL.DataChannel != nil {
+				if sendErr := peerURL.DataChannel.Send(respBytes); sendErr != nil {
+					element.log.Errorf(element, "Can not send response to data channel: %v", sendErr)
+				}
+			}
+			return nil
+		}
 		return element.streams.Move(peerURL)
 	case peerTrack := <-element.connectPeersChan:
 		if err = element.streams.Insert(peerTrack); err != nil {
@@ -145,6 +157,12 @@ func (element *webRTCWriter) Step(stopCh <-chan struct{}) (err error) {
 		if err = element.streams.writePacket(inpPkt); err != nil {
 			return err
 		}
+		for _, peer := range element.streams.failedPeers {
+			if rmErr := element.removePeer(peer); rmErr != nil {
+				element.log.Errorf(element, "Failed to remove broken peer: %v", rmErr)
+			}
+		}
+		element.streams.failedPeers = element.streams.failedPeers[:0]
 	}
 
 	return nil
@@ -171,9 +189,11 @@ func (element *webRTCWriter) addSource(addr string) {
 	element.sources = append(element.sources, addr)
 	element.log.Infof(element, "Added new source %s", addr)
 
-	parsedURL, err := url.Parse(addr)
-	if err == nil {
-		element.name = "WEBRTC_WRITER " + parsedURL.Hostname()
+	if len(element.sources) == 1 {
+		parsedURL, err := url.Parse(addr)
+		if err == nil {
+			element.name = "WEBRTC_WRITER " + parsedURL.Hostname()
+		}
 	}
 }
 
@@ -204,13 +224,6 @@ func (element *webRTCWriter) checkCodecParameters(addr string, codecPar gomedia.
 	if !element.streams.Exists(addr) {
 		_ = element.streams.Add(addr, codecPar)
 		element.sendAvailableStreams()
-
-		parsedURL, err := url.Parse(addr)
-		if err != nil {
-			return err
-		}
-		element.name = "WEBRTC_WRITER " + parsedURL.Hostname()
-
 		return nil
 	}
 
@@ -218,12 +231,6 @@ func (element *webRTCWriter) checkCodecParameters(addr string, codecPar gomedia.
 	if !changed {
 		return
 	}
-
-	parsedURL, err := url.Parse(addr)
-	if err != nil {
-		return err
-	}
-	element.name = "WEBRTC_WRITER " + parsedURL.Hostname()
 
 	element.sendAvailableStreams()
 
@@ -368,6 +375,11 @@ func (element *webRTCWriter) addConnection(inpPeer *gomedia.WebRTCPeer, targetUR
 		inpPeer.Err = err
 		return inpPeer.Err
 	}
+	defer func() {
+		if err != nil {
+			_ = peer.Close()
+		}
+	}()
 
 	pt := new(peerTrack)
 	pt.PeerConnection = peer
@@ -410,28 +422,10 @@ func (element *webRTCWriter) addConnection(inpPeer *gomedia.WebRTCPeer, targetUR
 				return
 			}
 
-			newPeerURL := &peerURL{
+			element.changePeersChan <- &peerURL{
 				peerTrack: pt,
 				Token:     token,
 				URL:       targetURL,
-			}
-
-			if element.streams.Exists(newPeerURL.URL) {
-				element.changePeersChan <- newPeerURL
-				return
-			}
-
-			respBytes, marshalErr := element.signaling.BuildErrorResponse(token)
-			if marshalErr != nil {
-				element.log.Errorf(element, "Can not send response to data channel: %v", marshalErr)
-				return
-			}
-
-			if newPeerURL.DataChannel != nil {
-				if sendErr := newPeerURL.DataChannel.Send(respBytes); sendErr != nil {
-					element.log.Errorf(element, "Can not send response to data channel: %v", sendErr)
-					return
-				}
 			}
 		})
 	})

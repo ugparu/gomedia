@@ -7,9 +7,12 @@ import (
 	"math/rand/v2"
 	"time"
 
+	"github.com/ugparu/gomedia/utils/buffer"
 	"github.com/ugparu/gomedia/utils/logger"
 	"github.com/ugparu/gomedia/utils/sdp"
 )
+
+const rtpBufInitSize = 1500 //nolint:mnd // covers typical MTU-sized RTP packet with RTSP interleaved header
 
 // baseMuxer provides low-level RTP packet construction and RTSP-interleaved
 // framing over an io.Writer. It mirrors baseDemuxer but in the opposite
@@ -17,6 +20,7 @@ import (
 type baseMuxer struct {
 	w           io.Writer
 	log         logger.Logger
+	buf         buffer.PooledBuffer
 	payloadType uint8
 	clockRate   uint32
 	ssrc        uint32
@@ -31,6 +35,7 @@ func newBaseMuxer(w io.Writer, media sdp.Media, channel uint8, streamIndex uint8
 	m := &baseMuxer{
 		w:           w,
 		log:         log,
+		buf:         buffer.Get(rtpBufInitSize),
 		payloadType: uint8(media.PayloadType),
 		clockRate:   uint32(media.TimeScale),
 		channel:     channel,
@@ -59,7 +64,9 @@ func (m *baseMuxer) writeRTP(payload []byte, ts time.Duration, marker bool) erro
 
 	// Build RTP header.
 	rtpPacketLen := rtpHeaderSize + len(payload)
-	buf := make([]byte, rtspHeaderSize+rtpPacketLen)
+	size := rtspHeaderSize + rtpPacketLen
+	m.buf.Resize(size)
+	buf := m.buf.Data()
 
 	// RTSP interleaved header.
 	buf[0] = 0x24
@@ -80,12 +87,12 @@ func (m *baseMuxer) writeRTP(payload []byte, ts time.Duration, marker bool) erro
 
 	copy(buf[rtspHeaderSize+rtpHeaderSize:], payload)
 
-	n, err := m.w.Write(buf)
+	n, err := m.w.Write(buf[:size])
 	if err != nil {
 		return fmt.Errorf("rtp: write failed for stream %d: %w", m.streamIndex, err)
 	}
-	if n != len(buf) {
-		m.log.Warningf(m, "short RTP write: wrote %d of %d bytes", n, len(buf))
+	if n != size {
+		m.log.Warningf(m, "short RTP write: wrote %d of %d bytes", n, size)
 	}
 
 	m.sequence++

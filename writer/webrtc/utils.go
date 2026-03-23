@@ -188,6 +188,14 @@ func writeAudioPacketsToPeer(pt *peerTrack, aflush chan struct{}, aChan chan gom
 		aBuf.Resize(pkt.Len())
 		copy(aBuf.Data(), pkt.Data())
 
+		miss := time.Since(pkt.StartTime()) - delay
+
+		if miss > 0 {
+			pkt.SetDuration(pkt.Duration() - correctionStep)
+		} else if miss < 0 {
+			pkt.SetDuration(pkt.Duration() + correctionStep)
+		}
+
 		sample := media.Sample{
 			Data:               aBuf.Data(),
 			Timestamp:          pkt.StartTime(),
