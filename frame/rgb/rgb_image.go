@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"sync"
 )
 
 const (
@@ -54,30 +53,40 @@ type ReleasableImage interface {
 	GetRGB() *RGB
 }
 
-// FramePool is a resolution-specific pool for RGB frames. Create one per
-// decoder instance at Init() time.
+const defaultPoolSize = 5
+
+// FramePool is a resolution-specific fixed-size pool for RGB frames.
+// Unlike sync.Pool, it is NOT cleared by the GC — frames stay allocated
+// for the lifetime of the pool, guaranteeing zero allocations after warmup.
 type FramePool struct {
-	pool sync.Pool
-	size int // expected Pix length (bytesPerPix * w * h)
+	ch   chan *RGB
 	w, h int
 }
 
-// NewFramePool creates a frame pool for the given resolution.
+// NewFramePool creates a frame pool for the given resolution pre-filled
+// with defaultPoolSize frames.
 func NewFramePool(w, h int) *FramePool {
-	size := bytesPerPix * w * h
-	return &FramePool{
-		pool: sync.Pool{New: func() any {
-			return &RGB{Pix: make([]byte, size)}
-		}},
-		size: size,
-		w:    w,
-		h:    h,
+	p := &FramePool{
+		ch: make(chan *RGB, defaultPoolSize),
+		w:  w,
+		h:  h,
 	}
+	for range defaultPoolSize {
+		p.ch <- &RGB{Pix: make([]byte, bytesPerPix*w*h)}
+	}
+	return p
 }
 
 // Get returns a pooled RGB frame with Pix, Stride, and Rect pre-set.
+// If the pool is exhausted, a new frame is allocated (should not happen
+// after warmup).
 func (p *FramePool) Get() *RGB {
-	img := p.pool.Get().(*RGB)
+	var img *RGB
+	select {
+	case img = <-p.ch:
+	default:
+		img = &RGB{Pix: make([]byte, bytesPerPix*p.w*p.h)}
+	}
 	img.Stride = p.w * bytesPerPix
 	img.Rect = image.Rect(0, 0, p.w, p.h)
 	img.pool = p
@@ -87,7 +96,11 @@ func (p *FramePool) Get() *RGB {
 // Put returns a frame to the pool. Called by RGB.Release().
 func (p *FramePool) Put(img *RGB) {
 	img.pool = nil
-	p.pool.Put(img)
+	select {
+	case p.ch <- img:
+	default:
+		// Pool full — drop frame.
+	}
 }
 
 // RGB represents an RGB image.
