@@ -5,9 +5,8 @@ import (
 )
 
 const (
-	defaultBufSize = 4 * 1024        // Начальный размер 4KB
-	bigBufSize     = 64 * 1024       // 64KB
-	maxBufSize     = 1 * 1024 * 1024 // 1MB предел для возврата в пул
+	defaultBufSize = 4 * 1024  // Начальный размер 4KB
+	bigBufSize     = 64 * 1024 // 64KB
 )
 
 // Пул объектов memBuffer
@@ -66,25 +65,14 @@ func (b *memBuffer) Cap() int {
 // Resize меняет длину слайса (len), не меняя емкость (cap), если влезает
 func (b *memBuffer) Resize(size int) {
 	if size > cap(b.buf) {
-		// Если просят больше чем есть памяти, придется выделить новую
-		newBuf := make([]byte, size)
+		newCap := cap(b.buf) * 14 / 10
+		if newCap < size {
+			newCap = size
+		}
+		newBuf := make([]byte, newCap)
 		copy(newBuf, b.buf)
 		b.buf = newBuf
 	} else {
 		b.buf = b.buf[:size]
 	}
-}
-
-// Release возвращает буфер в пул
-func (b *memBuffer) Release() {
-	// Буферы крупнее maxBufSize не возвращаем в пул — слишком редкие.
-	// if cap(b.buf) > maxBufSize {
-	// 	return
-	// }
-	// b.buf = b.buf[:0]
-	// if cap(b.buf) >= bigBufSize {
-	// 	bigBufPool.Put(b)
-	// } else {
-	// 	bufPool.Put(b)
-	// }
 }
