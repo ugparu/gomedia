@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"time"
 )
 
 const (
@@ -53,7 +54,10 @@ type ReleasableImage interface {
 	GetRGB() *RGB
 }
 
-const defaultPoolSize = 5
+const (
+	defaultPoolSize = 3
+	timeout         = time.Second
+)
 
 // FramePool is a resolution-specific fixed-size pool for RGB frames.
 // Unlike sync.Pool, it is NOT cleared by the GC — frames stay allocated
@@ -99,7 +103,10 @@ func (p *FramePool) Put(img *RGB) {
 	select {
 	case p.ch <- img:
 	default:
-		// Pool full — drop frame.
+		select {
+		case p.ch <- img:
+		case <-time.After(timeout):
+		}
 	}
 }
 
