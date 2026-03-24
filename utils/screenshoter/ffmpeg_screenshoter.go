@@ -40,7 +40,7 @@ func NewScreenshoter() Screenshoter {
 // Screenshot captures a screenshot from the provided RTSP video stream URL.
 func (screenshoter *ffmpegScreenshoter) Screenshot(url string) ([]byte, error) {
 	// Create a new RTSP reader with a buffer size.
-	screenshotReader := reader.NewRTSP(bufSize, nil)
+	screenshotReader := reader.NewRTSP(bufSize)
 	defer screenshotReader.Close()
 
 	// Set a timer for a maximum waiting time (30 seconds).
