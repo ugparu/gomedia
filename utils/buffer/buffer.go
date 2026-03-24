@@ -78,13 +78,13 @@ func (b *memBuffer) Resize(size int) {
 // Release возвращает буфер в пул
 func (b *memBuffer) Release() {
 	// Буферы крупнее maxBufSize не возвращаем в пул — слишком редкие.
-	if cap(b.buf) > maxBufSize {
-		return
-	}
-	b.buf = b.buf[:0]
-	if cap(b.buf) >= bigBufSize {
-		bigBufPool.Put(b)
-	} else {
-		bufPool.Put(b)
-	}
+	// if cap(b.buf) > maxBufSize {
+	// 	return
+	// }
+	// b.buf = b.buf[:0]
+	// if cap(b.buf) >= bigBufSize {
+	// 	bigBufPool.Put(b)
+	// } else {
+	// 	bufPool.Put(b)
+	// }
 }
