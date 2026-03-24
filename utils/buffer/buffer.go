@@ -2,9 +2,16 @@ package buffer
 
 // Get получает буфер из пула с заданной длиной (len)
 func Get(size int) Buffer {
-	return &memBuffer{
-		buf: make([]byte, size),
+	b := &memBuffer{buf: make([]byte, 0, 1024*1024)}
+
+	// Убеждаемся, что емкости хватает
+	if cap(b.buf) < size {
+		b.buf = make([]byte, size)
 	}
+
+	// Устанавливаем рабочую длину слайса
+	b.buf = b.buf[:size]
+	return b
 }
 
 type memBuffer struct {
