@@ -76,6 +76,7 @@ func (dcd *ffmpegCUDADecoder) Decode(pkt gomedia.VideoPacket) (rgb.ReleasableIma
 	img := dcd.pool.Get()
 	ret := C.decode_cuda_packet(dcd.dcd, (*C.uint8_t)(unsafe.Pointer(&img.Pix[0])))
 	if ret != 0 {
+		img.Release()
 		if ret == -999 {
 			return nil, errors.New("libnpp error")
 		}

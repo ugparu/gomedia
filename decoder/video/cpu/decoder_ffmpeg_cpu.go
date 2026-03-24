@@ -63,6 +63,7 @@ func (dcd *ffmpegCPUDecoder) Decode(pkt gomedia.VideoPacket) (rgb.ReleasableImag
 	img := dcd.pool.Get()
 	ret := C.decode_cpu_packet(dcd.dcd, (*C.uint8_t)(unsafe.Pointer(&img.Pix[0])))
 	if ret != 0 {
+		img.Release()
 		if ret > 0 {
 			return nil, decoder.ErrNeedMoreData
 		}

@@ -95,10 +95,11 @@ func (e *alawEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err e
 			}
 			return
 		}
+		encoded := g711.EncodeAlaw(inBuf)
 		if poolBuf != nil {
 			poolBuf.Release()
+			poolBuf = nil
 		}
-		encoded := g711.EncodeAlaw(inBuf)
 		var outData []byte
 		var handle *buffer.SlotHandle
 		if e.ring != nil {

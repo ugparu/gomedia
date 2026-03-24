@@ -264,6 +264,7 @@ func (dcd *ffmpegRKMPPDecoder) Decode(pkt gomedia.VideoPacket) (rgb.ReleasableIm
 	img := dcd.pool.Get()
 
 	if len(img.Pix) == 0 {
+		img.Release()
 		return nil, video.NewFFmpegError("empty image buffer", -1)
 	}
 
@@ -273,6 +274,7 @@ func (dcd *ffmpegRKMPPDecoder) Decode(pkt gomedia.VideoPacket) (rgb.ReleasableIm
 		C.int(len(img.Pix)),
 	)
 	if ret != 0 {
+		img.Release()
 		if ret > 0 {
 			return nil, decoder.ErrNeedMoreData
 		}

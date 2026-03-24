@@ -93,8 +93,9 @@ func (screenshoter *ffmpegScreenshoter) Screenshot(url string) ([]byte, error) {
 			// Resize the image to the specified width and height using nearest-neighbor interpolation.
 			smallImg := rgb.NewRGB(image.Rect(0, 0, screenshotWidth, screenshotHeight))
 			draw.NearestNeighbor.Scale(smallImg, smallImg.Rect, mat, mat.Bounds(), draw.Over, nil)
+			mat.Release()
 
-			// Encode the resized image as PNG and write it to the buffer.
+			// Encode the resized image as JPEG and write it to the buffer.
 			if err := jpeg.Encode(buff, smallImg, nil); err != nil {
 				return nil, err
 			}
