@@ -24,8 +24,6 @@ func WithLogger(l logger.Logger) RingAllocOption {
 // Must be a power of two. 4096 comfortably covers 30 s @ 30 fps + audio.
 const ringSlotCount = 4096
 
-const danderRingSize = 1024 * 1024 * 25 // 25MB
-
 // RingAlloc is a fixed-size byte slab with FIFO slot tracking and atomic reference
 // counting. It is designed for a single producer goroutine (demuxer) and N consumer
 // goroutines (writers).
@@ -76,71 +74,35 @@ type SlotHandle struct {
 	idx  uint64
 }
 
-// newRingAllocSoftCap creates a RingAlloc with an initial usable capacity of
-// softCap. When bufSize > softCap the backing buffer is allocated via
-// mmap(MAP_ANONYMOUS) so that physical pages are committed only on first write
-// and the allocation is invisible to Go's heap profiler. When bufSize == softCap
-// a regular Go slice is used (no mmap overhead for fixed-size rings).
-func newRingAllocSoftCap(bufSize, softCap int, opts ...RingAllocOption) *RingAlloc {
-	softCap = min(softCap, bufSize)
-
-	var buf []byte
-	var useMmap bool
-	if bufSize > softCap {
-		var err error
-		buf, err = mmapBytes(bufSize)
-		if err != nil {
-			buf = make([]byte, bufSize) // fallback
-		} else {
-			useMmap = true
-		}
-	} else {
-		buf = make([]byte, bufSize)
-	}
-
+// NewRingAlloc creates a ring allocator backed by a slab of the given byte size.
+func NewRingAlloc(size int, opts ...RingAllocOption) *RingAlloc {
 	r := &RingAlloc{
-		buf:  buf,
-		bcap: softCap,
+		buf:  make([]byte, size),
+		bcap: size,
 		log:  logger.Default,
 	}
 	for _, opt := range opts {
 		opt(r)
 	}
-	if useMmap {
-		setMmapFinalizer(r)
-	}
 	return r
 }
 
-// NewRingAlloc creates a ring allocator backed by a slab of the given byte size.
-func NewRingAlloc(size int, opts ...RingAllocOption) *RingAlloc {
-	return newRingAllocSoftCap(size, size, opts...)
-}
-
-// GrowingRingAlloc wraps RingAlloc with in-place capacity growth. The backing
-// buffer is pre-allocated at danderRingSize using virtual memory; physical pages
-// are committed only as data is written. The usable capacity (bcap) starts at
-// initSize and grows in place when needed, avoiding the memory overhead of
-// multiple coexisting rings during growth transitions.
-//
-// Only when the ring is genuinely full of live data (all slots occupied) is a
-// new ring created as a last resort.
+// GrowingRingAlloc wraps RingAlloc with automatic growth. The ring starts at
+// the requested initSize; when it cannot satisfy an allocation it creates a new,
+// larger ring. The old ring becomes GC-eligible once all outstanding SlotHandles
+// have been released by consumers.
 //
 // Must be driven by a single producer goroutine (same constraint as RingAlloc).
 type GrowingRingAlloc struct {
 	current *RingAlloc
-	maxCap  int
 	opts    []RingAllocOption
 }
 
 // NewGrowingRingAlloc creates a growing ring allocator with the given initial
-// byte capacity. The backing buffer is pre-allocated at danderRingSize (or
-// initSize if larger) using virtual memory.
+// byte capacity.
 func NewGrowingRingAlloc(initSize int, opts ...RingAllocOption) *GrowingRingAlloc {
-	mc := max(danderRingSize, initSize)
 	return &GrowingRingAlloc{
-		current: newRingAllocSoftCap(mc, initSize, opts...),
-		maxCap:  mc,
+		current: NewRingAlloc(initSize, opts...),
 		opts:    opts,
 	}
 }
@@ -148,86 +110,50 @@ func NewGrowingRingAlloc(initSize int, opts ...RingAllocOption) *GrowingRingAllo
 // calcGrowth computes the target capacity given the current cap and the
 // requested allocation size.
 func (g *GrowingRingAlloc) calcGrowth(currentCap, allocSize int) int {
-	grov := 20
+	grov := 20 //nolint:mnd // growth factor ×2.0
 	if currentCap > 1024*1024*10 {
-		grov = 11
+		grov = 11 //nolint:mnd // growth factor ×1.1 for >10 MB
 	} else if currentCap > 1024*1024*5 {
-		grov = 12
+		grov = 12 //nolint:mnd // growth factor ×1.2 for >5 MB
 	} else if currentCap > 1024*1024 {
-		grov = 14
+		grov = 14 //nolint:mnd // growth factor ×1.4 for >1 MB
 	}
-	return max(currentCap*grov/10, allocSize*2)
+	return max(currentCap*grov/10, allocSize*2) //nolint:mnd // factor is tenths
 }
 
-// growCap increases the usable capacity of the current ring in place.
-// The backing buffer was pre-allocated at maxCap, so this only bumps the bcap
-// field — no memory allocation occurs and no old ring is left behind.
+// grow creates a new, larger ring. The old ring stays alive until all its
+// SlotHandles are released.
 //
 // Must be called from the producer goroutine only.
-func (g *GrowingRingAlloc) growCap(allocSize int) {
+func (g *GrowingRingAlloc) grow(allocSize int) {
 	r := g.current
 	newCap := g.calcGrowth(r.bcap, allocSize)
-	newCap = min(newCap, g.maxCap)
-	if newCap <= r.bcap {
-		return
-	}
-	if newCap > danderRingSize {
-		r.log.Warningf(r, "Growing ring alloc to %dkb is too large", newCap/1024)
-	} else {
-		r.log.Infof(r, "Growing ring alloc to %dkb", newCap/1024)
-	}
-	r.bcap = newCap
+	r.log.Infof(r, "Growing ring alloc to %dkb", newCap/1024) //nolint:mnd
+	g.current = NewRingAlloc(newCap, g.opts...)
 }
 
-// Alloc carves n contiguous bytes from the current ring. When the usable
-// capacity is too small it is grown in place (the backing buffer was
-// pre-allocated). Only when the ring is genuinely full of live data is a new
-// ring created as a last resort.
+// Alloc carves n contiguous bytes from the current ring. When the current ring
+// cannot satisfy the allocation a new, larger ring is created.
 //
 // Must be called from the producer goroutine only.
 func (g *GrowingRingAlloc) Alloc(n int) ([]byte, *SlotHandle) {
-	r := g.current
-
-	// Preemptively grow the usable capacity when the allocation would either
-	// exceed the current cap (n > bcap) or force a wrap (write+n > bcap).
-	// Growing in place reuses the pre-allocated backing buffer, avoiding the
-	// memory overhead of two coexisting rings during growth transitions.
-	if (n > r.bcap || r.write+n > r.bcap) && r.bcap < g.maxCap {
-		g.growCap(n)
-	}
-
-	if buf, h := r.Alloc(n); buf != nil {
+	if buf, h := g.current.Alloc(n); buf != nil {
 		return buf, h
 	}
 
-	// The ring is genuinely full of live data or the slot table is exhausted.
-	// Create a new ring as a last resort; the old ring becomes GC-eligible once
-	// all outstanding SlotHandles have been released by consumers.
-	newSize := g.calcGrowth(r.bcap, n)
-	mc := g.maxCap
-	if newSize > mc {
-		mc = newSize
-		g.maxCap = mc
-	}
-	r.log.Warningf(r, "Ring genuinely full, creating new %dkb ring", mc/1024)
-	g.current = newRingAllocSoftCap(mc, mc, g.opts...)
+	g.grow(n)
 	return g.current.Alloc(n)
 }
 
 // Extend grows the most recent allocation in-place. Only succeeds when the
 // handle belongs to the current ring and there is enough contiguous free space.
-// Like Alloc, the usable capacity is grown in place when possible.
 //
 // Must be called from the producer goroutine only.
 func (g *GrowingRingAlloc) Extend(h *SlotHandle, n int) ([]byte, bool) {
 	if h == nil || h.ring != g.current {
 		return nil, false
 	}
-	r := g.current
-	if r.write+n > r.bcap && r.bcap < g.maxCap {
-		g.growCap(n)
-	}
-	return r.Extend(h, n)
+	return g.current.Extend(h, n)
 }
 
 // readCursor returns the start position of the oldest live slot.
