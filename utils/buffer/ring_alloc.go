@@ -24,7 +24,7 @@ func WithLogger(l logger.Logger) RingAllocOption {
 // Must be a power of two. 4096 comfortably covers 30 s @ 30 fps + audio.
 const ringSlotCount = 4096
 
-const danderRingSize = 1024 * 1024 * 1024 // 1GB
+const danderRingSize = 1024 * 1024 * 25 // 25MB
 
 // RingAlloc is a fixed-size byte slab with FIFO slot tracking and atomic reference
 // counting. It is designed for a single producer goroutine (demuxer) and N consumer
