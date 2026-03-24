@@ -17,7 +17,7 @@ type fragment struct {
 	segID          uint64        // Identifier for the segment to which the fragment belongs.
 	targetDuration time.Duration // Target duration for the fragment.
 	duration       time.Duration // Actual duration of the fragment.
-	finished       chan struct{}  // Channel to signal completion of the fragment.
+	finished       chan struct{} // Channel to signal completion of the fragment.
 	manifestEntry  string        // HLS manifest entry.
 	packets        []gomedia.Packet
 	codecPars      gomedia.CodecParametersPair // Codec parameters for the fragment.
@@ -108,23 +108,22 @@ func (fr *fragment) generateMp4() {
 	}
 	mux := fmp4.NewMuxer(fr.log)
 	if err := mux.Mux(fr.codecPars); err != nil {
-		fr.log.Errorf(fr,"fragment cache: mux error: %v", err)
+		fr.log.Errorf(fr, "fragment cache: mux error: %v", err)
 		return
 	}
 	for _, pkt := range fr.packets {
 		if err := mux.WritePacket(pkt); err != nil {
-			fr.log.Errorf(fr,"fragment cache: WritePacket error: %v", err)
+			fr.log.Errorf(fr, "fragment cache: WritePacket error: %v", err)
 		}
 	}
 	if buf := mux.GetMP4Fragment(int(fr.id)); buf != nil {
 		fr.cachedMp4 = make([]byte, len(buf.Data()))
 		copy(fr.cachedMp4, buf.Data())
-		buf.Release()
 	}
 }
 
 // getMp4Buffer returns the cached MP4 data for this fragment.
-func (fr *fragment) getMp4Buffer() buffer.PooledBuffer {
+func (fr *fragment) getMp4Buffer() buffer.Buffer {
 	return &staticBuffer{fr.cachedMp4}
 }
 

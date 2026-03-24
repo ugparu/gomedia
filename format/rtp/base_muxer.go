@@ -20,7 +20,7 @@ const rtpBufInitSize = 1500 //nolint:mnd // covers typical MTU-sized RTP packet 
 type baseMuxer struct {
 	w           io.Writer
 	log         logger.Logger
-	buf         buffer.PooledBuffer
+	buf         buffer.Buffer
 	payloadType uint8
 	clockRate   uint32
 	ssrc        uint32

@@ -638,20 +638,6 @@ func TestRingAlloc_StressCycles(t *testing.T) {
 // Benchmarks
 // ---------------------------------------------------------------------------
 
-func BenchmarkPooledBuffer_GetRelease_Small(b *testing.B) {
-	for b.Loop() {
-		buf := Get(128)
-		buf.Release()
-	}
-}
-
-func BenchmarkPooledBuffer_GetRelease_Big(b *testing.B) {
-	for b.Loop() {
-		buf := Get(bigBufSize)
-		buf.Release()
-	}
-}
-
 func BenchmarkRingAlloc_AllocRelease(b *testing.B) {
 	r := NewRingAlloc(1024 * 1024)
 	for b.Loop() {

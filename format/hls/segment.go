@@ -166,7 +166,7 @@ func (element *segment) release() {
 
 // getMp4Buffer lazily generates and returns the full-segment MP4 data.
 // Returns nil if the segment's packets have already been released.
-func (element *segment) getMp4Buffer() buffer.PooledBuffer {
+func (element *segment) getMp4Buffer() buffer.Buffer {
 	element.mu.Lock()
 	defer element.mu.Unlock()
 
@@ -192,7 +192,6 @@ func (element *segment) getMp4Buffer() buffer.PooledBuffer {
 	if buf := mux.GetMP4Fragment(int(element.id)); buf != nil {
 		element.cachedMp4 = make([]byte, len(buf.Data()))
 		copy(element.cachedMp4, buf.Data())
-		buf.Release()
 	}
 
 	return &staticBuffer{element.cachedMp4}
@@ -200,7 +199,7 @@ func (element *segment) getMp4Buffer() buffer.PooledBuffer {
 
 // getFragment lazily generates and returns the MP4 content of a specific fragment.
 // Returns nil if the segment's packets have already been released.
-func (element *segment) getFragment(ctx context.Context, id uint8) buffer.PooledBuffer {
+func (element *segment) getFragment(ctx context.Context, id uint8) buffer.Buffer {
 	element.mu.RLock()
 	if id >= uint8(len(element.fragments)) {
 		element.mu.RUnlock()

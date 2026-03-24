@@ -70,7 +70,7 @@ func (e *alawEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err e
 		consumed += e.inpFrameSize
 
 		var inBuf []byte
-		var poolBuf buffer.PooledBuffer
+		var poolBuf buffer.Buffer
 		if e.inpChannels == 1 {
 			inBuf = inData
 		} else {
@@ -90,16 +90,9 @@ func (e *alawEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err e
 		}
 
 		if inBuf, err = e.r.Resample(inBuf); err != nil {
-			if poolBuf != nil {
-				poolBuf.Release()
-			}
 			return
 		}
 		encoded := g711.EncodeAlaw(inBuf)
-		if poolBuf != nil {
-			poolBuf.Release()
-			poolBuf = nil
-		}
 		var outData []byte
 		var handle *buffer.SlotHandle
 		if e.ring != nil {

@@ -129,7 +129,7 @@ func (s *Stream) fillTrackAtom() (err error) {
 			Width:                int16(width),  //nolint:gosec
 			Height:               int16(height), //nolint:gosec
 			HorizontalResolution: defaultDPI,
-			VerticalResolution: defaultDPI,
+			VerticalResolution:   defaultDPI,
 			FrameCount:           1,
 			CompressorName:       [32]byte{},
 			Depth:                defaultDepth,
@@ -159,7 +159,7 @@ func (s *Stream) fillTrackAtom() (err error) {
 			Width:                int16(width),  //nolint:gosec
 			Height:               int16(height), //nolint:gosec
 			HorizontalResolution: defaultDPI,
-			VerticalResolution: defaultDPI,
+			VerticalResolution:   defaultDPI,
 			FrameCount:           1,
 			CompressorName:       [32]byte{},
 			Depth:                defaultDepth,
@@ -190,7 +190,7 @@ func (s *Stream) fillTrackAtom() (err error) {
 			Width:                int16(width),  //nolint:gosec
 			Height:               int16(height), //nolint:gosec
 			HorizontalResolution: defaultDPI,
-			VerticalResolution: defaultDPI,
+			VerticalResolution:   defaultDPI,
 			FrameCount:           1,
 			CompressorName:       [32]byte{},
 			Depth:                defaultDepth,
@@ -204,7 +204,7 @@ func (s *Stream) fillTrackAtom() (err error) {
 	case *aac.CodecParameters:
 		s.sample.SampleDesc.MP4ADesc = &mp4io.MP4ADesc{
 			DataRefIdx:       1,
-			NumberOfChannels: int16(codecPar.ChannelLayout().Count()),         //nolint:gosec
+			NumberOfChannels: int16(codecPar.ChannelLayout().Count()),             //nolint:gosec
 			SampleSize:       int16(codecPar.SampleFormat().BytesPerSample()) * 8, //nolint:gosec,mnd // bits per sample per ISO 14496-12 §12.2.3
 			SampleRate:       float64(codecPar.SampleRate()),
 			Conf: &mp4io.ElemStreamDesc{
@@ -463,7 +463,6 @@ func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
 			pps := h264Par.PPS()
 
 			buf := buffer.Get(4)
-			defer buf.Release()
 
 			binary.BigEndian.PutUint32(buf.Data(), uint32(len(sps))) //nolint:gosec
 			if _, err = s.muxer.writer.Write(buf.Data()); err != nil {
@@ -490,7 +489,6 @@ func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
 			vps := h265Par.VPS()
 
 			buf := buffer.Get(4)
-			defer buf.Release()
 
 			binary.BigEndian.PutUint32(buf.Data(), uint32(len(vps))) //nolint:gosec
 			if _, err = s.muxer.writer.Write(buf.Data()); err != nil {

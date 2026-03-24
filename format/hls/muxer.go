@@ -108,7 +108,7 @@ type muxer struct {
 	version               int                                 // HLS protocol version.
 	manifest              atomic.Value                        // Stores the HLS manifest (string).
 	indexMu               sync.Mutex                          // Protects indexCh replacement.
-	indexCh               chan struct{}                        // Closed to broadcast manifest changes; then replaced.
+	indexCh               chan struct{}                       // Closed to broadcast manifest changes; then replaced.
 	header                string                              // Initial part of the HLS playlist.
 	codecPars             gomedia.CodecParametersPair         // Codec parameters for video and audio.
 	initVersion           int                                 // Current init segment version (incremented on codec change).
@@ -534,7 +534,6 @@ func (mxr *muxer) GetInitByVersion(version int) ([]byte, error) {
 		return nil, err
 	}
 	buf := mux.GetInit()
-	defer buf.Release()
 	if len(buf.Data()) == 0 {
 		return nil, errors.New("empty init buffer")
 	}
@@ -562,7 +561,6 @@ func (mxr *muxer) GetSegment(ctx context.Context, index uint64) ([]byte, error) 
 	if buf == nil {
 		return nil, errors.New("segment expired")
 	}
-	defer buf.Release()
 	return buf.Data(), nil
 }
 
@@ -580,7 +578,6 @@ func (mxr *muxer) GetFragment(ctx context.Context, segindex uint64, index uint8)
 	if buf == nil {
 		return nil, errors.New("fragment expired")
 	}
-	defer buf.Release()
 	bytes := buf.Data()
 
 	if len(bytes) == 0 {

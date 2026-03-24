@@ -34,7 +34,7 @@ const (
 type baseDemuxer struct {
 	rdr     io.Reader
 	sdp     sdp.Media
-	payload buffer.PooledBuffer
+	payload buffer.Buffer
 	offset  int
 	end     int
 
@@ -141,9 +141,6 @@ func (d *baseDemuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 }
 
 func (d *baseDemuxer) Close() {
-	d.payload.Release()
-	// ring slab is a plain []byte; it becomes GC-eligible once all outstanding
-	// SlotHandles have been released by consumers. Nothing to close explicitly.
 }
 
 func (d *baseDemuxer) isRTCPPacket() bool {

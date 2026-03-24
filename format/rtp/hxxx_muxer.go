@@ -11,7 +11,7 @@ const DefaultMTU = 1200
 // It is codec-agnostic and expects the caller to provide NAL classification.
 type hxxxMuxer struct {
 	*baseMuxer
-	fuBuf buffer.PooledBuffer
+	fuBuf buffer.Buffer
 	mtu   int
 }
 

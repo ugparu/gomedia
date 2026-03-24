@@ -221,7 +221,7 @@ func (m *Muxer) WriteTrailer() (err error) {
 	return
 }
 
-func (m *Muxer) GetInit() buffer.PooledBuffer {
+func (m *Muxer) GetInit() buffer.Buffer {
 	moov := &mp4io.Movie{
 		Header: mp4io.NewMovieHeader(),
 		MovieExtend: &mp4io.MovieExtend{
@@ -413,7 +413,7 @@ func (m *Muxer) processDataOffsets(moof *mp4io.MovieFrag, startMOOF int, out []b
 
 // GetMP4Fragment returns an MP4 fragment
 // This function is complex but has been refactored to reduce cyclomatic complexity
-func (m *Muxer) GetMP4Fragment(idx int) buffer.PooledBuffer {
+func (m *Muxer) GetMP4Fragment(idx int) buffer.Buffer {
 	defer m.processMuxer()
 
 	moof := new(mp4io.MovieFrag)

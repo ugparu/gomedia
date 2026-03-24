@@ -22,7 +22,7 @@ const memBufInitSize = 512 * 1024 //nolint:mnd // 512KB initial buffer, covers ~
 // memWriteSeeker is an in-memory io.WriteSeeker backed by buffer.PooledBuffer.
 // All muxer writes go here; the buffer is flushed to disk in one write at segment close.
 type memWriteSeeker struct {
-	buf buffer.PooledBuffer
+	buf buffer.Buffer
 	len int // logical length of written data (may differ from buf.Len after Resize)
 	pos int
 }
@@ -73,9 +73,6 @@ func (m *memWriteSeeker) Len() int { return m.len }
 
 // Reset resets the buffer for reuse, keeping the allocated capacity.
 func (m *memWriteSeeker) Reset() { m.len = 0; m.pos = 0 }
-
-// Release returns the underlying PooledBuffer to the pool.
-func (m *memWriteSeeker) Release() { m.buf.Release() }
 
 // ensure interface compliance at compile time.
 var _ io.WriteSeeker = (*memWriteSeeker)(nil)

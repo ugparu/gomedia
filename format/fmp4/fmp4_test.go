@@ -196,7 +196,6 @@ func TestGetInit_ParsedFtyp(t *testing.T) {
 	require.NoError(t, m.Mux(pair))
 
 	buf := m.GetInit()
-	defer buf.Release()
 
 	ftyp, _ := parseInitSegment(t, buf.Data())
 
@@ -223,7 +222,6 @@ func TestGetInit_ParsedMoov_VideoTrack(t *testing.T) {
 	require.NoError(t, m.Mux(pair))
 
 	buf := m.GetInit()
-	defer buf.Release()
 	_, moov := parseInitSegment(t, buf.Data())
 
 	// ISO 14496-12 §8.2.2: moov must have a header
@@ -269,7 +267,6 @@ func TestGetInit_ParsedMoov_AudioTrack(t *testing.T) {
 	require.NoError(t, m.Mux(pair))
 
 	buf := m.GetInit()
-	defer buf.Release()
 	_, moov := parseInitSegment(t, buf.Data())
 
 	require.Len(t, moov.Tracks, 1)
@@ -298,7 +295,6 @@ func TestGetInit_ParsedMoov_VideoAndAudio(t *testing.T) {
 	require.NoError(t, m.Mux(pair))
 
 	buf := m.GetInit()
-	defer buf.Release()
 	_, moov := parseInitSegment(t, buf.Data())
 
 	require.Len(t, moov.Tracks, 2)
@@ -333,7 +329,6 @@ func TestGetMP4Fragment_ParsedMoof_SequenceNumber(t *testing.T) {
 	require.NoError(t, m.WritePacket(makeVideoPacket(videoCp, true, 0, 33*time.Millisecond, []byte{0x01})))
 
 	buf := m.GetMP4Fragment(42)
-	defer buf.Release()
 
 	moof, _ := parseFragment(t, buf.Data())
 	require.NotNil(t, moof.Header)
@@ -351,7 +346,6 @@ func TestGetMP4Fragment_ParsedMoof_TrackID(t *testing.T) {
 	require.NoError(t, m.strs[1].writePacket(aac.NewPacket([]byte{0x02}, 0, "test", time.Time{}, audioCp, 64*time.Millisecond)))
 
 	buf := m.GetMP4Fragment(1)
-	defer buf.Release()
 
 	moof, _ := parseFragment(t, buf.Data())
 	require.Len(t, moof.Tracks, 2)
@@ -371,7 +365,6 @@ func TestGetMP4Fragment_ParsedMoof_TfhdFlags(t *testing.T) {
 	require.NoError(t, m.WritePacket(makeVideoPacket(videoCp, true, 0, 33*time.Millisecond, []byte{0x01})))
 
 	buf := m.GetMP4Fragment(1)
-	defer buf.Release()
 
 	moof, _ := parseFragment(t, buf.Data())
 	flags := moof.Tracks[0].Header.Flags
@@ -395,7 +388,6 @@ func TestGetMP4Fragment_ParsedMoof_DecodeTime(t *testing.T) {
 	require.NoError(t, m.WritePacket(makeVideoPacket(videoCp, true, ts, 33*time.Millisecond, []byte{0x01})))
 
 	buf := m.GetMP4Fragment(1)
-	defer buf.Release()
 
 	moof, _ := parseFragment(t, buf.Data())
 	require.NotNil(t, moof.Tracks[0].DecodeTime)
@@ -417,7 +409,6 @@ func TestGetMP4Fragment_DataOffset_PointsIntoMdat(t *testing.T) {
 	require.NoError(t, m.WritePacket(makeVideoPacket(videoCp, true, 0, 33*time.Millisecond, payload)))
 
 	buf := m.GetMP4Fragment(1)
-	defer buf.Release()
 	data := buf.Data()
 
 	// Find moof start offset
@@ -454,7 +445,6 @@ func TestGetMP4Fragment_MdatSize_MatchesPayload(t *testing.T) {
 	require.NoError(t, m.strs[1].writePacket(aac.NewPacket(audioPayload, 0, "test", time.Time{}, audioCp, 64*time.Millisecond)))
 
 	buf := m.GetMP4Fragment(1)
-	defer buf.Release()
 
 	_, mdatPayload := parseFragment(t, buf.Data())
 
@@ -478,7 +468,6 @@ func TestGetMP4Fragment_MultiStream_DataOffsets(t *testing.T) {
 	require.NoError(t, m.strs[1].writePacket(aac.NewPacket(audioPayload, 0, "test", time.Time{}, audioCp, 64*time.Millisecond)))
 
 	buf := m.GetMP4Fragment(1)
-	defer buf.Release()
 	data := buf.Data()
 
 	// Find moof start
@@ -517,7 +506,6 @@ func TestSampleFlags_VideoKeyframeThenNonKeyframe(t *testing.T) {
 	require.NoError(t, m.WritePacket(makeVideoPacket(videoCp, false, 33*time.Millisecond, 33*time.Millisecond, []byte{0x02})))
 
 	buf := m.GetMP4Fragment(1)
-	defer buf.Release()
 	moof, _ := parseFragment(t, buf.Data())
 
 	trun := moof.Tracks[0].Run
@@ -541,7 +529,6 @@ func TestSampleFlags_AllKeyframes(t *testing.T) {
 	require.NoError(t, m.WritePacket(makeVideoPacket(videoCp, true, 33*time.Millisecond, 33*time.Millisecond, []byte{0x02})))
 
 	buf := m.GetMP4Fragment(1)
-	defer buf.Release()
 	moof, _ := parseFragment(t, buf.Data())
 
 	// All keyframes: DefaultFlags = NoDependencies, no FirstSampleFlags needed
@@ -561,7 +548,6 @@ func TestSampleFlags_AudioAllNoDependencies(t *testing.T) {
 	require.NoError(t, m.strs[0].writePacket(aac.NewPacket([]byte{0x02}, 64*time.Millisecond, "test", time.Time{}, audioCp, 64*time.Millisecond)))
 
 	buf := m.GetMP4Fragment(1)
-	defer buf.Release()
 	moof, _ := parseFragment(t, buf.Data())
 
 	// Audio samples are all independent (sync) — must be SampleNoDependencies
@@ -585,7 +571,6 @@ func TestSampleFlags_MixedKeyframes_TRUNSampleFlagsSet(t *testing.T) {
 	require.NoError(t, m.WritePacket(makeVideoPacket(videoCp, true, 66*time.Millisecond, 33*time.Millisecond, []byte{0x03})))
 
 	buf := m.GetMP4Fragment(1)
-	defer buf.Release()
 	moof, _ := parseFragment(t, buf.Data())
 
 	trun := moof.Tracks[0].Run
@@ -615,7 +600,6 @@ func TestTrunEntries_SizeAndDuration(t *testing.T) {
 	require.NoError(t, m.WritePacket(makeVideoPacket(videoCp, false, dur, dur, data2)))
 
 	buf := m.GetMP4Fragment(1)
-	defer buf.Release()
 	moof, _ := parseFragment(t, buf.Data())
 
 	trun := moof.Tracks[0].Run
@@ -640,8 +624,7 @@ func TestGetMP4Fragment_ResetsStreams(t *testing.T) {
 	require.NoError(t, m.Mux(pair))
 	require.NoError(t, m.WritePacket(makeVideoPacket(videoCp, true, 0, 33*time.Millisecond, []byte{0x01})))
 
-	buf := m.GetMP4Fragment(1)
-	buf.Release()
+	m.GetMP4Fragment(1)
 
 	// Streams should be recreated and empty
 	require.Len(t, m.strs, 1)
@@ -665,9 +648,6 @@ func TestMultipleFragments_IndependentPayloads(t *testing.T) {
 	payload2 := []byte{0xCC, 0xDD, 0xEE}
 	require.NoError(t, m.WritePacket(makeVideoPacket(videoCp, true, 33*time.Millisecond, 33*time.Millisecond, payload2)))
 	buf2 := m.GetMP4Fragment(2)
-
-	defer buf1.Release()
-	defer buf2.Release()
 
 	// Validate each fragment independently
 	_, mdat1 := parseFragment(t, buf1.Data())
@@ -745,7 +725,6 @@ func TestFullRoundtrip_RealData(t *testing.T) {
 
 	// Init segment
 	initBuf := m.GetInit()
-	defer initBuf.Release()
 	_, moov := parseInitSegment(t, initBuf.Data())
 	require.Len(t, moov.Tracks, 2)
 
@@ -758,7 +737,6 @@ func TestFullRoundtrip_RealData(t *testing.T) {
 
 	// Fragment
 	fragBuf := m.GetMP4Fragment(1)
-	defer fragBuf.Release()
 
 	moof, mdatPayload := parseFragment(t, fragBuf.Data())
 
@@ -791,7 +769,6 @@ func TestFullRoundtrip_BufferExactSize(t *testing.T) {
 	require.NoError(t, m.WritePacket(makeVideoPacket(videoCp, true, 0, 33*time.Millisecond, []byte{0x01, 0x02})))
 
 	buf := m.GetMP4Fragment(1)
-	defer buf.Release()
 
 	data := buf.Data()
 	// Walk all boxes and verify they exactly fill the buffer — no trailing garbage

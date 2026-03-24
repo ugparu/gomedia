@@ -41,7 +41,7 @@ type audioDecoder struct {
 	outPackets chan gomedia.AudioPacket
 	codecPar   gomedia.AudioCodecParameters
 	pcmPar     *pcm.CodecParameters
-	inBuf      buffer.PooledBuffer
+	inBuf      buffer.Buffer
 	ring       *buffer.GrowingRingAlloc
 	name       string
 	log        logger.Logger
@@ -156,7 +156,6 @@ func (d *audioDecoder) Release() { //nolint:revive // required by lifecycle.Asyn
 	}
 drained:
 	close(d.outPackets)
-	d.inBuf.Release()
 }
 
 func (d *audioDecoder) String() string {

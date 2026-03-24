@@ -21,9 +21,9 @@ type aacEncoder struct {
 	channels      int
 	frameSize     int
 	frameDuration time.Duration
-	pcmBuf        buffer.PooledBuffer
+	pcmBuf        buffer.Buffer
 	pcmLen        int
-	aacBuf        buffer.PooledBuffer
+	aacBuf        buffer.Buffer
 	param         *aac.CodecParameters
 	ring          *buffer.GrowingRingAlloc
 }
@@ -215,7 +215,5 @@ func (v *aacEncoder) NbBytesPerFrame() int {
 
 func (v *aacEncoder) Close() {
 	C.aacenc_close(&v.m) //nolint:gocritic // CGO function call
-	v.pcmBuf.Release()
-	v.aacBuf.Release()
 	v.ring = nil
 }

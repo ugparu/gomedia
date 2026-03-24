@@ -67,9 +67,9 @@ type peerTrack struct {
 	at                     *webrtc.TrackLocalStaticSample
 	targetURL              string
 	aChan                  chan gomedia.AudioPacket
-	aBuf                   buffer.PooledBuffer
+	aBuf                   buffer.Buffer
 	vChan                  chan gomedia.VideoPacket
-	vBuf                   buffer.PooledBuffer
+	vBuf                   buffer.Buffer
 	vflush                 chan struct{}
 	aflush                 chan struct{}
 	delay                  time.Duration
@@ -80,8 +80,7 @@ type peerTrack struct {
 func writeVideoPacketsToPeer(pt *peerTrack,
 	vflush chan struct{},
 	vChan chan gomedia.VideoPacket,
-	vt *webrtc.TrackLocalStaticSample, vBuf buffer.PooledBuffer, delay time.Duration) {
-	defer vBuf.Release()
+	vt *webrtc.TrackLocalStaticSample, vBuf buffer.Buffer, delay time.Duration) {
 	last := time.Now()
 	naluBuf := make([][]byte, 0, 8) //nolint:mnd // typical frame has 1-5 NALUs
 	processPkt := func(pkt gomedia.VideoPacket) {
@@ -181,8 +180,7 @@ func writeVideoPacketsToPeer(pt *peerTrack,
 	}
 }
 
-func writeAudioPacketsToPeer(pt *peerTrack, aflush chan struct{}, aChan chan gomedia.AudioPacket, at *webrtc.TrackLocalStaticSample, aBuf buffer.PooledBuffer, delay time.Duration) {
-	defer aBuf.Release()
+func writeAudioPacketsToPeer(pt *peerTrack, aflush chan struct{}, aChan chan gomedia.AudioPacket, at *webrtc.TrackLocalStaticSample, aBuf buffer.Buffer, delay time.Duration) {
 	last := time.Now()
 	processPkt := func(pkt gomedia.AudioPacket) {
 		defer pkt.Release()

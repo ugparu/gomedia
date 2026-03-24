@@ -34,7 +34,7 @@ type innerRTSPDemuxer struct {
 	buffer            *bytes.Buffer
 	packets           []gomedia.Packet
 	noVideo, noAudio  bool
-	readBuffer        buffer.PooledBuffer
+	readBuffer        buffer.Buffer
 	rtpRingBufferSize int
 	log               logger.Logger
 }
@@ -390,7 +390,6 @@ func (dmx *innerRTSPDemuxer) processRTSPPacket(header [headerSize]byte) (err err
 func (dmx *innerRTSPDemuxer) Close() {
 	dmx.ticker.Stop()
 	dmx.client.Close()
-	dmx.readBuffer.Release()
 }
 
 func (dmx *innerRTSPDemuxer) String() string {

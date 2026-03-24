@@ -194,7 +194,6 @@ func (mux *Muxer) Mux(streams gomedia.CodecParametersPair) (err error) {
 	ftyp := mp4io.NewFileType()
 
 	buf := buffer.Get(ftyp.Len())
-	defer buf.Release()
 
 	bufData := buf.Data()
 	ftyp.Marshal(bufData)
