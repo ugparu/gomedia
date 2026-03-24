@@ -2,7 +2,7 @@ package buffer
 
 // Get получает буфер из пула с заданной длиной (len)
 func Get(size int) Buffer {
-	b := &memBuffer{buf: make([]byte, 0, 1024*1024)}
+	b := &memBuffer{buf: make([]byte, 0, size)}
 
 	// Убеждаемся, что емкости хватает
 	if cap(b.buf) < size {
@@ -38,7 +38,7 @@ func (b *memBuffer) Resize(size int) {
 		if newCap < size {
 			newCap = size
 		}
-		newBuf := make([]byte, newCap)
+		newBuf := make([]byte, size, newCap)
 		copy(newBuf, b.buf)
 		b.buf = newBuf
 	} else {
