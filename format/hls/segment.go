@@ -29,7 +29,7 @@ type segment struct {
 	targetFragDuration time.Duration               // Target duration for each fragment in the segment.
 	targetDuration     time.Duration               // Target duration for the entire segment.
 	duration           time.Duration               // Actual duration of the segment.
-	finished           chan struct{}                // Channel to signal completion of the segment.
+	finished           chan struct{}               // Channel to signal completion of the segment.
 	curFragment        *fragment                   // Atomic value to store the current fragment.
 	manifestEntry      string                      // HLS manifest entry for the segment.
 	codecPars          gomedia.CodecParametersPair // Codec parameters for the segment.
@@ -37,7 +37,7 @@ type segment struct {
 	fragments          []*fragment                 // List of fragments in the segment.
 	time               time.Time                   // Time when the segment was created.
 	cachedMp4          []byte                      // Lazily generated full-segment MP4.
-	mu                 sync.Mutex                  // Protects lazy MP4 generation vs packet release.
+	mu                 sync.RWMutex                // Protects fragments slice, lazy MP4 generation, and packet release.
 	released           bool                        // True after packets have been released.
 	discontinuity      bool                        // True if this segment starts after a codec change.
 	initVersion        int                         // Init segment version this segment belongs to.
@@ -96,8 +96,12 @@ func (element *segment) writePacket(packet gomedia.Packet) (changed bool, err er
 
 		newFragID := curFrag.id + 1
 		newFrag := newFragment(newFragID, element.id, element.targetFragDuration, element.codecPars, element.mediaName, element.log)
+
+		element.mu.Lock()
 		element.fragments = append(element.fragments, newFrag)
 		element.curFragment = newFrag
+		element.mu.Unlock()
+
 		element.manifestEntry = element.cacheEntry + newFrag.manifestEntry
 		changed = true
 	default:
@@ -175,13 +179,13 @@ func (element *segment) getMp4Buffer() buffer.PooledBuffer {
 
 	mux := fmp4.NewMuxer(element.log)
 	if muxErr := mux.Mux(element.codecPars); muxErr != nil {
-		element.log.Errorf(element,"segment cache: mux error: %v", muxErr)
+		element.log.Errorf(element, "segment cache: mux error: %v", muxErr)
 		return nil
 	}
 	for _, frag := range element.fragments {
 		for _, pkt := range frag.packets {
 			if wErr := mux.WritePacket(pkt); wErr != nil {
-				element.log.Errorf(element,"segment cache: WritePacket error: %v", wErr)
+				element.log.Errorf(element, "segment cache: WritePacket error: %v", wErr)
 			}
 		}
 	}
@@ -197,14 +201,17 @@ func (element *segment) getMp4Buffer() buffer.PooledBuffer {
 // getFragment lazily generates and returns the MP4 content of a specific fragment.
 // Returns nil if the segment's packets have already been released.
 func (element *segment) getFragment(ctx context.Context, id uint8) buffer.PooledBuffer {
+	element.mu.RLock()
 	if id >= uint8(len(element.fragments)) {
+		element.mu.RUnlock()
 		return nil
 	}
+	frag := element.fragments[id]
+	element.mu.RUnlock()
 
 	ctx, cancel := context.WithTimeout(ctx, element.blockingTimeout)
 	defer cancel()
 
-	frag := element.fragments[id]
 	select {
 	case <-ctx.Done():
 		return nil
@@ -228,7 +235,10 @@ func (element *segment) getFragment(ctx context.Context, id uint8) buffer.Pooled
 // waitFragment waits until a specific fragment in the segment is finished.
 func (element *segment) waitFragment(ctx context.Context, id uint8) {
 	for {
+		element.mu.RLock()
 		curFrag := element.curFragment
+		element.mu.RUnlock()
+
 		if curFrag.id >= id {
 			return
 		}

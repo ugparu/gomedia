@@ -107,7 +107,8 @@ type muxer struct {
 	blockingTimeout       time.Duration                       // Timeout for blocking HLS requests.
 	version               int                                 // HLS protocol version.
 	manifest              atomic.Value                        // Stores the HLS manifest (string).
-	indexChan             chan struct{}                       // Channel for signaling index changes.
+	indexMu               sync.Mutex                          // Protects indexCh replacement.
+	indexCh               chan struct{}                        // Closed to broadcast manifest changes; then replaced.
 	header                string                              // Initial part of the HLS playlist.
 	codecPars             gomedia.CodecParametersPair         // Codec parameters for video and audio.
 	initVersion           int                                 // Current init segment version (incremented on codec change).
@@ -137,7 +138,7 @@ func NewHLSMuxer(segmentDuration time.Duration, segmentCount uint8, partHoldBack
 		blockingTimeout:  time.Second * 3,
 		version:          7,
 		manifest:         atomic.Value{}, //nolint:govet // initialized with Store("") below
-		indexChan:        make(chan struct{}),
+		indexCh:          make(chan struct{}),
 		codecPars:        gomedia.CodecParametersPair{AudioCodecParameters: nil, VideoCodecParameters: nil, SourceID: ""},
 		initVersion:      0,
 		initCache:        make(map[int]gomedia.CodecParametersPair),
@@ -233,6 +234,7 @@ func (mxr *muxer) UpdateCodecParameters(codecPars gomedia.CodecParametersPair) e
 	mxr.evictOldSegments()
 
 	mxr.manifest.Store(mxr.updateIndexM3u8())
+	mxr.broadcastIndex()
 	return nil
 }
 
@@ -331,15 +333,29 @@ func (mxr *muxer) WritePacket(inpPkt gomedia.Packet) (err error) {
 	}
 	mxr.manifestDirty = false
 
-	// Update the HLS manifest and signal the change.
+	// Update the HLS manifest and broadcast the change to all waiting readers.
 	mxr.manifest.Store(mxr.updateIndexM3u8())
-	for {
-		select {
-		case mxr.indexChan <- struct{}{}:
-		default:
-			return
-		}
-	}
+	mxr.broadcastIndex()
+	return nil
+}
+
+// broadcastIndex closes the current indexCh (waking all blocked readers) and
+// replaces it with a fresh channel for the next wait cycle.
+func (mxr *muxer) broadcastIndex() {
+	mxr.indexMu.Lock()
+	ch := mxr.indexCh
+	mxr.indexCh = make(chan struct{})
+	mxr.indexMu.Unlock()
+	close(ch)
+}
+
+// getIndexCh returns the current broadcast channel. Readers must capture it
+// before starting to wait so they don't miss a broadcast that fires while they
+// are not yet in the select.
+func (mxr *muxer) getIndexCh() chan struct{} {
+	mxr.indexMu.Lock()
+	defer mxr.indexMu.Unlock()
+	return mxr.indexCh
 }
 
 // updateIndexM3u8 rebuilds the HLS manifest into the reusable manifestBuilder.
@@ -395,6 +411,11 @@ func (mxr *muxer) GetIndexM3u8(ctx context.Context, needSeg int64, needPart int8
 		return mxr.manifest.Load().(string), nil
 	}
 
+	// Capture the broadcast channel BEFORE waiting, so if the manifest is
+	// updated while we wait for the segment/part, the channel will already
+	// be closed and we won't block below.
+	ch := mxr.getIndexCh()
+
 	// Wait for segment or part
 	waitErr := mxr.waitForSegmentOrPart(ctx, needSeg, needPart)
 	if waitErr != nil {
@@ -407,7 +428,7 @@ func (mxr *muxer) GetIndexM3u8(ctx context.Context, needSeg int64, needPart int8
 	select {
 	case <-ctx.Done():
 		return "", ctx.Err()
-	case <-mxr.indexChan:
+	case <-ch:
 	}
 
 	return mxr.manifest.Load().(string), nil

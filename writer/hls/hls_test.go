@@ -680,3 +680,88 @@ func TestEndToEnd_FullPipeline(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, frag)
 }
+
+// ---------------------------------------------------------------------------
+// Parallel multi-instance: 4 independent HLS streams with concurrent readers
+// ---------------------------------------------------------------------------
+
+// TestParallelInstances_FourStreamsWithConcurrentReaders emulates a real
+// deployment: 4 independent HLS writer instances (4 camera streams), each
+// receiving packets concurrently, while multiple reader goroutines per
+// instance poll init/manifest/segments/fragments — exactly what happens
+// when browsers connect to separate HLS streams.
+func TestParallelInstances_FourStreamsWithConcurrentReaders(t *testing.T) {
+	const (
+		numStreams     = 4
+		readersPerStream = 3
+		pktLimit       = 500
+		readIterations = 30
+	)
+
+	_, vCp, aCp := loadTestCodecPair(t, "cam1")
+
+	writers := make([]gomedia.HLSStreamer, numStreams)
+	packetSets := make([][]gomedia.Packet, numStreams)
+
+	for i := 0; i < numStreams; i++ {
+		sourceID := fmt.Sprintf("stream-%d", i)
+		writers[i] = newWriter(t, uint64(i+1), 3, 2*time.Second)
+		packetSets[i] = loadTestPackets(t, sourceID, vCp, aCp, pktLimit)
+	}
+
+	var wg sync.WaitGroup
+
+	// Launch a writer goroutine per stream (concurrent packet injection).
+	for i := 0; i < numStreams; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			sendPackets(t, writers[idx], packetSets[idx])
+		}(i)
+	}
+
+	// Launch reader goroutines per stream (emulating browser players).
+	for i := 0; i < numStreams; i++ {
+		for r := 0; r < readersPerStream; r++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				w := writers[idx]
+				for j := 0; j < readIterations; j++ {
+					_, _ = w.GetMasterPlaylist()
+					_, _ = w.GetIndexM3u8(context.Background(), uint8(0), -1, -1)
+					_, _ = w.GetInit(0)
+					_, _ = w.GetSegment(context.Background(), 0, 0)
+					_, _ = w.GetFragment(context.Background(), 0, 0, 0)
+					time.Sleep(2 * time.Millisecond)
+				}
+			}(i)
+		}
+	}
+
+	wg.Wait()
+
+	// After all packets are consumed, every stream must have produced valid data.
+	for i := 0; i < numStreams; i++ {
+		w := writers[i]
+
+		master := waitForMaster(t, w, 3*time.Second)
+		assert.Contains(t, master, "#EXTM3U", "stream %d master missing header", i)
+		assert.Contains(t, master, "#EXT-X-STREAM-INF:", "stream %d master missing variant", i)
+
+		initData, err := w.GetInit(0)
+		require.NoError(t, err, "stream %d GetInit", i)
+		assert.NotEmpty(t, initData, "stream %d init empty", i)
+
+		manifest := waitForSegment(t, w, 0, 3*time.Second)
+		assert.Contains(t, manifest, "#EXTINF:", "stream %d missing segment", i)
+
+		seg, err := w.GetSegment(context.Background(), 0, 0)
+		require.NoError(t, err, "stream %d GetSegment", i)
+		assert.NotEmpty(t, seg, "stream %d segment empty", i)
+
+		frag, err := w.GetFragment(context.Background(), 0, 0, 0)
+		require.NoError(t, err, "stream %d GetFragment", i)
+		assert.NotEmpty(t, frag, "stream %d fragment empty", i)
+	}
+}
