@@ -24,7 +24,7 @@ func WithLogger(l logger.Logger) RingAllocOption {
 // Must be a power of two. 4096 comfortably covers 30 s @ 30 fps + audio.
 const ringSlotCount = 4096
 
-const danderRingSize = 1024 * 1024 * 25 // 25MB
+const danderRingSize = 1024 * 1024 * 1024 // 1GB
 
 // RingAlloc is a fixed-size byte slab with FIFO slot tracking and atomic reference
 // counting. It is designed for a single producer goroutine (demuxer) and N consumer
@@ -76,22 +76,38 @@ type SlotHandle struct {
 	idx  uint64
 }
 
-// newRingAllocSoftCap creates a RingAlloc backed by bufSize bytes of virtual
-// memory with an initial usable capacity of softCap. The producer can grow the
-// usable capacity up to bufSize by writing to bcap directly (producer-only).
-//
-// On Linux/amd64 the kernel defers physical page allocation until first write
-// (demand paging), so the resident memory cost tracks the usable capacity, not
-// the full buffer size.
+// newRingAllocSoftCap creates a RingAlloc with an initial usable capacity of
+// softCap. When bufSize > softCap the backing buffer is allocated via
+// mmap(MAP_ANONYMOUS) so that physical pages are committed only on first write
+// and the allocation is invisible to Go's heap profiler. When bufSize == softCap
+// a regular Go slice is used (no mmap overhead for fixed-size rings).
 func newRingAllocSoftCap(bufSize, softCap int, opts ...RingAllocOption) *RingAlloc {
 	softCap = min(softCap, bufSize)
+
+	var buf []byte
+	var useMmap bool
+	if bufSize > softCap {
+		var err error
+		buf, err = mmapBytes(bufSize)
+		if err != nil {
+			buf = make([]byte, bufSize) // fallback
+		} else {
+			useMmap = true
+		}
+	} else {
+		buf = make([]byte, bufSize)
+	}
+
 	r := &RingAlloc{
-		buf:  make([]byte, bufSize),
+		buf:  buf,
 		bcap: softCap,
 		log:  logger.Default,
 	}
 	for _, opt := range opts {
 		opt(r)
+	}
+	if useMmap {
+		setMmapFinalizer(r)
 	}
 	return r
 }

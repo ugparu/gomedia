@@ -1,48 +1,10 @@
 package buffer
 
-import (
-	"sync"
-)
-
-const (
-	defaultBufSize = 4 * 1024  // Начальный размер 4KB
-	bigBufSize     = 64 * 1024 // 64KB
-)
-
-// Пул объектов memBuffer
-var bufPool = sync.Pool{
-	New: func() any {
-		return &memBuffer{
-			buf: make([]byte, 0, defaultBufSize),
-		}
-	},
-}
-
-var bigBufPool = sync.Pool{
-	New: func() any {
-		return &memBuffer{
-			buf: make([]byte, 0, bigBufSize),
-		}
-	},
-}
-
 // Get получает буфер из пула с заданной длиной (len)
 func Get(size int) Buffer {
-	var b *memBuffer
-	if size >= bigBufSize {
-		b = bigBufPool.Get().(*memBuffer)
-	} else {
-		b = bufPool.Get().(*memBuffer)
+	return &memBuffer{
+		buf: make([]byte, size),
 	}
-
-	// Убеждаемся, что емкости хватает
-	if cap(b.buf) < size {
-		b.buf = make([]byte, size)
-	}
-
-	// Устанавливаем рабочую длину слайса
-	b.buf = b.buf[:size]
-	return b
 }
 
 type memBuffer struct {
