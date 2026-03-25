@@ -29,12 +29,12 @@ func WithUsageLog(interval time.Duration) RingAllocOption {
 	}
 }
 
-// WithStaleRingAllocFn enables a background watchdog goroutine that periodically
+// WithStaleRingAllocLog enables a background watchdog goroutine that periodically
 // scans live slots and calls fn for any slot that has been held longer than timeout.
 // The callback receives the slot index and the duration since allocation.
 // This is a diagnostic tool for detecting leaked SlotHandles — do not enable in
 // performance-critical production paths.
-func WithStaleRingAllocFn(timeout time.Duration, fn func(idx uint64, age time.Duration)) RingAllocOption {
+func WithStaleRingAllocLog(timeout time.Duration, fn func(idx uint64, age time.Duration)) RingAllocOption {
 	return func(r *RingAlloc) {
 		r.staleFn = fn
 		r.staleTimeout = timeout
