@@ -175,7 +175,21 @@ func (w *rtspWriter) resetMuxer() {
 // Release is called by AsyncManager to gracefully stop the writer.
 func (w *rtspWriter) Release() { //nolint:revive
 	w.resetMuxer()
-	close(w.inpPktCh)
+	// Drain remaining packets from the channel to prevent leaks.
+	for {
+		select {
+		case pkt, ok := <-w.inpPktCh:
+			if !ok {
+				return
+			}
+			if pkt != nil {
+				pkt.Release()
+			}
+		default:
+			close(w.inpPktCh)
+			return
+		}
+	}
 }
 
 // Packets returns the input packet channel for the writer.

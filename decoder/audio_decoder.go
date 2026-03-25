@@ -155,7 +155,19 @@ func (d *audioDecoder) Release() { //nolint:revive // required by lifecycle.Asyn
 		}
 	}
 drained:
-	close(d.outPackets)
+	// Drain remaining output packets to prevent leaks.
+	for {
+		select {
+		case pkt, ok := <-d.outPackets:
+			if !ok {
+				return
+			}
+			pkt.Release()
+		default:
+			close(d.outPackets)
+			return
+		}
+	}
 }
 
 func (d *audioDecoder) String() string {

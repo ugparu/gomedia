@@ -241,7 +241,20 @@ func (dec *videoDecoder) Release() { //nolint:revive // required by lifecycle.As
 		}
 	}
 drained:
-	close(dec.outFrmCh)
+	// Drain remaining output frames to prevent leaks.
+	for {
+		select {
+		case img, ok := <-dec.outFrmCh:
+			if !ok {
+				goto framesDrained
+			}
+			img.Release()
+		default:
+			close(dec.outFrmCh)
+			goto framesDrained
+		}
+	}
+framesDrained:
 	close(dec.fpsChan)
 }
 

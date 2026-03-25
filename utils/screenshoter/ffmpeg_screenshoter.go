@@ -77,25 +77,26 @@ func (screenshoter *ffmpegScreenshoter) Screenshot(url string) ([]byte, error) {
 				select {
 				case screenshotDecoder.Packets() <- vPkt:
 				case <-screenshotDecoder.Done():
+					vPkt.Release()
 					return nil, errors.New("decoder stopped")
 				case <-timer:
+					vPkt.Release()
 					return nil, errors.New("timed out")
 				}
+			} else {
+				packet.Release()
 			}
 		// Receive images from the video decoder.
 		case mat := <-screenshotDecoder.Images():
 			buff := new(bytes.Buffer)
 
-			// Define constants for the screenshot width and height.
 			const screenshotWidth = 640
 			const screenshotHeight = 480
 
-			// Resize the image to the specified width and height using nearest-neighbor interpolation.
 			smallImg := rgb.NewRGB(image.Rect(0, 0, screenshotWidth, screenshotHeight))
 			draw.NearestNeighbor.Scale(smallImg, smallImg.Rect, mat, mat.Bounds(), draw.Over, nil)
 			mat.Release()
 
-			// Encode the resized image as JPEG and write it to the buffer.
 			if err := jpeg.Encode(buff, smallImg, nil); err != nil {
 				return nil, err
 			}
@@ -103,7 +104,6 @@ func (screenshoter *ffmpegScreenshoter) Screenshot(url string) ([]byte, error) {
 			// Log successful extraction of the screenshot.
 			screenshoter.log.Debugf(screenshoter, "Screenshot extracted successfully from %s", url)
 
-			// Return the PNG-encoded image bytes.
 			return buff.Bytes(), nil
 		}
 	}

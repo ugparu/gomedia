@@ -92,6 +92,20 @@ func (e *audioEncoder) Step(doneCh <-chan struct{}) error {
 
 func (e *audioEncoder) Release() { //nolint:revive // required by lifecycle.AsyncInstance interface
 	e.InnerAudioEncoder.Close()
+	// Drain remaining input samples to prevent leaks.
+	for {
+		select {
+		case pkt, ok := <-e.inpSamples:
+			if !ok {
+				goto drained
+			}
+			pkt.Release()
+		default:
+			close(e.inpSamples)
+			goto drained
+		}
+	}
+drained:
 	close(e.outSamples)
 }
 
