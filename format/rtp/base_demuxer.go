@@ -141,6 +141,9 @@ func (d *baseDemuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 }
 
 func (d *baseDemuxer) Close() {
+	if d.ring != nil {
+		d.ring.Close()
+	}
 }
 
 func (d *baseDemuxer) isRTCPPacket() bool {

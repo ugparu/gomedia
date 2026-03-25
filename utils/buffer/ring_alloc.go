@@ -223,6 +223,11 @@ func NewRingAlloc(size int, opts ...RingAllocOption) *RingAlloc {
 // have been released by consumers.
 //
 // Must be driven by a single producer goroutine (same constraint as RingAlloc).
+// maxRingSize is the upper bound for ring growth. Once the current ring
+// reaches this capacity, Alloc returns nil instead of growing further —
+// the caller is expected to allocate memory on its own.
+const maxRingSize = 16 * 1024 * 1024 //nolint:mnd // 16 MB hard cap
+
 type GrowingRingAlloc struct {
 	current *RingAlloc
 	opts    []RingAllocOption
@@ -237,6 +242,17 @@ func NewGrowingRingAlloc(initSize int, opts ...RingAllocOption) *GrowingRingAllo
 	}
 }
 
+// Close stops all background goroutines (stale watchdog, usage logger) on the
+// current ring. Outstanding SlotHandles remain valid and drain naturally.
+// Safe to call on a nil receiver (no-op).
+func (g *GrowingRingAlloc) Close() {
+	if g == nil {
+		return
+	}
+	g.current.StopStaleWatchdog()
+	g.current.StopUsageLog()
+}
+
 // calcGrowth computes the target capacity given the current cap and the
 // requested allocation size.
 func (g *GrowingRingAlloc) calcGrowth(currentCap, allocSize int) int {
@@ -248,7 +264,7 @@ func (g *GrowingRingAlloc) calcGrowth(currentCap, allocSize int) int {
 	} else if currentCap > 1024*1024 {
 		grov = 14 //nolint:mnd // growth factor ×1.4 for >1 MB
 	}
-	return max(currentCap*grov/10, allocSize*2) //nolint:mnd // factor is tenths
+	return min(max(currentCap*grov/10, allocSize*2), maxRingSize) //nolint:mnd // factor is tenths, capped at maxRingSize
 }
 
 // grow creates a new, larger ring. The old ring stays alive until all its
@@ -265,7 +281,9 @@ func (g *GrowingRingAlloc) grow(allocSize int) {
 }
 
 // Alloc carves n contiguous bytes from the current ring. When the current ring
-// cannot satisfy the allocation a new, larger ring is created.
+// cannot satisfy the allocation a new, larger ring is created, up to maxRingSize.
+// Returns nil, nil when the ring has reached its maximum capacity and cannot
+// satisfy the request — the caller must allocate memory on its own.
 //
 // Must be called from the producer goroutine only.
 func (g *GrowingRingAlloc) Alloc(n int) ([]byte, *SlotHandle) {
@@ -276,6 +294,10 @@ func (g *GrowingRingAlloc) Alloc(n int) ([]byte, *SlotHandle) {
 	if g.current.slotsExhausted() {
 		panic(fmt.Sprintf("%s: slot table exhausted (%d slots in-flight), consumers are not releasing handles",
 			g.current, ringSlotCount))
+	}
+
+	if g.current.bcap >= maxRingSize {
+		return nil, nil
 	}
 
 	g.grow(n)
