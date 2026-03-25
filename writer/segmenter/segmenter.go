@@ -200,7 +200,7 @@ func WithMaxEventDuration(d time.Duration) Option {
 	return func(s *segmenter) { s.maxEventDuration = d }
 }
 
-// WithDirPermissions overrides the default directory permissions (0750).
+// WithDirPermissions overrides the default directory permissions (ModePerm).
 func WithDirPermissions(perm os.FileMode) Option {
 	return func(s *segmenter) { s.dirPerm = perm }
 }
@@ -323,7 +323,7 @@ func New(dest string, segSize time.Duration, recordMode gomedia.RecordMode, chan
 		newArch.maxEventDuration = time.Minute
 	}
 	if newArch.dirPerm == 0 {
-		newArch.dirPerm = 0o750
+		newArch.dirPerm = os.ModePerm
 	}
 	newArch.AsyncManager = lifecycle.NewFailSafeAsyncManager(newArch, newArch.log)
 	return newArch
