@@ -118,7 +118,6 @@ func (e *alawEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err e
 
 func (e *alawEncoder) Close() {
 	e.buf = nil
-	e.ring.Close()
 	e.ring = nil
 	e.r = nil
 }

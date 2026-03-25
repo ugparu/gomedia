@@ -3,7 +3,6 @@ package buffer
 import (
 	"fmt"
 	"sync/atomic"
-	"time"
 
 	"github.com/ugparu/gomedia/utils/logger"
 )
@@ -19,24 +18,6 @@ func WithLogName(name string) RingAllocOption {
 // WithLogger sets the logger for the ring allocator.
 func WithLogger(l logger.Logger) RingAllocOption {
 	return func(r *RingAlloc) { r.log = l }
-}
-
-// WithUsageLog enables periodic logging of ring buffer byte utilization.
-// The logger used is the one set via WithLogger (or the default no-op logger).
-func WithUsageLog(interval time.Duration) RingAllocOption {
-	return func(r *RingAlloc) {
-		r.usageLogInterval = interval
-	}
-}
-
-// WithStaleRingAllocLog enables a background watchdog goroutine that periodically
-// scans live slots and logs any slot that has been held longer than timeout.
-// This is a diagnostic tool for detecting leaked SlotHandles — do not enable in
-// performance-critical production paths.
-func WithStaleRingAllocLog(timeout time.Duration) RingAllocOption {
-	return func(r *RingAlloc) {
-		r.staleTimeout = timeout
-	}
 }
 
 // ringSlotCount is the maximum number of in-flight allocations tracked at once.
@@ -69,13 +50,6 @@ type RingAlloc struct {
 
 	logName string
 	log     logger.Logger
-
-	staleTimeout time.Duration
-	allocTimes   [ringSlotCount]atomic.Int64 // unix-nano timestamp set on Alloc; 0 when released
-	stopStale    chan struct{}
-
-	usageLogInterval time.Duration
-	stopUsageLog     chan struct{}
 }
 
 func (r *RingAlloc) String() string {
@@ -83,102 +57,6 @@ func (r *RingAlloc) String() string {
 		return r.logName
 	}
 	return "RingAlloc"
-}
-
-// staleWatchdog periodically scans live slots and invokes staleFn for any
-// slot held longer than staleTimeout.
-func (r *RingAlloc) staleWatchdog() {
-	interval := r.staleTimeout / 2 //nolint:mnd // scan twice per timeout period
-	if interval < time.Millisecond {
-		interval = time.Millisecond
-	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-r.stopStale:
-			return
-		case <-ticker.C:
-			r.scanStaleSlots()
-		}
-	}
-}
-
-// scanStaleSlots checks all live slots for stale handles.
-func (r *RingAlloc) scanStaleSlots() {
-	now := time.Now().UnixNano()
-	head := r.head.Load()
-	tail := r.tail.Load()
-
-	for i := head; i < tail; i++ {
-		si := i % ringSlotCount
-		if r.slots[si].refs.Load() <= 0 {
-			continue
-		}
-		allocNano := r.allocTimes[si].Load()
-		if allocNano == 0 {
-			continue
-		}
-		age := time.Duration(now - allocNano)
-		if age >= r.staleTimeout {
-			r.log.Errorf(r, "slot %d held for %v, possible leak (refs=%d)", i, age, r.slots[si].refs.Load())
-		}
-	}
-}
-
-// StopStaleWatchdog stops the background stale-detection goroutine.
-// Safe to call if no watchdog is running (no-op).
-func (r *RingAlloc) StopStaleWatchdog() {
-	if r.stopStale != nil {
-		close(r.stopStale)
-		r.stopStale = nil
-	}
-}
-
-// Usage returns the byte utilization of the ring as a value in [0, 1].
-// 0 means empty, 1 means fully occupied.
-func (r *RingAlloc) Usage() float64 {
-	head := r.head.Load()
-	tail := r.tail.Load()
-	if head == tail {
-		return 0
-	}
-	read := int(r.slots[head%ringSlotCount].start)
-	write := r.write
-	var used int
-	if write >= read {
-		used = write - read
-	} else {
-		used = (r.bcap - read) + write
-	}
-	return float64(used) / float64(r.bcap)
-}
-
-// usageLogger periodically logs ring buffer utilization.
-func (r *RingAlloc) usageLogger() {
-	ticker := time.NewTicker(r.usageLogInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-r.stopUsageLog:
-			return
-		case <-ticker.C:
-			r.log.Infof(r, "usage %.1f%%, slots %d/%d",
-				r.Usage()*100, //nolint:mnd // percentage conversion
-				r.tail.Load()-r.head.Load(), ringSlotCount)
-		}
-	}
-}
-
-// StopUsageLog stops the background usage-logging goroutine.
-// Safe to call if no logger is running (no-op).
-func (r *RingAlloc) StopUsageLog() {
-	if r.stopUsageLog != nil {
-		close(r.stopUsageLog)
-		r.stopUsageLog = nil
-	}
 }
 
 type ringSlot struct {
@@ -206,16 +84,13 @@ func NewRingAlloc(size int, opts ...RingAllocOption) *RingAlloc {
 	for _, opt := range opts {
 		opt(r)
 	}
-	if r.staleTimeout > 0 {
-		r.stopStale = make(chan struct{})
-		go r.staleWatchdog()
-	}
-	if r.usageLogInterval > 0 {
-		r.stopUsageLog = make(chan struct{})
-		go r.usageLogger()
-	}
 	return r
 }
+
+// maxRingSize is the upper bound for ring growth. Once the current ring
+// reaches this capacity, Alloc returns nil instead of growing further —
+// the caller is expected to allocate memory on its own.
+const maxRingSize = 16 * 1024 * 1024 //nolint:mnd // 16 MB hard cap
 
 // GrowingRingAlloc wraps RingAlloc with automatic growth. The ring starts at
 // the requested initSize; when it cannot satisfy an allocation it creates a new,
@@ -223,11 +98,6 @@ func NewRingAlloc(size int, opts ...RingAllocOption) *RingAlloc {
 // have been released by consumers.
 //
 // Must be driven by a single producer goroutine (same constraint as RingAlloc).
-// maxRingSize is the upper bound for ring growth. Once the current ring
-// reaches this capacity, Alloc returns nil instead of growing further —
-// the caller is expected to allocate memory on its own.
-const maxRingSize = 16 * 1024 * 1024 //nolint:mnd // 16 MB hard cap
-
 type GrowingRingAlloc struct {
 	current *RingAlloc
 	opts    []RingAllocOption
@@ -240,17 +110,6 @@ func NewGrowingRingAlloc(initSize int, opts ...RingAllocOption) *GrowingRingAllo
 		current: NewRingAlloc(initSize, opts...),
 		opts:    opts,
 	}
-}
-
-// Close stops all background goroutines (stale watchdog, usage logger) on the
-// current ring. Outstanding SlotHandles remain valid and drain naturally.
-// Safe to call on a nil receiver (no-op).
-func (g *GrowingRingAlloc) Close() {
-	if g == nil {
-		return
-	}
-	g.current.StopStaleWatchdog()
-	g.current.StopUsageLog()
 }
 
 // calcGrowth computes the target capacity given the current cap and the
@@ -275,8 +134,6 @@ func (g *GrowingRingAlloc) grow(allocSize int) {
 	r := g.current
 	newCap := g.calcGrowth(r.bcap, allocSize)
 	r.log.Infof(r, "Growing ring alloc to %dkb", newCap/1024) //nolint:mnd
-	r.StopStaleWatchdog()                                     // old ring — stop its watchdog; slots drain naturally
-	r.StopUsageLog()
 	g.current = NewRingAlloc(newCap, g.opts...)
 }
 
@@ -399,9 +256,6 @@ func (r *RingAlloc) Alloc(n int) ([]byte, *SlotHandle) {
 	// Store refs before incrementing tail — consumers cannot see this slot until
 	// tail advances, and the atomic increment provides the release barrier.
 	slot.refs.Store(1)
-	if r.staleTimeout > 0 {
-		r.allocTimes[idx%ringSlotCount].Store(time.Now().UnixNano())
-	}
 	r.write = start + n
 	r.tail.Add(1)
 
@@ -460,9 +314,6 @@ func (h *SlotHandle) Release() {
 	refs := r.slots[slotIdx].refs.Add(-1)
 	if refs < 0 {
 		panic("refs < 0")
-	}
-	if refs == 0 {
-		r.allocTimes[slotIdx].Store(0)
 	}
 
 	// Advance head past consecutive done slots using CAS so multiple concurrent

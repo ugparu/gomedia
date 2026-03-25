@@ -215,6 +215,5 @@ func (v *aacEncoder) NbBytesPerFrame() int {
 
 func (v *aacEncoder) Close() {
 	C.aacenc_close(&v.m) //nolint:gocritic // CGO function call
-	v.ring.Close()
 	v.ring = nil
 }

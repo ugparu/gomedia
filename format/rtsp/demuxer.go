@@ -154,8 +154,7 @@ func (dmx *innerRTSPDemuxer) findStreams() (params gomedia.CodecParametersPair, 
 				logName = parsedURL.Host + "_" + logName
 			}
 
-			opts = append(opts, rtp.WithRingBuffer(dmx.rtpRingBufferSize, buffer.WithLogger(dmx.log), buffer.WithLogName(logName),
-				buffer.WithStaleRingAllocLog(time.Minute/2), buffer.WithUsageLog(time.Minute)))
+			opts = append(opts, rtp.WithRingBuffer(dmx.rtpRingBufferSize, buffer.WithLogger(dmx.log), buffer.WithLogName(logName)))
 		}
 		switch i2.AVType {
 		case video:
