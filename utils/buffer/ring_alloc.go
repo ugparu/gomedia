@@ -141,6 +141,11 @@ func (g *GrowingRingAlloc) Alloc(n int) ([]byte, *SlotHandle) {
 		return buf, h
 	}
 
+	if g.current.slotsExhausted() {
+		panic(fmt.Sprintf("%s: slot table exhausted (%d slots in-flight), consumers are not releasing handles",
+			g.current, ringSlotCount))
+	}
+
 	g.grow(n)
 	return g.current.Alloc(n)
 }
@@ -154,6 +159,11 @@ func (g *GrowingRingAlloc) Extend(h *SlotHandle, n int) ([]byte, bool) {
 		return nil, false
 	}
 	return g.current.Extend(h, n)
+}
+
+// slotsExhausted reports whether every entry in the slot table is in use.
+func (r *RingAlloc) slotsExhausted() bool {
+	return r.tail.Load()-r.head.Load() >= ringSlotCount
 }
 
 // readCursor returns the start position of the oldest live slot.
