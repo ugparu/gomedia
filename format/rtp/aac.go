@@ -54,6 +54,15 @@ func (d *aacDemuxer) allocBuf(src []byte) ([]byte, *buffer.SlotHandle) {
 	return data, handle
 }
 
+func (d *aacDemuxer) Close() {
+	for _, pkt := range d.packets {
+		if pkt.Slot != nil {
+			pkt.Slot.Release()
+		}
+	}
+	d.packets = nil
+}
+
 // nolint: mnd
 func (d *aacDemuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 	if len(d.packets) > 0 {

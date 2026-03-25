@@ -64,6 +64,15 @@ func NewMJPEGDemuxer(rdr io.Reader, sdp sdp.Media, index uint8, options ...Demux
 	}
 }
 
+func (d *mjpegDemuxer) Close() {
+	for _, pkt := range d.packets {
+		if pkt.Slot != nil {
+			pkt.Slot.Release()
+		}
+	}
+	d.packets = nil
+}
+
 // Demux returns the codec parameters for MJPEG
 func (d *mjpegDemuxer) Demux() (codecs gomedia.CodecParametersPair, err error) {
 	// Get framerate from SDP if available, otherwise default to 30
