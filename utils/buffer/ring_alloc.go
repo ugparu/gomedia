@@ -30,13 +30,11 @@ func WithUsageLog(interval time.Duration) RingAllocOption {
 }
 
 // WithStaleRingAllocLog enables a background watchdog goroutine that periodically
-// scans live slots and calls fn for any slot that has been held longer than timeout.
-// The callback receives the slot index and the duration since allocation.
+// scans live slots and logs any slot that has been held longer than timeout.
 // This is a diagnostic tool for detecting leaked SlotHandles — do not enable in
 // performance-critical production paths.
-func WithStaleRingAllocLog(timeout time.Duration, fn func(idx uint64, age time.Duration)) RingAllocOption {
+func WithStaleRingAllocLog(timeout time.Duration) RingAllocOption {
 	return func(r *RingAlloc) {
-		r.staleFn = fn
 		r.staleTimeout = timeout
 	}
 }
@@ -72,7 +70,6 @@ type RingAlloc struct {
 	logName string
 	log     logger.Logger
 
-	staleFn      func(idx uint64, age time.Duration)
 	staleTimeout time.Duration
 	allocTimes   [ringSlotCount]atomic.Int64 // unix-nano timestamp set on Alloc; 0 when released
 	stopStale    chan struct{}
@@ -125,7 +122,7 @@ func (r *RingAlloc) scanStaleSlots() {
 		}
 		age := time.Duration(now - allocNano)
 		if age >= r.staleTimeout {
-			r.staleFn(i, age)
+			r.log.Errorf(r, "slot %d held for %v, possible leak (refs=%d)", i, age, r.slots[si].refs.Load())
 		}
 	}
 }
@@ -209,7 +206,7 @@ func NewRingAlloc(size int, opts ...RingAllocOption) *RingAlloc {
 	for _, opt := range opts {
 		opt(r)
 	}
-	if r.staleFn != nil {
+	if r.staleTimeout > 0 {
 		r.stopStale = make(chan struct{})
 		go r.staleWatchdog()
 	}
@@ -380,7 +377,7 @@ func (r *RingAlloc) Alloc(n int) ([]byte, *SlotHandle) {
 	// Store refs before incrementing tail — consumers cannot see this slot until
 	// tail advances, and the atomic increment provides the release barrier.
 	slot.refs.Store(1)
-	if r.staleFn != nil {
+	if r.staleTimeout > 0 {
 		r.allocTimes[idx%ringSlotCount].Store(time.Now().UnixNano())
 	}
 	r.write = start + n

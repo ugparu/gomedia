@@ -155,9 +155,7 @@ func (dmx *innerRTSPDemuxer) findStreams() (params gomedia.CodecParametersPair, 
 			}
 
 			opts = append(opts, rtp.WithRingBuffer(dmx.rtpRingBufferSize, buffer.WithLogger(dmx.log), buffer.WithLogName(logName),
-				buffer.WithStaleRingAllocLog(time.Minute/2, func(idx uint64, age time.Duration) {
-					dmx.log.Errorf(dmx.String(), "RTP ring alloc slot %d held for %v, leaking", idx, age)
-				}), buffer.WithUsageLog(time.Minute)))
+				buffer.WithStaleRingAllocLog(time.Minute/2), buffer.WithUsageLog(time.Minute)))
 		}
 		switch i2.AVType {
 		case video:
