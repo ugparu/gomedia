@@ -389,6 +389,16 @@ func (dmx *innerRTSPDemuxer) processRTSPPacket(header [headerSize]byte) (err err
 
 func (dmx *innerRTSPDemuxer) Close() {
 	dmx.ticker.Stop()
+	for _, pkt := range dmx.packets {
+		pkt.Release()
+	}
+	dmx.packets = nil
+	if dmx.videoDemuxer != nil {
+		dmx.videoDemuxer.Close()
+	}
+	if dmx.audioDemuxer != nil {
+		dmx.audioDemuxer.Close()
+	}
 	dmx.client.Close()
 }
 

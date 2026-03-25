@@ -252,6 +252,8 @@ func (mux *Muxer) WriteTrailer() (err error) {
 	for _, stream := range mux.streams {
 		if stream.lastPacket != nil {
 			if err = stream.writePacket(stream.lastPacket); err != nil {
+				stream.lastPacket.Release()
+				stream.lastPacket = nil
 				return
 			}
 			stream.lastPacket = nil

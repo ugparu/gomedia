@@ -154,6 +154,20 @@ func (d *h265Demuxer) Demux() (codecs gomedia.CodecParametersPair, err error) {
 }
 
 // nolint: mnd
+func (d *h265Demuxer) Close() {
+	if d.slicedHandle != nil {
+		d.slicedHandle.Release()
+		d.slicedHandle = nil
+		d.slicedPacket = nil
+	}
+	for _, pkt := range d.packets {
+		if pkt.Slot != nil {
+			pkt.Slot.Release()
+		}
+	}
+	d.packets = nil
+}
+
 func (d *h265Demuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 	if len(d.packets) > 0 {
 		pkt = d.packets[0]

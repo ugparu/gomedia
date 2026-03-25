@@ -479,6 +479,7 @@ func (s *segmenter) writePacket(stream *streamState, pkt gomedia.Packet) error {
 	af := stream.activeFile
 
 	if err := af.muxer.WritePacket(pkt); err != nil {
+		pkt.Release()
 		return err
 	}
 

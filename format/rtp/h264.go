@@ -200,6 +200,15 @@ func (d *h264Demuxer) addPacket(nalU []byte, isKeyFrame bool) {
 	d.packets = append(d.packets, pkt)
 }
 
+func (d *h264Demuxer) Close() {
+	for _, pkt := range d.packets {
+		if pkt.Slot != nil {
+			pkt.Slot.Release()
+		}
+	}
+	d.packets = nil
+}
+
 func (d *h264Demuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 	if len(d.packets) > 0 {
 		pkt = d.packets[0]

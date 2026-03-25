@@ -283,6 +283,18 @@ func (rdr *reader) Release() { //nolint: revive
 		close(stopCh)
 		delete(rdr.dmxStoppers, src)
 	}
+
+	// Drain remaining ring-backed packets to release their SlotHandles.
+	for {
+		select {
+		case pkt := <-rdr.packets:
+			if pkt != nil {
+				pkt.Release()
+			}
+		default:
+			return
+		}
+	}
 }
 
 // Packets returns the channel for receiving media packets.
