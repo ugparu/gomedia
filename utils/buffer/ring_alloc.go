@@ -83,7 +83,7 @@ type RingAlloc struct {
 
 func (r *RingAlloc) String() string {
 	if r.logName != "" {
-		return fmt.Sprintf("RingAlloc(%s)", r.logName)
+		return r.logName
 	}
 	return "RingAlloc"
 }
@@ -262,7 +262,7 @@ func (g *GrowingRingAlloc) grow(allocSize int) {
 	r := g.current
 	newCap := g.calcGrowth(r.bcap, allocSize)
 	r.log.Infof(r, "Growing ring alloc to %dkb", newCap/1024) //nolint:mnd
-	r.StopStaleWatchdog() // old ring — stop its watchdog; slots drain naturally
+	r.StopStaleWatchdog()                                     // old ring — stop its watchdog; slots drain naturally
 	r.StopUsageLog()
 	g.current = NewRingAlloc(newCap, g.opts...)
 }

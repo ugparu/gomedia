@@ -78,7 +78,8 @@ func (rdr *reader) repackPackets(src string, stopCh <-chan struct{}) {
 	videoOffsetHandler := new(offsetHandler)
 	audioOffsetHandler := new(offsetHandler)
 
-	dmx := rdr.newDmx(src, rdr.opts...)
+	opts := append([]rtsp.DemuxerOption{rtsp.WithLogger(rdr.log)}, rdr.opts...)
+	dmx := rdr.newDmx(src, opts...)
 	pars, err := dmx.Demux()
 	if err != nil {
 		rdr.log.Warningf(rdr, "Failed to start demuxer: %s", err.Error())
@@ -189,7 +190,8 @@ func (rdr *reader) handleReadError(dmx gomedia.Demuxer, src string, recInterval 
 
 	rdr.log.Debug(rdr, "Creating new demuxer")
 	// Create a new demuxer and start it
-	dmx = rdr.newDmx(src, rdr.opts...)
+	reconOpts := append([]rtsp.DemuxerOption{rtsp.WithLogger(rdr.log)}, rdr.opts...)
+	dmx = rdr.newDmx(src, reconOpts...)
 
 	rdr.log.Debug(rdr, "Starting demuxing")
 	par, err := dmx.Demux()
