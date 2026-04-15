@@ -226,13 +226,13 @@ func GetMaster(c *gin.Context) {
 }
 
 func GetManifest(c *gin.Context) {
-	id := StringToInt(c.Param("id"))
+	uid := c.Param("id")
 	msn := StringToInt(c.DefaultQuery("_HLS_msn", "-1"))
 	part := StringToInt(c.DefaultQuery("_HLS_part", "-1"))
 
-	logrus.Debugf("Low-Latency manifest requested: id=%d, msn=%d, part=%d", id, msn, part)
+	logrus.Debugf("Low-Latency manifest requested: uid=%s, msn=%d, part=%d", uid, msn, part)
 
-	index, err := hlsWr.GetIndexM3u8(c, uint8(id), int64(msn), int8(part))
+	index, err := hlsWr.GetIndexM3u8(c, uid, int64(msn), int8(part))
 	if err != nil {
 		logrus.Errorf("Failed to get manifest: %v", err)
 		c.String(http.StatusNotFound, err.Error())
@@ -250,18 +250,18 @@ func GetManifest(c *gin.Context) {
 
 func GetInit(c *gin.Context) {
 	c.Header("Content-Type", "video/mp4")
-	id := StringToInt(c.Param("id"))
+	uid := c.Param("id")
 	versionStr := c.DefaultQuery("v", "")
 
-	logrus.Debugf("Init segment requested: id=%d, version=%s", id, versionStr)
+	logrus.Debugf("Init segment requested: uid=%s, version=%s", uid, versionStr)
 
 	var buf []byte
 	var err error
 	if versionStr != "" {
 		version := StringToInt(versionStr)
-		buf, err = hlsWr.GetInitByVersion(uint8(id), version)
+		buf, err = hlsWr.GetInitByVersion(uid, version)
 	} else {
-		buf, err = hlsWr.GetInit(uint8(id))
+		buf, err = hlsWr.GetInit(uid)
 	}
 	if err != nil {
 		logrus.Errorf("Failed to get init segment: %v", err)
@@ -280,19 +280,19 @@ func GetInit(c *gin.Context) {
 
 func GetSegment(c *gin.Context) {
 	c.Header("Content-Type", "video/mp4")
-	id := StringToInt(c.Param("id"))
+	uid := c.Param("id")
 	segment := StringToInt(c.Param("segment"))
 
-	logrus.Debugf("Segment requested: id=%d, segment=%d", id, segment)
+	logrus.Debugf("Segment requested: uid=%s, segment=%d", uid, segment)
 
-	buf, err := hlsWr.GetSegment(c, uint8(id), uint64(segment))
+	buf, err := hlsWr.GetSegment(c, uid, uint64(segment))
 	if err != nil {
 		logrus.Errorf("Failed to get segment: %v", err)
 		c.Status(http.StatusNotFound)
 		return
 	}
 
-	logrus.Debugf("Serving segment: id=%d, segment=%d, size=%d bytes", id, segment, len(buf))
+	logrus.Debugf("Serving segment: uid=%s, segment=%d, size=%d bytes", uid, segment, len(buf))
 	_, err = c.Writer.Write(buf)
 	if err != nil {
 		logrus.Errorf("Failed to write segment: %v", err)
@@ -303,20 +303,20 @@ func GetSegment(c *gin.Context) {
 
 func GetFragment(c *gin.Context) {
 	c.Header("Content-Type", "video/mp4")
-	id := StringToInt(c.Param("id"))
+	uid := c.Param("id")
 	segment := StringToInt(c.Param("segment"))
 	fragment := StringToInt(c.Param("fragment"))
 
-	logrus.Debugf("Fragment requested: id=%d, segment=%d, fragment=%d", id, segment, fragment)
+	logrus.Debugf("Fragment requested: uid=%s, segment=%d, fragment=%d", uid, segment, fragment)
 
-	buf, err := hlsWr.GetFragment(c, uint8(id), uint64(segment), uint8(fragment))
+	buf, err := hlsWr.GetFragment(c, uid, uint64(segment), uint8(fragment))
 	if err != nil {
 		logrus.Errorf("Failed to get fragment: %v", err)
 		c.Status(http.StatusNotFound)
 		return
 	}
 
-	logrus.Debugf("Serving fragment: id=%d, segment=%d, fragment=%d, size=%d bytes", id, segment, fragment, len(buf))
+	logrus.Debugf("Serving fragment: uid=%s, segment=%d, fragment=%d, size=%d bytes", uid, segment, fragment, len(buf))
 	_, err = c.Writer.Write(buf)
 	if err != nil {
 		logrus.Errorf("Failed to write fragment: %v", err)

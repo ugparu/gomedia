@@ -2,6 +2,9 @@
 package webrtc
 
 import (
+	"encoding/base64"
+	"encoding/json"
+	"os"
 	"testing"
 	"time"
 
@@ -10,6 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/codec/h264"
+	"github.com/ugparu/gomedia/codec/h265"
+	"github.com/ugparu/gomedia/tests"
 	"github.com/ugparu/gomedia/utils/logger"
 )
 
@@ -547,4 +552,98 @@ done:
 	seeded, inCam2 := ss.streams["rtsp://cam2"].tracks[pt]
 	assert.True(t, inCam2)
 	assert.True(t, seeded)
+}
+
+// ---------------------------------------------------------------------------
+// Update — codec type change
+// ---------------------------------------------------------------------------
+
+const hevcTestDataDir = "../../tests/data/hevc/"
+
+func loadH265CodecParameters(t *testing.T) *h265.CodecParameters {
+	t.Helper()
+	raw, err := os.ReadFile(hevcTestDataDir + "parameters.json")
+	require.NoError(t, err)
+
+	var params tests.ParametersJSON
+	require.NoError(t, json.Unmarshal(raw, &params))
+	require.NotNil(t, params.Video)
+
+	recordBytes, err := base64.StdEncoding.DecodeString(params.Video.Record)
+	require.NoError(t, err)
+	codecPar, err := h265.NewCodecDataFromHEVCDecoderConfRecord(recordBytes)
+	require.NoError(t, err)
+	return &codecPar
+}
+
+func TestSortedStreams_Update_CodecTypeChange_DisconnectsPeers(t *testing.T) {
+	ss := newTestSortedStreams()
+	_, videoCp, _ := loadTestCodecPair(t, "rtsp://cam1") // H.264
+	ss.Add("rtsp://cam1", videoCp)
+
+	// Attach two peers to the stream
+	pt1 := newTestPeerTrack("rtsp://cam1")
+	pt2 := newTestPeerTrack("rtsp://cam1")
+	ss.streams["rtsp://cam1"].tracks[pt1] = true
+	ss.streams["rtsp://cam1"].tracks[pt2] = true
+
+	// Switch to H.265
+	h265Cp := loadH265CodecParameters(t)
+	peersToRemove, changed := ss.Update("rtsp://cam1", h265Cp)
+
+	assert.True(t, changed)
+	assert.Len(t, peersToRemove, 2)
+	assert.Contains(t, peersToRemove, pt1)
+	assert.Contains(t, peersToRemove, pt2)
+
+	// Stream should have no remaining tracks
+	assert.Len(t, ss.streams["rtsp://cam1"].tracks, 0)
+	assert.Len(t, ss.streams["rtsp://cam1"].toAdd, 0)
+
+	// Codec parameters should be updated
+	assert.Equal(t, gomedia.H265, ss.streams["rtsp://cam1"].codecPar.VideoCodecParameters.Type())
+	assert.Equal(t, gomedia.H265, ss.videoCodecType)
+}
+
+func TestSortedStreams_Update_CodecTypeChange_IncludesToAddPeers(t *testing.T) {
+	ss := newTestSortedStreams()
+	_, videoCp, _ := loadTestCodecPair(t, "rtsp://cam1") // H.264
+	ss.Add("rtsp://cam1", videoCp)
+
+	// One active peer, one pending move
+	ptActive := newTestPeerTrack("rtsp://cam1")
+	ss.streams["rtsp://cam1"].tracks[ptActive] = true
+
+	ptPending := newTestPeerTrack("rtsp://cam1")
+	ss.streams["rtsp://cam1"].toAdd[ptPending] = &peerURL{peerTrack: ptPending, URL: "rtsp://cam1"}
+
+	h265Cp := loadH265CodecParameters(t)
+	peersToRemove, changed := ss.Update("rtsp://cam1", h265Cp)
+
+	assert.True(t, changed)
+	assert.Len(t, peersToRemove, 2)
+	assert.Contains(t, peersToRemove, ptActive)
+	assert.Contains(t, peersToRemove, ptPending)
+	assert.Len(t, ss.streams["rtsp://cam1"].tracks, 0)
+	assert.Len(t, ss.streams["rtsp://cam1"].toAdd, 0)
+}
+
+func TestSortedStreams_Update_SameCodecType_KeepsPeers(t *testing.T) {
+	ss := newTestSortedStreams()
+	_, videoCp, _ := loadTestCodecPair(t, "rtsp://cam1") // H.264
+	ss.Add("rtsp://cam1", videoCp)
+
+	pt := newTestPeerTrack("rtsp://cam1")
+	ss.streams["rtsp://cam1"].tracks[pt] = true
+
+	// Create a second H.264 params object (same codec type, different pointer)
+	videoCp2 := *videoCp
+	videoCp2.SetStreamIndex(5)
+
+	peersToRemove, changed := ss.Update("rtsp://cam1", &videoCp2)
+
+	assert.True(t, changed)
+	assert.Nil(t, peersToRemove)
+	// Peer should still be in the stream (not disconnected)
+	assert.Len(t, ss.streams["rtsp://cam1"].tracks, 1)
 }

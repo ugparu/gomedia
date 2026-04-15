@@ -36,7 +36,9 @@ func (ss *sortedStreams) Exists(url string) bool {
 }
 
 // Update updates codec parameters for an existing stream.
-// Returns a list of peers that were moved from pendingPeers and a boolean indicating if a change was made.
+// When the video codec type changes (e.g. H264 → H265), all peers on the stream are returned
+// for disconnection because their WebRTC tracks are bound to the old codec MIME type.
+// Returns a list of peers to disconnect and a boolean indicating if a change was made.
 func (ss *sortedStreams) Update(newURL string, newCodecPar gomedia.CodecParameters) ([]*peerTrack, bool) {
 	stream, found := ss.streams[newURL]
 	if !found {
@@ -48,6 +50,31 @@ func (ss *sortedStreams) Update(newURL string, newCodecPar gomedia.CodecParamete
 		if stream.codecPar.VideoCodecParameters == par {
 			return nil, false
 		}
+
+		oldType := stream.codecPar.VideoCodecParameters.Type()
+		newType := par.Type()
+		if oldType != newType {
+			ss.log.Infof(ss, "Video codec type changed from %s to %s on stream %s, disconnecting all peers",
+				oldType, newType, newURL)
+
+			var peersToRemove []*peerTrack
+			for peer := range stream.tracks {
+				peersToRemove = append(peersToRemove, peer)
+			}
+			for peer := range stream.toAdd {
+				peersToRemove = append(peersToRemove, peer)
+			}
+
+			stream.tracks = make(map[*peerTrack]bool)
+			stream.toAdd = make(map[*peerTrack]*peerURL)
+			stream.codecPar.VideoCodecParameters = par
+			ss.videoCodecType = newType
+			stream.buffer.Reset()
+			ss.sortURLsByResolution()
+
+			return peersToRemove, true
+		}
+
 		ss.log.Infof(ss, "Updating stream %s with new codec parameters: %dx%d to %dx%d",
 			newURL, stream.codecPar.VideoCodecParameters.Width(), stream.codecPar.VideoCodecParameters.Height(),
 			par.Width(), par.Height())

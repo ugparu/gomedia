@@ -1970,63 +1970,63 @@ func (m *MockHLS) EXPECT() *MockHLSMockRecorder {
 }
 
 // GetFragment mocks base method.
-func (m *MockHLS) GetFragment(ctx context.Context, index uint8, seg uint64, frag uint8) ([]byte, error) {
+func (m *MockHLS) GetFragment(ctx context.Context, uid string, seg uint64, frag uint8) ([]byte, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetFragment", ctx, index, seg, frag)
+	ret := m.ctrl.Call(m, "GetFragment", ctx, uid, seg, frag)
 	ret0, _ := ret[0].([]byte)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetFragment indicates an expected call of GetFragment.
-func (mr *MockHLSMockRecorder) GetFragment(ctx, index, seg, frag any) *gomock.Call {
+func (mr *MockHLSMockRecorder) GetFragment(ctx, uid, seg, frag any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetFragment", reflect.TypeOf((*MockHLS)(nil).GetFragment), ctx, index, seg, frag)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetFragment", reflect.TypeOf((*MockHLS)(nil).GetFragment), ctx, uid, seg, frag)
 }
 
 // GetIndexM3u8 mocks base method.
-func (m *MockHLS) GetIndexM3u8(ctx context.Context, index uint8, msn int64, prt int8) (string, error) {
+func (m *MockHLS) GetIndexM3u8(ctx context.Context, uid string, msn int64, prt int8) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetIndexM3u8", ctx, index, msn, prt)
+	ret := m.ctrl.Call(m, "GetIndexM3u8", ctx, uid, msn, prt)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetIndexM3u8 indicates an expected call of GetIndexM3u8.
-func (mr *MockHLSMockRecorder) GetIndexM3u8(ctx, index, msn, prt any) *gomock.Call {
+func (mr *MockHLSMockRecorder) GetIndexM3u8(ctx, uid, msn, prt any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetIndexM3u8", reflect.TypeOf((*MockHLS)(nil).GetIndexM3u8), ctx, index, msn, prt)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetIndexM3u8", reflect.TypeOf((*MockHLS)(nil).GetIndexM3u8), ctx, uid, msn, prt)
 }
 
 // GetInit mocks base method.
-func (m *MockHLS) GetInit(index uint8) ([]byte, error) {
+func (m *MockHLS) GetInit(uid string) ([]byte, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetInit", index)
+	ret := m.ctrl.Call(m, "GetInit", uid)
 	ret0, _ := ret[0].([]byte)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetInit indicates an expected call of GetInit.
-func (mr *MockHLSMockRecorder) GetInit(index any) *gomock.Call {
+func (mr *MockHLSMockRecorder) GetInit(uid any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetInit", reflect.TypeOf((*MockHLS)(nil).GetInit), index)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetInit", reflect.TypeOf((*MockHLS)(nil).GetInit), uid)
 }
 
 // GetInitByVersion mocks base method.
-func (m *MockHLS) GetInitByVersion(index uint8, version int) ([]byte, error) {
+func (m *MockHLS) GetInitByVersion(uid string, version int) ([]byte, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetInitByVersion", index, version)
+	ret := m.ctrl.Call(m, "GetInitByVersion", uid, version)
 	ret0, _ := ret[0].([]byte)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetInitByVersion indicates an expected call of GetInitByVersion.
-func (mr *MockHLSMockRecorder) GetInitByVersion(index, version any) *gomock.Call {
+func (mr *MockHLSMockRecorder) GetInitByVersion(uid, version any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetInitByVersion", reflect.TypeOf((*MockHLS)(nil).GetInitByVersion), index, version)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetInitByVersion", reflect.TypeOf((*MockHLS)(nil).GetInitByVersion), uid, version)
 }
 
 // GetMasterPlaylist mocks base method.
@@ -2045,18 +2045,18 @@ func (mr *MockHLSMockRecorder) GetMasterPlaylist() *gomock.Call {
 }
 
 // GetSegment mocks base method.
-func (m *MockHLS) GetSegment(ctx context.Context, index uint8, seg uint64) ([]byte, error) {
+func (m *MockHLS) GetSegment(ctx context.Context, uid string, seg uint64) ([]byte, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetSegment", ctx, index, seg)
+	ret := m.ctrl.Call(m, "GetSegment", ctx, uid, seg)
 	ret0, _ := ret[0].([]byte)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetSegment indicates an expected call of GetSegment.
-func (mr *MockHLSMockRecorder) GetSegment(ctx, index, seg any) *gomock.Call {
+func (mr *MockHLSMockRecorder) GetSegment(ctx, uid, seg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSegment", reflect.TypeOf((*MockHLS)(nil).GetSegment), ctx, index, seg)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSegment", reflect.TypeOf((*MockHLS)(nil).GetSegment), ctx, uid, seg)
 }
 
 // MockHLSStreamer is a mock of HLSStreamer interface.
@@ -2124,63 +2124,63 @@ func (mr *MockHLSStreamerMockRecorder) Done() *gomock.Call {
 }
 
 // GetFragment mocks base method.
-func (m *MockHLSStreamer) GetFragment(ctx context.Context, index uint8, seg uint64, frag uint8) ([]byte, error) {
+func (m *MockHLSStreamer) GetFragment(ctx context.Context, uid string, seg uint64, frag uint8) ([]byte, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetFragment", ctx, index, seg, frag)
+	ret := m.ctrl.Call(m, "GetFragment", ctx, uid, seg, frag)
 	ret0, _ := ret[0].([]byte)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetFragment indicates an expected call of GetFragment.
-func (mr *MockHLSStreamerMockRecorder) GetFragment(ctx, index, seg, frag any) *gomock.Call {
+func (mr *MockHLSStreamerMockRecorder) GetFragment(ctx, uid, seg, frag any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetFragment", reflect.TypeOf((*MockHLSStreamer)(nil).GetFragment), ctx, index, seg, frag)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetFragment", reflect.TypeOf((*MockHLSStreamer)(nil).GetFragment), ctx, uid, seg, frag)
 }
 
 // GetIndexM3u8 mocks base method.
-func (m *MockHLSStreamer) GetIndexM3u8(ctx context.Context, index uint8, msn int64, prt int8) (string, error) {
+func (m *MockHLSStreamer) GetIndexM3u8(ctx context.Context, uid string, msn int64, prt int8) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetIndexM3u8", ctx, index, msn, prt)
+	ret := m.ctrl.Call(m, "GetIndexM3u8", ctx, uid, msn, prt)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetIndexM3u8 indicates an expected call of GetIndexM3u8.
-func (mr *MockHLSStreamerMockRecorder) GetIndexM3u8(ctx, index, msn, prt any) *gomock.Call {
+func (mr *MockHLSStreamerMockRecorder) GetIndexM3u8(ctx, uid, msn, prt any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetIndexM3u8", reflect.TypeOf((*MockHLSStreamer)(nil).GetIndexM3u8), ctx, index, msn, prt)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetIndexM3u8", reflect.TypeOf((*MockHLSStreamer)(nil).GetIndexM3u8), ctx, uid, msn, prt)
 }
 
 // GetInit mocks base method.
-func (m *MockHLSStreamer) GetInit(index uint8) ([]byte, error) {
+func (m *MockHLSStreamer) GetInit(uid string) ([]byte, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetInit", index)
+	ret := m.ctrl.Call(m, "GetInit", uid)
 	ret0, _ := ret[0].([]byte)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetInit indicates an expected call of GetInit.
-func (mr *MockHLSStreamerMockRecorder) GetInit(index any) *gomock.Call {
+func (mr *MockHLSStreamerMockRecorder) GetInit(uid any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetInit", reflect.TypeOf((*MockHLSStreamer)(nil).GetInit), index)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetInit", reflect.TypeOf((*MockHLSStreamer)(nil).GetInit), uid)
 }
 
 // GetInitByVersion mocks base method.
-func (m *MockHLSStreamer) GetInitByVersion(index uint8, version int) ([]byte, error) {
+func (m *MockHLSStreamer) GetInitByVersion(uid string, version int) ([]byte, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetInitByVersion", index, version)
+	ret := m.ctrl.Call(m, "GetInitByVersion", uid, version)
 	ret0, _ := ret[0].([]byte)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetInitByVersion indicates an expected call of GetInitByVersion.
-func (mr *MockHLSStreamerMockRecorder) GetInitByVersion(index, version any) *gomock.Call {
+func (mr *MockHLSStreamerMockRecorder) GetInitByVersion(uid, version any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetInitByVersion", reflect.TypeOf((*MockHLSStreamer)(nil).GetInitByVersion), index, version)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetInitByVersion", reflect.TypeOf((*MockHLSStreamer)(nil).GetInitByVersion), uid, version)
 }
 
 // GetMasterPlaylist mocks base method.
@@ -2199,18 +2199,18 @@ func (mr *MockHLSStreamerMockRecorder) GetMasterPlaylist() *gomock.Call {
 }
 
 // GetSegment mocks base method.
-func (m *MockHLSStreamer) GetSegment(ctx context.Context, index uint8, seg uint64) ([]byte, error) {
+func (m *MockHLSStreamer) GetSegment(ctx context.Context, uid string, seg uint64) ([]byte, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetSegment", ctx, index, seg)
+	ret := m.ctrl.Call(m, "GetSegment", ctx, uid, seg)
 	ret0, _ := ret[0].([]byte)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetSegment indicates an expected call of GetSegment.
-func (mr *MockHLSStreamerMockRecorder) GetSegment(ctx, index, seg any) *gomock.Call {
+func (mr *MockHLSStreamerMockRecorder) GetSegment(ctx, uid, seg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSegment", reflect.TypeOf((*MockHLSStreamer)(nil).GetSegment), ctx, index, seg)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSegment", reflect.TypeOf((*MockHLSStreamer)(nil).GetSegment), ctx, uid, seg)
 }
 
 // Packets mocks base method.

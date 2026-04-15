@@ -2,6 +2,8 @@ package hls
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"slices"
@@ -15,6 +17,14 @@ import (
 	"github.com/ugparu/gomedia/utils/lifecycle"
 	"github.com/ugparu/gomedia/utils/logger"
 )
+
+const uidLen = 4 //nolint:mnd // 4 random bytes → 8 hex chars
+
+func generateUID() string {
+	var b [uidLen]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
 
 // Option is a functional option for configuring an hlsWriter.
 type Option func(*hlsWriter)
@@ -51,8 +61,9 @@ type hlsWriter struct {
 	addSrcCh chan string
 	rmSrcCh  chan string
 
-	muxerIDs     map[uint8]gomedia.HLSMuxer
+	muxerIDs     map[string]gomedia.HLSMuxer
 	muxerURLs    map[string]gomedia.HLSMuxer
+	muxerUIDs    map[string]string
 	codPars      map[string]*gomedia.CodecParametersPair
 	sortedURLs   []string
 	mu           sync.RWMutex
@@ -75,8 +86,9 @@ func New(id uint64, segCnt uint8, segDur time.Duration, chanSize int, partHoldBa
 		addSrcCh: make(chan string, chanSize),
 		rmSrcCh:  make(chan string, chanSize),
 
-		muxerIDs:     map[uint8]gomedia.HLSMuxer{},
+		muxerIDs:     map[string]gomedia.HLSMuxer{},
 		muxerURLs:    make(map[string]gomedia.HLSMuxer),
+		muxerUIDs:    make(map[string]string),
 		codPars:      map[string]*gomedia.CodecParametersPair{},
 		sortedURLs:   []string{},
 		mu:           sync.RWMutex{},
@@ -137,12 +149,14 @@ func (hlsw *hlsWriter) checkCodPar(url string, codecPar gomedia.CodecParameters)
 		if err = mux.UpdateCodecParameters(*par); err != nil {
 			return
 		}
+		hlsw.muxerUIDs[url] = generateUID()
 	} else {
 		mux = hls.NewHLSMuxer(hlsw.segmentDuration, hlsw.segmentCount, hlsw.partHoldBack, hlsw.log, hls.WithMediaName(hlsw.mediaName), hls.WithVersion(hlsw.version))
 		if err = mux.Mux(*par); err != nil {
 			return
 		}
 		hlsw.muxerURLs[url] = mux
+		hlsw.muxerUIDs[url] = generateUID()
 	}
 
 	return hlsw.recalcManifest()
@@ -156,6 +170,7 @@ func (hlsw *hlsWriter) removeSrc(url string) error {
 	}
 	delete(hlsw.codPars, url)
 	delete(hlsw.muxerURLs, url)
+	delete(hlsw.muxerUIDs, url)
 
 	if idx := slices.Index(hlsw.sortedURLs, url); idx != -1 {
 		hlsw.sortedURLs = slices.Delete(hlsw.sortedURLs, idx, idx+1)
@@ -191,14 +206,14 @@ func (hlsw *hlsWriter) recalcManifest() (err error) {
 
 	clear(hlsw.muxerIDs)
 
-	index := uint8(0)
 	for _, url := range hlsw.sortedURLs {
 		mux, ok := hlsw.muxerURLs[url]
 		if !ok {
 			continue
 		}
 
-		hlsw.muxerIDs[index] = hlsw.muxerURLs[url]
+		uid := hlsw.muxerUIDs[url]
+		hlsw.muxerIDs[uid] = mux
 
 		var entry string
 		if entry, err = mux.GetMasterEntry(); err != nil {
@@ -207,10 +222,9 @@ func (hlsw *hlsWriter) recalcManifest() (err error) {
 		if _, err = builder.WriteString(fmt.Sprintf("%s\n", entry)); err != nil {
 			return
 		}
-		if _, err = builder.WriteString(fmt.Sprintf("%d/%d/%s\n", hlsw.id, index, hlsw.indexName)); err != nil {
+		if _, err = builder.WriteString(fmt.Sprintf("%d/%s/%s\n", hlsw.id, uid, hlsw.indexName)); err != nil {
 			return
 		}
-		index++
 	}
 
 	hlsw.master = builder.String()
@@ -279,59 +293,56 @@ func (hlsw *hlsWriter) GetMasterPlaylist() (string, error) {
 	return hlsw.master, nil
 }
 
-// getIndexM3u8 retrieves the M3U8 playlist for a specific index using the innerHLS instance.
-// It takes context, index, needMSN (Media Sequence Number), and needPart as parameters.
-func (hlsw *hlsWriter) GetIndexM3u8(ctx context.Context, index uint8, needMSN int64, needPart int8) (string, error) {
+// GetIndexM3u8 retrieves the M3U8 playlist for a specific muxer UID.
+func (hlsw *hlsWriter) GetIndexM3u8(ctx context.Context, uid string, needMSN int64, needPart int8) (string, error) {
 	hlsw.mu.RLock()
 	defer hlsw.mu.RUnlock()
-	mux, found := hlsw.muxerIDs[index]
+	mux, found := hlsw.muxerIDs[uid]
 	if !found {
-		return "", fmt.Errorf("output %d not found", index)
+		return "", fmt.Errorf("output %s not found", uid)
 	}
 	return mux.GetIndexM3u8(ctx, needMSN, needPart)
 }
 
-// getInit retrieves the initialization segment for a specific index using the innerHLS instance.
-func (hlsw *hlsWriter) GetInit(index uint8) ([]byte, error) {
+// GetInit retrieves the initialization segment for a specific muxer UID.
+func (hlsw *hlsWriter) GetInit(uid string) ([]byte, error) {
 	hlsw.mu.RLock()
 	defer hlsw.mu.RUnlock()
-	mux, found := hlsw.muxerIDs[index]
+	mux, found := hlsw.muxerIDs[uid]
 	if !found {
-		return nil, fmt.Errorf("output %d not found", index)
+		return nil, fmt.Errorf("output %s not found", uid)
 	}
 	return mux.GetInit()
 }
 
 // GetInitByVersion retrieves the initialization segment for a specific codec version.
-func (hlsw *hlsWriter) GetInitByVersion(index uint8, version int) ([]byte, error) {
+func (hlsw *hlsWriter) GetInitByVersion(uid string, version int) ([]byte, error) {
 	hlsw.mu.RLock()
 	defer hlsw.mu.RUnlock()
-	mux, found := hlsw.muxerIDs[index]
+	mux, found := hlsw.muxerIDs[uid]
 	if !found {
-		return nil, fmt.Errorf("output %d not found", index)
+		return nil, fmt.Errorf("output %s not found", uid)
 	}
 	return mux.GetInitByVersion(version)
 }
 
-// getSegment retrieves the media segment for a specific index and segment index using the innerHLS instance.
-// It takes context, index, and segIndex as parameters.
-func (hlsw *hlsWriter) GetSegment(ctx context.Context, index uint8, segIndex uint64) ([]byte, error) {
+// GetSegment retrieves the media segment for a specific muxer UID and segment index.
+func (hlsw *hlsWriter) GetSegment(ctx context.Context, uid string, segIndex uint64) ([]byte, error) {
 	hlsw.mu.RLock()
 	defer hlsw.mu.RUnlock()
-	mux, found := hlsw.muxerIDs[index]
-
+	mux, found := hlsw.muxerIDs[uid]
 	if !found {
-		return nil, fmt.Errorf("output %d not found", index)
+		return nil, fmt.Errorf("output %s not found", uid)
 	}
 	return mux.GetSegment(ctx, segIndex)
 }
 
-func (hlsw *hlsWriter) GetFragment(ctx context.Context, index uint8, segIndex uint64, fragIndex uint8) ([]byte, error) {
+func (hlsw *hlsWriter) GetFragment(ctx context.Context, uid string, segIndex uint64, fragIndex uint8) ([]byte, error) {
 	hlsw.mu.RLock()
 	defer hlsw.mu.RUnlock()
-	mux, found := hlsw.muxerIDs[index]
+	mux, found := hlsw.muxerIDs[uid]
 	if !found {
-		return nil, fmt.Errorf("output %d not found", index)
+		return nil, fmt.Errorf("output %s not found", uid)
 	}
 	return mux.GetFragment(ctx, segIndex, fragIndex)
 }

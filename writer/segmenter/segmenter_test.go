@@ -206,8 +206,8 @@ func TestNew_ReturnsNonNil(t *testing.T) {
 }
 
 func TestNew_DefaultOptions(t *testing.T) {
-	seg := New("/tmp/test", 10*time.Second, gomedia.Always, 64).(*segmenter)
-	assert.Equal(t, 5*time.Second, seg.preBufferDuration)  // targetDuration / 2
+	seg := New("/tmp/test", 10*time.Second, gomedia.Always, 64, WithDirPermissions(0o750)).(*segmenter)
+	assert.Equal(t, 5*time.Second, seg.preBufferDuration) // targetDuration / 2
 	assert.Equal(t, time.Minute, seg.maxEventDuration)
 	assert.Equal(t, os.FileMode(0o750), seg.dirPerm)
 }

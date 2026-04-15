@@ -160,12 +160,12 @@ type HLSMuxer interface {
 
 // HLS represents an hls receiving interface for several levels.
 type HLS interface {
-	GetMasterPlaylist() (string, error)                                                   // GetMasterEntry returns the master playlist.
-	GetIndexM3u8(ctx context.Context, index uint8, msn int64, prt int8) (string, error)   // GetIndexM3u8 returns the index playlist.
-	GetInit(index uint8) ([]byte, error)                                                  // GetInit returns the initialization segment.
-	GetInitByVersion(index uint8, version int) ([]byte, error)                            // GetInitByVersion returns the init segment for a specific codec version.
-	GetSegment(ctx context.Context, index uint8, seg uint64) ([]byte, error)              // GetSegment returns the segment.
-	GetFragment(ctx context.Context, index uint8, seg uint64, frag uint8) ([]byte, error) // GetFragment returns the fragment.
+	GetMasterPlaylist() (string, error)                                                 // GetMasterEntry returns the master playlist.
+	GetIndexM3u8(ctx context.Context, uid string, msn int64, prt int8) (string, error)  // GetIndexM3u8 returns the index playlist.
+	GetInit(uid string) ([]byte, error)                                                 // GetInit returns the initialization segment.
+	GetInitByVersion(uid string, version int) ([]byte, error)                           // GetInitByVersion returns the init segment for a specific codec version.
+	GetSegment(ctx context.Context, uid string, seg uint64) ([]byte, error)             // GetSegment returns the segment.
+	GetFragment(ctx context.Context, uid string, seg uint64, frag uint8) ([]byte, error) // GetFragment returns the fragment.
 }
 
 // HLSStreamer represents an HLS streamer for several inputs.

@@ -227,9 +227,15 @@ func (element *webRTCWriter) checkCodecParameters(addr string, codecPar gomedia.
 		return nil
 	}
 
-	_, changed := element.streams.Update(addr, codecPar)
+	peersToRemove, changed := element.streams.Update(addr, codecPar)
 	if !changed {
 		return
+	}
+
+	for _, peer := range peersToRemove {
+		if rmErr := element.removePeer(peer); rmErr != nil {
+			element.log.Errorf(element, "Failed to remove peer after codec change: %v", rmErr)
+		}
 	}
 
 	element.sendAvailableStreams()

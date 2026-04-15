@@ -480,7 +480,7 @@
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.4.2/dist/hls.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.4.14/dist/hls.min.js"></script>
     <script>
         // ===============================
         // Logging Utility
@@ -512,16 +512,50 @@
         function initHLSPlayer() {
             if (Hls.isSupported()) {
                 hlsInstance = new Hls({
+                    autoStartLoad: true,
                     lowLatencyMode: true,
-                    backBufferLength: 10,
-                    liveSyncDurationCount: 2,
-                    liveMaxLatencyDurationCount: 5,
+                    enableWorker: true,
+                    startFragPrefetch: true,
+                    startLevel: 0,
+
+                    backBufferLength: 0,
+                    maxBufferLength: 10,
+                    maxMaxBufferLength: 30,
+                    maxBufferHole: 0.5,
+
+                    liveSyncDuration: 5,
+                    liveMaxLatencyDuration: 10,
+                    maxLiveSyncPlaybackRate: 1.5,
                     liveDurationInfinity: true,
-                    maxBufferLength: 30,
-                    liveBackBufferLength: 5,
-                    maxMaxBufferLength: 60,
-                    emeEnabled: false,
-                    debug: false
+
+                    capLevelToPlayerSize: false,
+                    capLevelOnFPSDrop: false,
+                    forceKeyFrameOnDiscontinuity: true,
+
+                    fragLoadPolicy: {
+                    default: {
+                        maxTimeToFirstByteMs: 10000,
+                        maxLoadTimeMs: 120000,
+                        timeoutRetry: { maxNumRetry: 4, retryDelayMs: 0, maxRetryDelayMs: 0 },
+                        errorRetry: { maxNumRetry: 6, retryDelayMs: 1000, maxRetryDelayMs: 300000 },
+                    },
+                    },
+                    playlistLoadPolicy: {
+                    default: {
+                        maxTimeToFirstByteMs: 10000,
+                        maxLoadTimeMs: 20000,
+                        timeoutRetry: { maxNumRetry: 2, retryDelayMs: 0, maxRetryDelayMs: 0 },
+                        errorRetry: { maxNumRetry: 4, retryDelayMs: 1000, maxRetryDelayMs: 300000 },
+                    },
+                    },
+                    manifestLoadPolicy: {
+                    default: {
+                        maxTimeToFirstByteMs: Infinity,
+                        maxLoadTimeMs: 20000,
+                        timeoutRetry: { maxNumRetry: 2, retryDelayMs: 0, maxRetryDelayMs: 0 },
+                        errorRetry: { maxNumRetry: 1, retryDelayMs: 1000, maxRetryDelayMs: 300000 },
+                    },
+                    },
                 });
 
                 hlsInstance.on(Hls.Events.MEDIA_ATTACHED, () => {
@@ -631,7 +665,7 @@
         hlsQuality.addEventListener('change', function() {
             if (hlsInstance) {
                 const level = parseInt(this.value);
-                hlsInstance.currentLevel = level;
+                hlsInstance.nextLevel = level;
                 log(`HLS: Quality changed to ${level === -1 ? 'Auto' : hlsInstance.levels[level]?.height + 'p'}`, 'hls');
             }
         });

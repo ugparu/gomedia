@@ -15,32 +15,32 @@ import (
 	gomock "go.uber.org/mock/gomock"
 )
 
-// MockPooledBuffer is a mock of PooledBuffer interface.
-type MockPooledBuffer struct {
+// MockBuffer is a mock of Buffer interface.
+type MockBuffer struct {
 	ctrl     *gomock.Controller
-	recorder *MockPooledBufferMockRecorder
+	recorder *MockBufferMockRecorder
 	isgomock struct{}
 }
 
-// MockPooledBufferMockRecorder is the mock recorder for MockPooledBuffer.
-type MockPooledBufferMockRecorder struct {
-	mock *MockPooledBuffer
+// MockBufferMockRecorder is the mock recorder for MockBuffer.
+type MockBufferMockRecorder struct {
+	mock *MockBuffer
 }
 
-// NewMockPooledBuffer creates a new mock instance.
-func NewMockPooledBuffer(ctrl *gomock.Controller) *MockPooledBuffer {
-	mock := &MockPooledBuffer{ctrl: ctrl}
-	mock.recorder = &MockPooledBufferMockRecorder{mock}
+// NewMockBuffer creates a new mock instance.
+func NewMockBuffer(ctrl *gomock.Controller) *MockBuffer {
+	mock := &MockBuffer{ctrl: ctrl}
+	mock.recorder = &MockBufferMockRecorder{mock}
 	return mock
 }
 
 // EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockPooledBuffer) EXPECT() *MockPooledBufferMockRecorder {
+func (m *MockBuffer) EXPECT() *MockBufferMockRecorder {
 	return m.recorder
 }
 
 // Cap mocks base method.
-func (m *MockPooledBuffer) Cap() int {
+func (m *MockBuffer) Cap() int {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Cap")
 	ret0, _ := ret[0].(int)
@@ -48,13 +48,13 @@ func (m *MockPooledBuffer) Cap() int {
 }
 
 // Cap indicates an expected call of Cap.
-func (mr *MockPooledBufferMockRecorder) Cap() *gomock.Call {
+func (mr *MockBufferMockRecorder) Cap() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Cap", reflect.TypeOf((*MockPooledBuffer)(nil).Cap))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Cap", reflect.TypeOf((*MockBuffer)(nil).Cap))
 }
 
 // Data mocks base method.
-func (m *MockPooledBuffer) Data() []byte {
+func (m *MockBuffer) Data() []byte {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Data")
 	ret0, _ := ret[0].([]byte)
@@ -62,13 +62,13 @@ func (m *MockPooledBuffer) Data() []byte {
 }
 
 // Data indicates an expected call of Data.
-func (mr *MockPooledBufferMockRecorder) Data() *gomock.Call {
+func (mr *MockBufferMockRecorder) Data() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Data", reflect.TypeOf((*MockPooledBuffer)(nil).Data))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Data", reflect.TypeOf((*MockBuffer)(nil).Data))
 }
 
 // Len mocks base method.
-func (m *MockPooledBuffer) Len() int {
+func (m *MockBuffer) Len() int {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Len")
 	ret0, _ := ret[0].(int)
@@ -76,31 +76,19 @@ func (m *MockPooledBuffer) Len() int {
 }
 
 // Len indicates an expected call of Len.
-func (mr *MockPooledBufferMockRecorder) Len() *gomock.Call {
+func (mr *MockBufferMockRecorder) Len() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Len", reflect.TypeOf((*MockPooledBuffer)(nil).Len))
-}
-
-// Release mocks base method.
-func (m *MockPooledBuffer) Release() {
-	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "Release")
-}
-
-// Release indicates an expected call of Release.
-func (mr *MockPooledBufferMockRecorder) Release() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Release", reflect.TypeOf((*MockPooledBuffer)(nil).Release))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Len", reflect.TypeOf((*MockBuffer)(nil).Len))
 }
 
 // Resize mocks base method.
-func (m *MockPooledBuffer) Resize(arg0 int) {
+func (m *MockBuffer) Resize(arg0 int) {
 	m.ctrl.T.Helper()
 	m.ctrl.Call(m, "Resize", arg0)
 }
 
 // Resize indicates an expected call of Resize.
-func (mr *MockPooledBufferMockRecorder) Resize(arg0 any) *gomock.Call {
+func (mr *MockBufferMockRecorder) Resize(arg0 any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Resize", reflect.TypeOf((*MockPooledBuffer)(nil).Resize), arg0)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Resize", reflect.TypeOf((*MockBuffer)(nil).Resize), arg0)
 }

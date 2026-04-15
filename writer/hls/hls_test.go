@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -19,6 +20,8 @@ import (
 	"github.com/ugparu/gomedia/codec/h264"
 	"github.com/ugparu/gomedia/utils/logger"
 )
+
+var variantPathRe = regexp.MustCompile(`\d+/([0-9a-f]{8})/\S+\.m3u8`)
 
 const testDataDir = "../../tests/data/h264_aac/"
 
@@ -160,8 +163,19 @@ func waitForMaster(t *testing.T, w gomedia.HLSStreamer, timeout time.Duration) s
 	}
 }
 
+// extractUIDs parses all muxer UIDs from a master playlist, returned in order.
+func extractUIDs(t *testing.T, master string) []string {
+	t.Helper()
+	matches := variantPathRe.FindAllStringSubmatch(master, -1)
+	uids := make([]string, 0, len(matches))
+	for _, m := range matches {
+		uids = append(uids, m[1])
+	}
+	return uids
+}
+
 // waitForSegment polls until the index manifest contains #EXTINF (a completed segment).
-func waitForSegment(t *testing.T, w gomedia.HLSStreamer, index uint8, timeout time.Duration) string {
+func waitForSegment(t *testing.T, w gomedia.HLSStreamer, uid string, timeout time.Duration) string {
 	t.Helper()
 	deadline := time.After(timeout)
 	for {
@@ -170,7 +184,7 @@ func waitForSegment(t *testing.T, w gomedia.HLSStreamer, index uint8, timeout ti
 			t.Fatal("timed out waiting for segment completion")
 		default:
 		}
-		m, err := w.GetIndexM3u8(context.Background(), index, -1, -1)
+		m, err := w.GetIndexM3u8(context.Background(), uid, -1, -1)
 		if err != nil {
 			time.Sleep(5 * time.Millisecond)
 			continue
@@ -275,7 +289,10 @@ func TestSingleSource_MasterPlaylistGenerated(t *testing.T) {
 	assert.Contains(t, master, "RESOLUTION=")
 	assert.Contains(t, master, "CODECS=")
 	assert.Contains(t, master, "FRAME-RATE=")
-	assert.Contains(t, master, fmt.Sprintf("100/0/index.m3u8"))
+
+	uids := extractUIDs(t, master)
+	require.Len(t, uids, 1)
+	assert.Contains(t, master, fmt.Sprintf("100/%s/index.m3u8", uids[0]))
 }
 
 func TestSingleSource_MasterPlaylistUsesCustomVersion(t *testing.T) {
@@ -297,7 +314,7 @@ func TestSingleSource_MasterPlaylistUsesCustomIndexName(t *testing.T) {
 	sendPackets(t, w, packets)
 	master := waitForMaster(t, w, 3*time.Second)
 
-	assert.Contains(t, master, "55/0/playlist.m3u8")
+	assert.Regexp(t, `55/[0-9a-f]{8}/playlist\.m3u8`, master)
 }
 
 func TestSingleSource_IndexM3u8Available(t *testing.T) {
@@ -306,9 +323,11 @@ func TestSingleSource_IndexM3u8Available(t *testing.T) {
 	packets := loadTestPackets(t, "src1", vCp, aCp, 500)
 
 	sendPackets(t, w, packets)
-	waitForMaster(t, w, 3*time.Second)
+	master := waitForMaster(t, w, 3*time.Second)
+	uids := extractUIDs(t, master)
+	require.Len(t, uids, 1)
 
-	manifest := waitForSegment(t, w, 0, 3*time.Second)
+	manifest := waitForSegment(t, w, uids[0], 3*time.Second)
 	assert.Contains(t, manifest, "#EXTM3U")
 	assert.Contains(t, manifest, "#EXT-X-TARGETDURATION:")
 	assert.Contains(t, manifest, "#EXT-X-MEDIA-SEQUENCE:")
@@ -321,9 +340,11 @@ func TestSingleSource_GetInitReturnsData(t *testing.T) {
 	packets := loadTestPackets(t, "src1", vCp, aCp, 50)
 
 	sendPackets(t, w, packets)
-	waitForMaster(t, w, 3*time.Second)
+	master := waitForMaster(t, w, 3*time.Second)
+	uids := extractUIDs(t, master)
+	require.Len(t, uids, 1)
 
-	init, err := w.GetInit(0)
+	init, err := w.GetInit(uids[0])
 	require.NoError(t, err)
 	assert.NotEmpty(t, init)
 }
@@ -334,9 +355,11 @@ func TestSingleSource_GetInitByVersion(t *testing.T) {
 	packets := loadTestPackets(t, "src1", vCp, aCp, 50)
 
 	sendPackets(t, w, packets)
-	waitForMaster(t, w, 3*time.Second)
+	master := waitForMaster(t, w, 3*time.Second)
+	uids := extractUIDs(t, master)
+	require.Len(t, uids, 1)
 
-	init, err := w.GetInitByVersion(0, 0)
+	init, err := w.GetInitByVersion(uids[0], 0)
 	require.NoError(t, err)
 	assert.NotEmpty(t, init)
 }
@@ -347,9 +370,12 @@ func TestSingleSource_GetSegmentAfterCompletion(t *testing.T) {
 	packets := loadTestPackets(t, "src1", vCp, aCp, 500)
 
 	sendPackets(t, w, packets)
-	waitForSegment(t, w, 0, 3*time.Second)
+	master := waitForMaster(t, w, 3*time.Second)
+	uids := extractUIDs(t, master)
+	require.Len(t, uids, 1)
+	waitForSegment(t, w, uids[0], 3*time.Second)
 
-	seg, err := w.GetSegment(context.Background(), 0, 0)
+	seg, err := w.GetSegment(context.Background(), uids[0], 0)
 	require.NoError(t, err)
 	assert.NotEmpty(t, seg)
 }
@@ -360,9 +386,12 @@ func TestSingleSource_GetFragmentAfterCompletion(t *testing.T) {
 	packets := loadTestPackets(t, "src1", vCp, aCp, 500)
 
 	sendPackets(t, w, packets)
-	waitForSegment(t, w, 0, 3*time.Second)
+	master := waitForMaster(t, w, 3*time.Second)
+	uids := extractUIDs(t, master)
+	require.Len(t, uids, 1)
+	waitForSegment(t, w, uids[0], 3*time.Second)
 
-	frag, err := w.GetFragment(context.Background(), 0, 0, 0)
+	frag, err := w.GetFragment(context.Background(), uids[0], 0, 0)
 	require.NoError(t, err)
 	assert.NotEmpty(t, frag)
 }
@@ -371,37 +400,37 @@ func TestSingleSource_GetFragmentAfterCompletion(t *testing.T) {
 // Invalid index lookups
 // ---------------------------------------------------------------------------
 
-func TestGetIndexM3u8_InvalidIndex(t *testing.T) {
+func TestGetIndexM3u8_InvalidUID(t *testing.T) {
 	w := newWriter(t, 1, 3, 2*time.Second)
-	_, err := w.GetIndexM3u8(context.Background(), 99, -1, -1)
+	_, err := w.GetIndexM3u8(context.Background(), "nonexistent", -1, -1)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
 
-func TestGetInit_InvalidIndex(t *testing.T) {
+func TestGetInit_InvalidUID(t *testing.T) {
 	w := newWriter(t, 1, 3, 2*time.Second)
-	_, err := w.GetInit(99)
+	_, err := w.GetInit("nonexistent")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
 
-func TestGetInitByVersion_InvalidIndex(t *testing.T) {
+func TestGetInitByVersion_InvalidUID(t *testing.T) {
 	w := newWriter(t, 1, 3, 2*time.Second)
-	_, err := w.GetInitByVersion(99, 0)
+	_, err := w.GetInitByVersion("nonexistent", 0)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
 
-func TestGetSegment_InvalidIndex(t *testing.T) {
+func TestGetSegment_InvalidUID(t *testing.T) {
 	w := newWriter(t, 1, 3, 2*time.Second)
-	_, err := w.GetSegment(context.Background(), 99, 0)
+	_, err := w.GetSegment(context.Background(), "nonexistent", 0)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
 
-func TestGetFragment_InvalidIndex(t *testing.T) {
+func TestGetFragment_InvalidUID(t *testing.T) {
 	w := newWriter(t, 1, 3, 2*time.Second)
-	_, err := w.GetFragment(context.Background(), 99, 0, 0)
+	_, err := w.GetFragment(context.Background(), "nonexistent", 0, 0)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
@@ -427,10 +456,11 @@ func TestRemoveSource_RemovesMuxer(t *testing.T) {
 	packets := loadTestPackets(t, "src1", vCp, aCp, 50)
 
 	sendPackets(t, w, packets)
-	waitForMaster(t, w, 3*time.Second)
+	master := waitForMaster(t, w, 3*time.Second)
+	uids := extractUIDs(t, master)
+	require.Len(t, uids, 1)
 
-	// Verify index 0 works before removal.
-	_, err := w.GetInit(0)
+	_, err := w.GetInit(uids[0])
 	require.NoError(t, err)
 
 	// Remove the source.
@@ -439,12 +469,12 @@ func TestRemoveSource_RemovesMuxer(t *testing.T) {
 	// Give the Step loop time to process the removal.
 	time.Sleep(100 * time.Millisecond)
 
-	master, err := w.GetMasterPlaylist()
+	master, err = w.GetMasterPlaylist()
 	require.NoError(t, err)
 	assert.NotContains(t, master, "#EXT-X-STREAM-INF:")
 
-	// Index 0 should no longer resolve.
-	_, err = w.GetInit(0)
+	// Old UID should no longer resolve.
+	_, err = w.GetInit(uids[0])
 	assert.Error(t, err)
 }
 
@@ -503,9 +533,10 @@ func TestMultiSource_MasterPlaylistContainsAllSources(t *testing.T) {
 	master, err := w.GetMasterPlaylist()
 	require.NoError(t, err)
 
-	// Should have two variant entries.
-	assert.Contains(t, master, "200/0/index.m3u8")
-	assert.Contains(t, master, "200/1/index.m3u8")
+	// Should have two variant entries with distinct UIDs.
+	uids := extractUIDs(t, master)
+	require.Len(t, uids, 2)
+	assert.NotEqual(t, uids[0], uids[1])
 	assert.Equal(t, 2, strings.Count(master, "#EXT-X-STREAM-INF:"))
 }
 
@@ -520,13 +551,20 @@ func TestMultiSource_IndependentIndexPlaylists(t *testing.T) {
 	sendPackets(t, w, packets1)
 	sendPackets(t, w, packets2)
 
-	// Wait for both to have segments.
-	waitForSegment(t, w, 0, 5*time.Second)
-	waitForSegment(t, w, 1, 5*time.Second)
-
-	m0, err := w.GetIndexM3u8(context.Background(), 0, -1, -1)
+	// Wait for both sources to appear in master.
+	time.Sleep(200 * time.Millisecond)
+	master, err := w.GetMasterPlaylist()
 	require.NoError(t, err)
-	m1, err := w.GetIndexM3u8(context.Background(), 1, -1, -1)
+	uids := extractUIDs(t, master)
+	require.Len(t, uids, 2)
+
+	// Wait for both to have segments.
+	waitForSegment(t, w, uids[0], 5*time.Second)
+	waitForSegment(t, w, uids[1], 5*time.Second)
+
+	m0, err := w.GetIndexM3u8(context.Background(), uids[0], -1, -1)
+	require.NoError(t, err)
+	m1, err := w.GetIndexM3u8(context.Background(), uids[1], -1, -1)
 	require.NoError(t, err)
 
 	// Both should be valid HLS playlists.
@@ -597,13 +635,15 @@ func TestGetSegment_ContextCancelled(t *testing.T) {
 	packets := loadTestPackets(t, "src1", vCp, aCp, 50)
 
 	sendPackets(t, w, packets)
-	waitForMaster(t, w, 3*time.Second)
+	master := waitForMaster(t, w, 3*time.Second)
+	uids := extractUIDs(t, master)
+	require.Len(t, uids, 1)
 
 	// Request a segment that may not be finished, with an already cancelled context.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := w.GetSegment(ctx, 0, 999)
+	_, err := w.GetSegment(ctx, uids[0], 999)
 	assert.Error(t, err)
 }
 
@@ -626,16 +666,21 @@ func TestConcurrentAccess(t *testing.T) {
 	}()
 
 	// Reader goroutines accessing HLS methods concurrently.
+	// UID is dynamic so readers try whatever UID the master currently has.
 	for i := 0; i < 5; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 20; j++ {
-				_, _ = w.GetMasterPlaylist()
-				_, _ = w.GetIndexM3u8(context.Background(), 0, -1, -1)
-				_, _ = w.GetInit(0)
-				_, _ = w.GetSegment(context.Background(), 0, 0)
-				_, _ = w.GetFragment(context.Background(), 0, 0, 0)
+				master, _ := w.GetMasterPlaylist()
+				uids := variantPathRe.FindAllStringSubmatch(master, -1)
+				if len(uids) > 0 {
+					uid := uids[0][1]
+					_, _ = w.GetIndexM3u8(context.Background(), uid, -1, -1)
+					_, _ = w.GetInit(uid)
+					_, _ = w.GetSegment(context.Background(), uid, 0)
+					_, _ = w.GetFragment(context.Background(), uid, 0, 0)
+				}
 				time.Sleep(5 * time.Millisecond)
 			}
 		}()
@@ -655,28 +700,30 @@ func TestEndToEnd_FullPipeline(t *testing.T) {
 
 	sendPackets(t, w, packets)
 
-	// 1. Master playlist should appear.
+	// 1. Master playlist should appear with a UID-based variant path.
 	master := waitForMaster(t, w, 3*time.Second)
 	assert.Contains(t, master, "#EXTM3U")
-	assert.Contains(t, master, "42/0/index.m3u8")
+	uids := extractUIDs(t, master)
+	require.Len(t, uids, 1)
+	assert.Contains(t, master, fmt.Sprintf("42/%s/index.m3u8", uids[0]))
 
 	// 2. Init segment should be available.
-	init, err := w.GetInit(0)
+	init, err := w.GetInit(uids[0])
 	require.NoError(t, err)
 	assert.NotEmpty(t, init)
 
 	// 3. Index manifest should have segments.
-	manifest := waitForSegment(t, w, 0, 3*time.Second)
+	manifest := waitForSegment(t, w, uids[0], 3*time.Second)
 	assert.Contains(t, manifest, "#EXTINF:")
 	assert.Contains(t, manifest, "#EXT-X-MAP:URI=\"init.mp4?v=0\"")
 
 	// 4. Segment data should be retrievable.
-	seg, err := w.GetSegment(context.Background(), 0, 0)
+	seg, err := w.GetSegment(context.Background(), uids[0], 0)
 	require.NoError(t, err)
 	assert.NotEmpty(t, seg)
 
 	// 5. Fragment data should be retrievable.
-	frag, err := w.GetFragment(context.Background(), 0, 0, 0)
+	frag, err := w.GetFragment(context.Background(), uids[0], 0, 0)
 	require.NoError(t, err)
 	assert.NotEmpty(t, frag)
 }
@@ -728,11 +775,15 @@ func TestParallelInstances_FourStreamsWithConcurrentReaders(t *testing.T) {
 				defer wg.Done()
 				w := writers[idx]
 				for j := 0; j < readIterations; j++ {
-					_, _ = w.GetMasterPlaylist()
-					_, _ = w.GetIndexM3u8(context.Background(), uint8(0), -1, -1)
-					_, _ = w.GetInit(0)
-					_, _ = w.GetSegment(context.Background(), 0, 0)
-					_, _ = w.GetFragment(context.Background(), 0, 0, 0)
+					master, _ := w.GetMasterPlaylist()
+					uids := variantPathRe.FindAllStringSubmatch(master, -1)
+					if len(uids) > 0 {
+						uid := uids[0][1]
+						_, _ = w.GetIndexM3u8(context.Background(), uid, -1, -1)
+						_, _ = w.GetInit(uid)
+						_, _ = w.GetSegment(context.Background(), uid, 0)
+						_, _ = w.GetFragment(context.Background(), uid, 0, 0)
+					}
 					time.Sleep(2 * time.Millisecond)
 				}
 			}(i)
@@ -749,18 +800,22 @@ func TestParallelInstances_FourStreamsWithConcurrentReaders(t *testing.T) {
 		assert.Contains(t, master, "#EXTM3U", "stream %d master missing header", i)
 		assert.Contains(t, master, "#EXT-X-STREAM-INF:", "stream %d master missing variant", i)
 
-		initData, err := w.GetInit(0)
+		uids := extractUIDs(t, master)
+		require.NotEmpty(t, uids, "stream %d has no UIDs", i)
+		uid := uids[0]
+
+		initData, err := w.GetInit(uid)
 		require.NoError(t, err, "stream %d GetInit", i)
 		assert.NotEmpty(t, initData, "stream %d init empty", i)
 
-		manifest := waitForSegment(t, w, 0, 3*time.Second)
+		manifest := waitForSegment(t, w, uid, 3*time.Second)
 		assert.Contains(t, manifest, "#EXTINF:", "stream %d missing segment", i)
 
-		seg, err := w.GetSegment(context.Background(), 0, 0)
+		seg, err := w.GetSegment(context.Background(), uid, 0)
 		require.NoError(t, err, "stream %d GetSegment", i)
 		assert.NotEmpty(t, seg, "stream %d segment empty", i)
 
-		frag, err := w.GetFragment(context.Background(), 0, 0, 0)
+		frag, err := w.GetFragment(context.Background(), uid, 0, 0)
 		require.NoError(t, err, "stream %d GetFragment", i)
 		assert.NotEmpty(t, frag, "stream %d fragment empty", i)
 	}
