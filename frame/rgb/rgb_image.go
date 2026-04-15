@@ -103,10 +103,6 @@ func (p *FramePool) Put(img *RGB) {
 	select {
 	case p.ch <- img:
 	default:
-		select {
-		case p.ch <- img:
-		case <-time.After(timeout):
-		}
 	}
 }
 
