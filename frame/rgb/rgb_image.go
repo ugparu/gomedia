@@ -55,7 +55,7 @@ type ReleasableImage interface {
 }
 
 const (
-	defaultPoolSize = 3
+	defaultPoolSize = 4
 	timeout         = time.Second
 )
 

@@ -115,11 +115,11 @@ func NewGrowingRingAlloc(initSize int, opts ...RingAllocOption) *GrowingRingAllo
 // calcGrowth computes the target capacity given the current cap and the
 // requested allocation size.
 func (g *GrowingRingAlloc) calcGrowth(currentCap, allocSize int) int {
-	grov := 20 //nolint:mnd // growth factor ×2.0
-	if currentCap > 1024*1024*10 {
+	grov := 16 //nolint:mnd // growth factor ×1.6
+	if currentCap > 1024*1024*8 {
 		grov = 11 //nolint:mnd // growth factor ×1.1 for >10 MB
-	} else if currentCap > 1024*1024*5 {
-		grov = 12 //nolint:mnd // growth factor ×1.2 for >5 MB
+	} else if currentCap > 1024*1024*4 {
+		grov = 13 //nolint:mnd // growth factor ×1.3 for >5 MB
 	} else if currentCap > 1024*1024 {
 		grov = 14 //nolint:mnd // growth factor ×1.4 for >1 MB
 	}
@@ -154,6 +154,7 @@ func (g *GrowingRingAlloc) Alloc(n int) ([]byte, *SlotHandle) {
 	}
 
 	if g.current.bcap >= maxRingSize {
+		g.current.log.Warningf(g.current, "ring allocator reached max size: %d", maxRingSize)
 		return nil, nil
 	}
 

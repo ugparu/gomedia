@@ -53,7 +53,7 @@ func (e *alawEncoder) Init(params *pcm.CodecParameters) error {
 	e.frameDuration = time.Duration(ALAWSampleRate/frameDurationDivisor) * time.Second / time.Duration(ALAWSampleRate)
 
 	e.codecPar = pcm.NewCodecParameters(params.StreamIndex(), gomedia.PCMAlaw, 1, ALAWSampleRate)
-	e.ring = buffer.NewGrowingRingAlloc(64 * 1024)
+	e.ring = buffer.NewGrowingRingAlloc(16 * 1024)
 
 	return err
 }

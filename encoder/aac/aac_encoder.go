@@ -88,7 +88,7 @@ func (v *aacEncoder) Init(codecPar *pcm.CodecParameters) (err error) {
 	}
 	aacPar.SetStreamIndex(codecPar.StreamIndex())
 	v.param = &aacPar
-	v.ring = buffer.NewGrowingRingAlloc(256 * 1024)
+	v.ring = buffer.NewGrowingRingAlloc(80 * 1024)
 
 	return
 }

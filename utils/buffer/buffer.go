@@ -34,11 +34,7 @@ func (b *memBuffer) Cap() int {
 // Resize меняет длину слайса (len), не меняя емкость (cap), если влезает
 func (b *memBuffer) Resize(size int) {
 	if size > cap(b.buf) {
-		newCap := cap(b.buf) * 14 / 10
-		if newCap < size {
-			newCap = size
-		}
-		newBuf := make([]byte, size, newCap)
+		newBuf := make([]byte, size)
 		copy(newBuf, b.buf)
 		b.buf = newBuf
 	} else {
