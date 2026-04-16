@@ -1038,6 +1038,105 @@ func TestMuxer_Ftyp_Brands(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Muxer — Flush writes data to writer mid-stream
+// ---------------------------------------------------------------------------
+
+func TestMuxer_Flush_WritesToWriter(t *testing.T) {
+	t.Parallel()
+	pair, videoCp, audioCp := loadTestCodecPair(t)
+	packets := loadTestPackets(t, videoCp, audioCp, 50)
+
+	f, err := os.CreateTemp("", "gomedia_flush_test_*.mp4")
+	require.NoError(t, err)
+	defer os.Remove(f.Name())
+
+	mux := NewMuxer(f)
+	require.NoError(t, mux.Mux(pair))
+
+	// Write some packets
+	for i := 0; i < 10 && i < len(packets); i++ {
+		require.NoError(t, mux.WritePacket(packets[i]))
+	}
+
+	// Before Flush, file should be empty (nothing written yet)
+	stat, err := f.Stat()
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), stat.Size(), "file must be empty before Flush")
+
+	// After Flush, file should have data (header + packet data)
+	require.NoError(t, mux.Flush())
+	stat, err = f.Stat()
+	require.NoError(t, err)
+	assert.Greater(t, stat.Size(), int64(headerSize), "file must have data after Flush")
+}
+
+func TestMuxer_Flush_ThenWriteTrailer_ProducesValidMP4(t *testing.T) {
+	t.Parallel()
+	pair, videoCp, audioCp := loadTestCodecPair(t)
+	packets := loadTestPackets(t, videoCp, audioCp, 50)
+
+	f, err := os.CreateTemp("", "gomedia_flush_trailer_test_*.mp4")
+	require.NoError(t, err)
+	path := f.Name()
+	defer os.Remove(path)
+
+	mux := NewMuxer(f)
+	require.NoError(t, mux.Mux(pair))
+
+	half := len(packets) / 2
+	for i := 0; i < half; i++ {
+		require.NoError(t, mux.WritePacket(packets[i]))
+	}
+	require.NoError(t, mux.Flush())
+
+	for i := half; i < len(packets); i++ {
+		require.NoError(t, mux.WritePacket(packets[i]))
+	}
+	require.NoError(t, mux.WriteTrailer())
+	require.NoError(t, f.Close())
+
+	// The resulting file must be a valid MP4 with moov at the end.
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	require.Equal(t, mp4io.FTYP, readTag(data, 0), "first box must be ftyp")
+	moov := demuxAndGetMoov(t, path)
+	require.Len(t, moov.Tracks, 2, "should have 2 tracks")
+	assert.Greater(t, moov.Header.Duration, int64(0))
+}
+
+func TestMuxer_NoFlush_WriteTrailer_ProducesValidMP4(t *testing.T) {
+	t.Parallel()
+	pair, videoCp, audioCp := loadTestCodecPair(t)
+	packets := loadTestPackets(t, videoCp, audioCp, 50)
+
+	f, err := os.CreateTemp("", "gomedia_noflush_trailer_test_*.mp4")
+	require.NoError(t, err)
+	path := f.Name()
+	defer os.Remove(path)
+
+	mux := NewMuxer(f)
+	require.NoError(t, mux.Mux(pair))
+
+	for _, pkt := range packets {
+		require.NoError(t, mux.WritePacket(pkt))
+	}
+
+	// Before WriteTrailer, file should be empty (fast path buffers everything)
+	stat, err := f.Stat()
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), stat.Size(), "file must be empty before WriteTrailer (fast path)")
+
+	require.NoError(t, mux.WriteTrailer())
+	require.NoError(t, f.Close())
+
+	// Verify file is valid
+	moov := demuxAndGetMoov(t, path)
+	require.Len(t, moov.Tracks, 2)
+	assert.Greater(t, moov.Header.Duration, int64(0))
+}
+
+// ---------------------------------------------------------------------------
 // Helper: parse moov from a muxed file
 // ---------------------------------------------------------------------------
 

@@ -93,6 +93,15 @@ func WithVersion(v int) MuxerOption {
 	return func(m *muxer) { m.version = v }
 }
 
+// WithKeyframeSplit controls segment rotation strategy.
+// When false (default) segments rotate strictly on target duration, which may
+// split mid-GOP. When true, rotation is deferred to the next video keyframe
+// after the target duration is reached, guaranteeing every segment starts with
+// an independently decodable frame at the cost of variable segment lengths.
+func WithKeyframeSplit(enabled bool) MuxerOption {
+	return func(m *muxer) { m.keyframeSplit = enabled }
+}
+
 // muxer is an implementation of the HLS interface.
 type muxer struct {
 	lifecycle.Manager[*muxer] // Embedding lifecycle.Manager to manage lifecycle functions.
@@ -118,6 +127,7 @@ type muxer struct {
 	mediaName             string                              // Base filename used in segment/fragment URIs (e.g. "media").
 	manifestBuilder       strings.Builder                     // Reusable builder for manifest generation.
 	manifestDirty         bool                                // True when manifest needs rebuild.
+	keyframeSplit         bool                                // When true, defer segment rotation to the next video keyframe.
 }
 
 // NewHLSMuxer creates a new HLS muxer with the specified segment duration and segment count.
@@ -150,13 +160,16 @@ func NewHLSMuxer(segmentDuration time.Duration, segmentCount uint8, partHoldBack
 		o(newHLS)
 	}
 	partTarget := newHLS.fragmentDuration.Seconds() * 1.01
+	independentTag := ""
+	if newHLS.keyframeSplit {
+		independentTag = "#EXT-X-INDEPENDENT-SEGMENTS\n"
+	}
 	newHLS.header = fmt.Sprintf(`#EXTM3U
 #EXT-X-VERSION:%d
 #EXT-X-TARGETDURATION:%d
 #EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,PART-HOLD-BACK=%.5f
 #EXT-X-PART-INF:PART-TARGET=%.5f
-#EXT-X-INDEPENDENT-SEGMENTS
-`, newHLS.version, int(math.Ceil(segmentDuration.Seconds())), partHoldBack, partTarget)
+%s`, newHLS.version, int(math.Ceil(segmentDuration.Seconds())), partHoldBack, partTarget, independentTag)
 	newHLS.Manager = lifecycle.NewDefaultManager(newHLS, log)
 	return newHLS
 }
@@ -294,13 +307,26 @@ func (mxr *muxer) WritePacket(inpPkt gomedia.Packet) (err error) {
 
 	inpPkt.SetTimestamp(inpPkt.Timestamp() % mxr.maxTS)
 
-	// Rotate segment on video keyframe when target duration is met.
-	// This ensures every new segment starts with an independently decodable
-	// frame, preventing video stalls caused by missing reference frames.
-	if vPkt, isVideo := inpPkt.(gomedia.VideoPacket); isVideo && vPkt.IsKeyFrame() {
+	// Rotate segment according to the configured strategy.
+	//   - keyframeSplit=true: wait for the next video keyframe once the
+	//     target duration is met. Segments may exceed target but always
+	//     start with an independently decodable frame.
+	//   - keyframeSplit=false (default): strict time-based rotation. Cut
+	//     before any video packet that would push the segment past the
+	//     target duration, so EXT-X-TARGETDURATION remains an honest
+	//     upper bound (RFC 8216 §4.3.3.1).
+	if vPkt, isVideo := inpPkt.(gomedia.VideoPacket); isVideo {
 		curSeg := mxr.getCurSegment()
-		if curSeg.duration >= mxr.segmentDuration {
-			curSeg.closeOnKeyframe()
+		var rotate bool
+		if mxr.keyframeSplit {
+			rotate = vPkt.IsKeyFrame() && curSeg.duration >= mxr.segmentDuration
+		} else {
+			projected := curSeg.duration + curSeg.curFragment.duration + inpPkt.Duration()
+			hasContent := curSeg.duration > 0 || curSeg.curFragment.duration > 0
+			rotate = hasContent && projected > mxr.segmentDuration
+		}
+		if rotate {
+			curSeg.closeSeg()
 			newSegID := curSeg.id + 1
 			newSeg := newSegment(newSegID, mxr.fragmentDuration, mxr.segmentDuration, mxr.codecPars, mxr.mediaName, mxr.blockingTimeout, mxr.log)
 			newSeg.initVersion = mxr.initVersion

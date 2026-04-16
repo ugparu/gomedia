@@ -79,9 +79,8 @@ func newSegment(
 }
 
 // writePacket writes a multimedia packet to the current fragment of the segment.
-// Segment closure is NOT handled here — it is driven by the muxer at keyframe
-// boundaries to ensure each new segment starts with an independently decodable
-// frame (preventing video stalls in the player).
+// Segment closure is NOT handled here — it is driven by the muxer based on
+// target duration (and optionally deferred to a keyframe when configured).
 // Returns true if a fragment was closed and the manifest needs rebuilding.
 func (element *segment) writePacket(packet gomedia.Packet) (changed bool, err error) {
 	curFrag := element.curFragment
@@ -109,11 +108,11 @@ func (element *segment) writePacket(packet gomedia.Packet) (changed bool, err er
 	return
 }
 
-// closeOnKeyframe finalizes the segment when the muxer triggers a keyframe
-// rotation. Any in-progress fragment is closed: if it contains video data it
-// becomes the last part of this segment; otherwise it is silently closed
-// (audio-only data remains in the segment's fMP4 but is not listed as a part).
-func (element *segment) closeOnKeyframe() {
+// closeSeg finalizes the segment when the muxer triggers a rotation. Any
+// in-progress fragment is closed: if it contains video data it becomes the
+// last part of this segment; otherwise it is silently closed (audio-only
+// data remains in the segment's fMP4 but is not listed as a part).
+func (element *segment) closeSeg() {
 	curFrag := element.curFragment
 	select {
 	case <-curFrag.finished:

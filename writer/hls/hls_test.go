@@ -22,6 +22,7 @@ import (
 )
 
 var variantPathRe = regexp.MustCompile(`\d+/([0-9a-f]{8})/\S+\.m3u8`)
+var segmentPathRe = regexp.MustCompile(`segment/(\d+)/`)
 
 const testDataDir = "../../tests/data/h264_aac/"
 
@@ -172,6 +173,18 @@ func extractUIDs(t *testing.T, master string) []string {
 		uids = append(uids, m[1])
 	}
 	return uids
+}
+
+// firstSegmentID parses the index manifest and returns the first segment
+// index listed. Fails the test if none is present.
+func firstSegmentID(t *testing.T, manifest string) uint64 {
+	t.Helper()
+	m := segmentPathRe.FindStringSubmatch(manifest)
+	require.NotEmpty(t, m, "no segment entry in manifest")
+	var id uint64
+	_, err := fmt.Sscanf(m[1], "%d", &id)
+	require.NoError(t, err)
+	return id
 }
 
 // waitForSegment polls until the index manifest contains #EXTINF (a completed segment).
@@ -373,9 +386,10 @@ func TestSingleSource_GetSegmentAfterCompletion(t *testing.T) {
 	master := waitForMaster(t, w, 3*time.Second)
 	uids := extractUIDs(t, master)
 	require.Len(t, uids, 1)
-	waitForSegment(t, w, uids[0], 3*time.Second)
+	manifest := waitForSegment(t, w, uids[0], 3*time.Second)
+	segID := firstSegmentID(t, manifest)
 
-	seg, err := w.GetSegment(context.Background(), uids[0], 0)
+	seg, err := w.GetSegment(context.Background(), uids[0], segID)
 	require.NoError(t, err)
 	assert.NotEmpty(t, seg)
 }
@@ -389,9 +403,10 @@ func TestSingleSource_GetFragmentAfterCompletion(t *testing.T) {
 	master := waitForMaster(t, w, 3*time.Second)
 	uids := extractUIDs(t, master)
 	require.Len(t, uids, 1)
-	waitForSegment(t, w, uids[0], 3*time.Second)
+	manifest := waitForSegment(t, w, uids[0], 3*time.Second)
+	segID := firstSegmentID(t, manifest)
 
-	frag, err := w.GetFragment(context.Background(), uids[0], 0, 0)
+	frag, err := w.GetFragment(context.Background(), uids[0], segID, 0)
 	require.NoError(t, err)
 	assert.NotEmpty(t, frag)
 }
@@ -718,12 +733,13 @@ func TestEndToEnd_FullPipeline(t *testing.T) {
 	assert.Contains(t, manifest, "#EXT-X-MAP:URI=\"init.mp4?v=0\"")
 
 	// 4. Segment data should be retrievable.
-	seg, err := w.GetSegment(context.Background(), uids[0], 0)
+	segID := firstSegmentID(t, manifest)
+	seg, err := w.GetSegment(context.Background(), uids[0], segID)
 	require.NoError(t, err)
 	assert.NotEmpty(t, seg)
 
 	// 5. Fragment data should be retrievable.
-	frag, err := w.GetFragment(context.Background(), uids[0], 0, 0)
+	frag, err := w.GetFragment(context.Background(), uids[0], segID, 0)
 	require.NoError(t, err)
 	assert.NotEmpty(t, frag)
 }
@@ -811,11 +827,12 @@ func TestParallelInstances_FourStreamsWithConcurrentReaders(t *testing.T) {
 		manifest := waitForSegment(t, w, uid, 3*time.Second)
 		assert.Contains(t, manifest, "#EXTINF:", "stream %d missing segment", i)
 
-		seg, err := w.GetSegment(context.Background(), uid, 0)
+		segID := firstSegmentID(t, manifest)
+		seg, err := w.GetSegment(context.Background(), uid, segID)
 		require.NoError(t, err, "stream %d GetSegment", i)
 		assert.NotEmpty(t, seg, "stream %d segment empty", i)
 
-		frag, err := w.GetFragment(context.Background(), uid, 0, 0)
+		frag, err := w.GetFragment(context.Background(), uid, segID, 0)
 		require.NoError(t, err, "stream %d GetFragment", i)
 		assert.NotEmpty(t, frag, "stream %d fragment empty", i)
 	}

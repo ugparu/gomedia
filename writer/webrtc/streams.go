@@ -147,10 +147,11 @@ func (ss *sortedStreams) Add(url string, newCodecPar gomedia.CodecParameters) []
 		tracks: map[*peerTrack]bool{},
 		toAdd:  map[*peerTrack]*peerURL{},
 		buffer: &Buffer{
-			log:            ss.log,
-			gops:           nil,
-			duration:       0,
-			targetDuration: ss.targetDuration,
+			log:             ss.log,
+			gops:            nil,
+			duration:        0,
+			targetDuration:  ss.targetDuration,
+			hardCapDuration: ss.targetDuration + time.Second,
 		},
 		codecPar: pair,
 	}

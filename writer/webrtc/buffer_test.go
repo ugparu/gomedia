@@ -105,8 +105,9 @@ func makeAbsTime() time.Time {
 
 func newBuffer(targetDuration time.Duration) *Buffer {
 	return &Buffer{
-		log:            logger.Default,
-		targetDuration: targetDuration,
+		log:             logger.Default,
+		targetDuration:  targetDuration,
+		hardCapDuration: targetDuration + time.Second,
 	}
 }
 
@@ -203,6 +204,84 @@ func TestBuffer_AdjustSize_RemovesOldGoPsWhenOverTarget(t *testing.T) {
 
 	assert.Len(t, buf.gops, 2) // oldest GOP removed
 	assert.Equal(t, 66*time.Millisecond, buf.duration)
+}
+
+func TestBuffer_AddPacket_HardCapShiftsSingleGOPAndKeepsKeyframe(t *testing.T) {
+	_, videoCp, _ := loadTestCodecPair(t, "rtsp://test")
+	buf := newBuffer(200 * time.Millisecond)
+	absTime := time.Now()
+
+	kf := makeVideoPacket(t, videoCp, "rtsp://test", true, 0, 100*time.Millisecond, absTime)
+	assert.True(t, buf.AddPacket(kf))
+
+	for i := 1; i <= 12; i++ {
+		ts := time.Duration(i) * 100 * time.Millisecond
+		p := makeVideoPacket(t, videoCp, "rtsp://test", false, ts, 100*time.Millisecond, absTime.Add(ts))
+		assert.True(t, buf.AddPacket(p))
+	}
+
+	assert.Len(t, buf.gops, 1)
+	assert.Len(t, buf.gops[0].packets, 12)
+	assert.Equal(t, 1200*time.Millisecond, buf.duration)
+
+	first, ok := buf.gops[0].packets[0].(gomedia.VideoPacket)
+	require.True(t, ok)
+	assert.True(t, first.IsKeyFrame())
+	assert.Equal(t, absTime, first.StartTime())
+
+	second, ok := buf.gops[0].packets[1].(gomedia.VideoPacket)
+	require.True(t, ok)
+	assert.False(t, second.IsKeyFrame())
+	assert.Equal(t, absTime.Add(200*time.Millisecond), second.StartTime())
+}
+
+func TestBuffer_AddPacket_HardCapDropsWholeGOPWhenPossible(t *testing.T) {
+	_, videoCp, _ := loadTestCodecPair(t, "rtsp://test")
+	buf := newBuffer(200 * time.Millisecond)
+	absTime := time.Now()
+
+	kf1 := makeVideoPacket(t, videoCp, "rtsp://test", true, 0, 100*time.Millisecond, absTime)
+	assert.True(t, buf.AddPacket(kf1))
+
+	kf2TS := 100 * time.Millisecond
+	kf2 := makeVideoPacket(t, videoCp, "rtsp://test", true, kf2TS, 100*time.Millisecond, absTime.Add(kf2TS))
+	assert.True(t, buf.AddPacket(kf2))
+
+	for i := 2; i <= 12; i++ {
+		ts := time.Duration(i) * 100 * time.Millisecond
+		p := makeVideoPacket(t, videoCp, "rtsp://test", false, ts, 100*time.Millisecond, absTime.Add(ts))
+		assert.True(t, buf.AddPacket(p))
+	}
+
+	assert.Len(t, buf.gops, 1)
+	assert.Equal(t, 1200*time.Millisecond, buf.duration)
+
+	first, ok := buf.gops[0].packets[0].(gomedia.VideoPacket)
+	require.True(t, ok)
+	assert.True(t, first.IsKeyFrame())
+	assert.Equal(t, absTime.Add(kf2TS), first.StartTime())
+
+	second, ok := buf.gops[0].packets[1].(gomedia.VideoPacket)
+	require.True(t, ok)
+	assert.False(t, second.IsKeyFrame())
+	assert.Equal(t, absTime.Add(200*time.Millisecond), second.StartTime())
+}
+
+func TestBuffer_AddPacket_HardCapPreservesOnlyKeyframes(t *testing.T) {
+	_, videoCp, _ := loadTestCodecPair(t, "rtsp://test")
+	buf := newBuffer(5 * time.Second)
+	absTime := time.Now()
+
+	kf1 := makeVideoPacket(t, videoCp, "rtsp://test", true, 0, 4*time.Second, absTime)
+	assert.True(t, buf.AddPacket(kf1))
+
+	kf2 := makeVideoPacket(t, videoCp, "rtsp://test", true, 4*time.Second, 4*time.Second, absTime.Add(4*time.Second))
+	assert.True(t, buf.AddPacket(kf2))
+
+	assert.Len(t, buf.gops, 2)
+	assert.Len(t, buf.gops[0].packets, 1)
+	assert.Len(t, buf.gops[1].packets, 1)
+	assert.Equal(t, 8*time.Second, buf.duration)
 }
 
 func TestBuffer_GetBuffer_EmptyBuffer(t *testing.T) {

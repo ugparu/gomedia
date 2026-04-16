@@ -248,9 +248,22 @@ func TestManifest_Header(t *testing.T) {
 	assert.Contains(t, m, "#EXT-X-TARGETDURATION:2")
 	assert.Contains(t, m, "#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES")
 	assert.Contains(t, m, "#EXT-X-PART-INF:PART-TARGET=0.49995")
-	assert.Contains(t, m, "#EXT-X-INDEPENDENT-SEGMENTS")
+	assert.NotContains(t, m, "#EXT-X-INDEPENDENT-SEGMENTS")
 	assert.Contains(t, m, "#EXT-X-MEDIA-SEQUENCE:0")
 	assert.Contains(t, m, "#EXT-X-MAP:URI=\"init.mp4?v=0\"")
+}
+
+func TestManifest_Header_KeyframeSplit(t *testing.T) {
+	mxr, _, vCp, aCp := initMuxer(t, 2*time.Second, 3, WithKeyframeSplit(true))
+	defer mxr.Release()
+	packets := loadTestPackets(t, vCp, aCp, 5)
+	for _, pkt := range packets {
+		require.NoError(t, mxr.WritePacket(pkt))
+	}
+
+	m, err := mxr.GetIndexM3u8(context.Background(), -1, -1)
+	require.NoError(t, err)
+	assert.Contains(t, m, "#EXT-X-INDEPENDENT-SEGMENTS")
 }
 
 func TestManifest_TargetDurationCeiled(t *testing.T) {
@@ -551,6 +564,41 @@ func TestSegmentEviction(t *testing.T) {
 	// Evicted segments should not be accessible
 	_, err = mxr.GetSegment(context.Background(), 0)
 	assert.Error(t, err, "segment 0 should have been evicted")
+}
+
+// ---------------------------------------------------------------------------
+// Target duration bounds (strict time-based splitting)
+// ---------------------------------------------------------------------------
+
+// TestTimeBasedSplit_RespectsTargetDuration verifies that with the default
+// (time-based) splitting strategy, no emitted #EXTINF exceeds the configured
+// target duration — the RFC 8216 §4.3.3.1 invariant for EXT-X-TARGETDURATION.
+func TestTimeBasedSplit_RespectsTargetDuration(t *testing.T) {
+	targetDur := 2 * time.Second
+	mxr, _, vCp, aCp := initMuxer(t, targetDur, 255)
+	defer mxr.Release()
+	packets := loadTestPackets(t, vCp, aCp, 1000)
+
+	for _, pkt := range packets {
+		require.NoError(t, mxr.WritePacket(pkt))
+	}
+
+	m, err := mxr.GetIndexM3u8(context.Background(), -1, -1)
+	require.NoError(t, err)
+
+	var extinfCount int
+	for _, line := range strings.Split(m, "\n") {
+		if !strings.HasPrefix(line, "#EXTINF:") {
+			continue
+		}
+		var dur float64
+		_, scanErr := fmt.Sscanf(line, "#EXTINF:%f", &dur)
+		require.NoError(t, scanErr)
+		assert.LessOrEqual(t, dur, targetDur.Seconds(),
+			"segment duration %.5f exceeds target %.5f", dur, targetDur.Seconds())
+		extinfCount++
+	}
+	assert.Greater(t, extinfCount, 1, "expected multiple completed segments")
 }
 
 // ---------------------------------------------------------------------------

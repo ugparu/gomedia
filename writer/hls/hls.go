@@ -49,6 +49,14 @@ func WithVersion(v int) Option {
 	return func(h *hlsWriter) { h.version = v }
 }
 
+// WithKeyframeSplit controls segment rotation strategy for the underlying
+// HLS muxers. When false (default) segments rotate strictly on target
+// duration, which may split mid-GOP. When true, rotation is deferred to the
+// next video keyframe after the target duration is reached.
+func WithKeyframeSplit(enabled bool) Option {
+	return func(h *hlsWriter) { h.keyframeSplit = enabled }
+}
+
 // hlsWriter is a struct representing an HLS (HTTP Live Streaming) writer.
 type hlsWriter struct {
 	lifecycle.AsyncManager[*hlsWriter]
@@ -61,17 +69,18 @@ type hlsWriter struct {
 	addSrcCh chan string
 	rmSrcCh  chan string
 
-	muxerIDs     map[string]gomedia.HLSMuxer
-	muxerURLs    map[string]gomedia.HLSMuxer
-	muxerUIDs    map[string]string
-	codPars      map[string]*gomedia.CodecParametersPair
-	sortedURLs   []string
-	mu           sync.RWMutex
-	master       string
-	indexName    string
-	mediaName    string
-	partHoldBack float64
-	version      int
+	muxerIDs      map[string]gomedia.HLSMuxer
+	muxerURLs     map[string]gomedia.HLSMuxer
+	muxerUIDs     map[string]string
+	codPars       map[string]*gomedia.CodecParametersPair
+	sortedURLs    []string
+	mu            sync.RWMutex
+	master        string
+	indexName     string
+	mediaName     string
+	partHoldBack  float64
+	version       int
+	keyframeSplit bool
 }
 
 func New(id uint64, segCnt uint8, segDur time.Duration, chanSize int, partHoldBack float64, opts ...Option) gomedia.HLSStreamer {
@@ -151,7 +160,7 @@ func (hlsw *hlsWriter) checkCodPar(url string, codecPar gomedia.CodecParameters)
 		}
 		hlsw.muxerUIDs[url] = generateUID()
 	} else {
-		mux = hls.NewHLSMuxer(hlsw.segmentDuration, hlsw.segmentCount, hlsw.partHoldBack, hlsw.log, hls.WithMediaName(hlsw.mediaName), hls.WithVersion(hlsw.version))
+		mux = hls.NewHLSMuxer(hlsw.segmentDuration, hlsw.segmentCount, hlsw.partHoldBack, hlsw.log, hls.WithMediaName(hlsw.mediaName), hls.WithVersion(hlsw.version), hls.WithKeyframeSplit(hlsw.keyframeSplit))
 		if err = mux.Mux(*par); err != nil {
 			return
 		}

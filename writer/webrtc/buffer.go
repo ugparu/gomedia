@@ -13,10 +13,11 @@ type GoP struct {
 }
 
 type Buffer struct {
-	log            logger.Logger
-	gops           []GoP
-	duration       time.Duration
-	targetDuration time.Duration
+	log             logger.Logger
+	gops            []GoP
+	duration        time.Duration
+	targetDuration  time.Duration
+	hardCapDuration time.Duration
 }
 
 // AddPacket stores packet in the current GOP buffer.
@@ -38,6 +39,8 @@ func (b *Buffer) AddPacket(packet gomedia.Packet) bool {
 		b.gops[len(b.gops)-1].duration += packet.Duration()
 		b.duration += packet.Duration()
 	}
+
+	b.adjustHardCap()
 	return true
 }
 
@@ -51,6 +54,52 @@ func (b *Buffer) AdjustSize() {
 	}
 	b.duration -= b.gops[0].duration
 	b.gops = b.gops[1:]
+}
+
+func (b *Buffer) adjustHardCap() {
+	if b.hardCapDuration == 0 {
+		return
+	}
+
+	for len(b.gops) > 1 && b.duration > b.hardCapDuration && b.duration-b.gops[0].duration >= b.hardCapDuration {
+		b.dropOldestGOP()
+	}
+
+	for len(b.gops) == 1 && b.duration > b.hardCapDuration {
+		if !b.shiftSingleGOP() {
+			return
+		}
+	}
+}
+
+func (b *Buffer) dropOldestGOP() {
+	for _, pkt := range b.gops[0].packets {
+		pkt.Release()
+	}
+	b.duration -= b.gops[0].duration
+	b.gops = b.gops[1:]
+}
+
+func (b *Buffer) shiftSingleGOP() bool {
+	gop := &b.gops[0]
+	if len(gop.packets) < 2 {
+		return false
+	}
+
+	dropped := gop.packets[1]
+	var droppedDur time.Duration
+	if _, ok := dropped.(gomedia.VideoPacket); ok {
+		droppedDur = dropped.Duration()
+	}
+	dropped.Release()
+
+	copy(gop.packets[1:], gop.packets[2:])
+	gop.packets = gop.packets[:len(gop.packets)-1]
+
+	gop.duration -= droppedDur
+	b.duration -= droppedDur
+
+	return true
 }
 
 func (b *Buffer) GetBuffer(ts time.Time) ([]gomedia.VideoPacket, []gomedia.Packet) {
