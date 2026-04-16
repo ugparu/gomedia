@@ -13,8 +13,7 @@ import (
 )
 
 const (
-	headerSize     = 56         //nolint:mnd // ftyp(32) + free(8) + mdat_tag(16)
-	defaultBufSize = 512 * 1024 //nolint:mnd // 512KB default I/O assembly buffer
+	headerSize = 56 //nolint:mnd // ftyp(32) + free(8) + mdat_tag(16)
 )
 
 // MuxerOption is a functional option for configuring a Muxer.
@@ -28,28 +27,25 @@ func WithBuffer(buf buffer.Buffer) MuxerOption {
 }
 
 // Muxer represents an MP4 muxer that combines multiple media streams into a single MP4 file.
-// All writes are buffered in memory until Flush() or WriteTrailer() is called.
+// If WithBuffer is used, writes are batched in memory until Flush/WriteTrailer.
+// Without WithBuffer, packet payloads are written directly to writer (more syscalls, less RAM).
 type Muxer struct {
 	writer        io.WriteSeeker
 	writePosition int64
 	streams       []*Stream
 	buf           buffer.Buffer // reusable buffer for I/O assembly
-	pending       [][]byte      // buffered mdat body chunks
-	pendingSize   int           // total bytes across all pending chunks
+	bufUsed       int           // bytes written into buf so far
 	flushed       bool          // true after first Flush() call
 }
 
 // NewMuxer creates a new Muxer instance with the given writer.
-// Use WithBuffer to supply a reusable I/O buffer; otherwise a default is allocated.
+// Use WithBuffer to enable in-memory batching; by default writes go directly to writer.
 func NewMuxer(writer io.WriteSeeker, opts ...MuxerOption) *Muxer {
 	m := &Muxer{
 		writer: writer,
 	}
 	for _, o := range opts {
 		o(m)
-	}
-	if m.buf == nil {
-		m.buf = buffer.Get(defaultBufSize)
 	}
 	return m
 }
@@ -65,14 +61,6 @@ func (mux *Muxer) GetPreLastPacket(streamIndex uint8) gomedia.Packet {
 		return nil
 	}
 	return mux.streams[streamIndex].lastPacket
-}
-
-// appendPending copies data and appends it to the pending buffer list.
-func (mux *Muxer) appendPending(data []byte) {
-	chunk := make([]byte, len(data))
-	copy(chunk, data)
-	mux.pending = append(mux.pending, chunk)
-	mux.pendingSize += len(data)
 }
 
 // newStream creates a new media stream based on the provided codec parameters and adds it to the muxer.
@@ -208,11 +196,11 @@ func (mux *Muxer) newStream(codec gomedia.CodecParameters) (err error) {
 }
 
 // Mux combines the specified video and audio streams into a single MP4 file.
-// The header is serialized into the internal buffer but NOT written to the writer.
+// With WithBuffer, header is staged in memory and written on Flush/WriteTrailer.
+// Without WithBuffer, header is written immediately.
 func (mux *Muxer) Mux(streams gomedia.CodecParametersPair) (err error) {
 	mux.streams = []*Stream{}
-	mux.pending = mux.pending[:0]
-	mux.pendingSize = 0
+	mux.bufUsed = 0
 	mux.flushed = false
 	mux.writePosition = 0
 
@@ -228,24 +216,20 @@ func (mux *Muxer) Mux(streams gomedia.CodecParametersPair) (err error) {
 		}
 	}
 
-	// Serialize ftyp + free + mdat tag into the reusable buffer (not written to writer).
-	mux.buf.Resize(headerSize)
-	hdr := mux.buf.Data()[:headerSize]
+	var hdr [headerSize]byte
+	mux.marshalHeader(hdr[:])
+	if mux.buf != nil {
+		mux.buf.Resize(headerSize)
+		copy(mux.buf.Data()[:headerSize], hdr[:])
+		mux.bufUsed = headerSize
+	} else {
+		if _, err = mux.writer.Write(hdr[:]); err != nil {
+			return
+		}
+		mux.flushed = true // header already written in direct-write mode
+	}
 
-	ftyp := mp4io.NewFileType()
-	ftyp.Marshal(hdr)
-	off := ftyp.Len() // 32
-
-	free := mp4io.FreeType{}
-	free.Marshal(hdr[off:])
-	off += free.Len() // +8 = 40
-
-	pio.PutU32BE(hdr[off:], 1)
-	pio.PutU32BE(hdr[off+4:], uint32(mp4io.MDAT)) //nolint:mnd
-	// Extended size placeholder at hdr[48:56] — patched later.
-	off += 16 //nolint:mnd
-
-	mux.writePosition = int64(off) // 56
+	mux.writePosition = headerSize
 
 	// Prepare video streams for muxing.
 	for _, stream := range mux.streams {
@@ -254,6 +238,67 @@ func (mux *Muxer) Mux(streams gomedia.CodecParametersPair) (err error) {
 		}
 	}
 	return
+}
+
+func (mux *Muxer) marshalHeader(dst []byte) {
+	ftyp := mp4io.NewFileType()
+	ftyp.Marshal(dst)
+	off := ftyp.Len() // 32
+
+	free := mp4io.FreeType{}
+	free.Marshal(dst[off:])
+	off += free.Len() // +8 = 40
+
+	pio.PutU32BE(dst[off:], 1)
+	pio.PutU32BE(dst[off+4:], uint32(mp4io.MDAT)) //nolint:mnd
+}
+
+const maxExtras = 3 //nolint:mnd // VPS + SPS + PPS at most
+
+// writePayload writes parameter-set NALUs (with 4-byte length prefix each)
+// followed by packet data. In buffered mode data is appended to the internal
+// buffer; in direct mode it is written straight to the underlying writer.
+func (mux *Muxer) writePayload(extras *[maxExtras][]byte, numExtras int, pktData []byte) error {
+	if mux.buf != nil {
+		return mux.appendPayload(extras, numExtras, pktData)
+	}
+	return mux.writePayloadDirect(extras, numExtras, pktData)
+}
+
+func (mux *Muxer) appendPayload(extras *[maxExtras][]byte, numExtras int, pktData []byte) error {
+	totalSize := len(pktData)
+	for i := range numExtras {
+		totalSize += 4 + len(extras[i]) //nolint:mnd // 4-byte NALU length prefix
+	}
+	needed := mux.bufUsed + totalSize
+	mux.buf.Resize(needed)
+	out := mux.buf.Data()
+	off := mux.bufUsed
+
+	for i := range numExtras {
+		pio.PutU32BE(out[off:], uint32(len(extras[i]))) //nolint:gosec
+		off += 4                                         //nolint:mnd
+		copy(out[off:], extras[i])
+		off += len(extras[i])
+	}
+	copy(out[off:], pktData)
+	mux.bufUsed = needed
+	return nil
+}
+
+func (mux *Muxer) writePayloadDirect(extras *[maxExtras][]byte, numExtras int, pktData []byte) error {
+	var hdr [4]byte //nolint:mnd
+	for i := range numExtras {
+		pio.PutU32BE(hdr[:], uint32(len(extras[i]))) //nolint:gosec
+		if _, err := mux.writer.Write(hdr[:]); err != nil {
+			return err
+		}
+		if _, err := mux.writer.Write(extras[i]); err != nil {
+			return err
+		}
+	}
+	_, err := mux.writer.Write(pktData)
+	return err
 }
 
 // WritePacket writes a media packet to the muxer's in-memory buffer.
@@ -271,30 +316,12 @@ func (mux *Muxer) WritePacket(pkt gomedia.Packet) (err error) {
 // After Flush has been called, WriteTrailer will need to seek back to patch
 // the mdat size.
 func (mux *Muxer) Flush() error {
-	totalSize := mux.pendingSize
-	if !mux.flushed {
-		totalSize += headerSize
-	}
-	if totalSize == 0 {
+	if mux.buf == nil || mux.bufUsed == 0 {
 		return nil
 	}
-
-	mux.buf.Resize(totalSize)
-	out := mux.buf.Data()
-	off := 0
-	if !mux.flushed {
-		// Header was already serialized into buf by Mux(); skip past it.
-		off = headerSize
-		mux.flushed = true
-	}
-	for _, chunk := range mux.pending {
-		copy(out[off:], chunk)
-		off += len(chunk)
-	}
-	mux.pending = mux.pending[:0]
-	mux.pendingSize = 0
-
-	_, err := mux.writer.Write(out[:off])
+	_, err := mux.writer.Write(mux.buf.Data()[:mux.bufUsed])
+	mux.bufUsed = 0
+	mux.flushed = true
 	return err
 }
 
@@ -356,7 +383,11 @@ func (mux *Muxer) WriteTrailer() (err error) {
 // writeTrailerFast assembles the entire MP4 into the reusable buffer and writes
 // it in a single Write call. No seeks are performed.
 func (mux *Muxer) writeTrailerFast(moovBytes []byte, mdatSize int64) error {
-	totalSize := headerSize + mux.pendingSize + len(moovBytes)
+	if mux.buf == nil {
+		return mux.writeTrailerSeek(moovBytes, mdatSize)
+	}
+
+	totalSize := mux.bufUsed + len(moovBytes)
 	mux.buf.Resize(totalSize)
 	out := mux.buf.Data()
 
@@ -364,15 +395,8 @@ func (mux *Muxer) writeTrailerFast(moovBytes []byte, mdatSize int64) error {
 	const mdatExtSizeOffset = 48 //nolint:mnd // ftyp(32) + free(8) + mdat_tag(8) = 48
 	pio.PutU64BE(out[mdatExtSizeOffset:], uint64(mdatSize))
 
-	off := headerSize
-	for _, chunk := range mux.pending {
-		copy(out[off:], chunk)
-		off += len(chunk)
-	}
-	copy(out[off:], moovBytes)
-
-	mux.pending = mux.pending[:0]
-	mux.pendingSize = 0
+	copy(out[mux.bufUsed:], moovBytes)
+	mux.bufUsed = 0
 
 	_, err := mux.writer.Write(out[:totalSize])
 	return err

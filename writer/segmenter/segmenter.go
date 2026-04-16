@@ -16,7 +16,7 @@ import (
 	"github.com/ugparu/gomedia/utils/logger"
 )
 
-const ioBufInitSize = 8 * 1024 //nolint:mnd // 8KB initial I/O assembly buffer
+const defaultIOBufInitSize = 8 * 1024 //nolint:mnd // 8KB initial I/O assembly buffer for optional mp4 buffering
 
 // activeFile tracks the on-disk segment currently being recorded.
 // The MP4 muxer buffers data internally; Flush() or WriteTrailer() writes to the file.
@@ -127,7 +127,7 @@ func (rb *ringBuffer) drain() []gomedia.Packet {
 type streamState struct {
 	activeFile   *activeFile                 // currently recording file for this URL
 	ringBuf      *ringBuffer                 // pre-buffer for event mode
-	ioBuf        buffer.Buffer               // reusable I/O assembly buffer passed to mp4.Muxer
+	ioBuf        buffer.Buffer               // optional: reusable I/O assembly buffer passed to mp4.Muxer
 	seenKeyframe bool                        // track first keyframe
 	eventSaved   bool                        // whether this stream has saved the current event
 	codecPar     gomedia.CodecParametersPair // codec parameters for this URL
@@ -164,6 +164,18 @@ func WithDirPermissions(perm os.FileMode) Option {
 	return func(s *segmenter) { s.dirPerm = perm }
 }
 
+// WithMuxerBuffer enables mp4 muxer in-memory batching and sets the initial buffer size.
+// When disabled (default), mp4 payloads are written directly to the file (lower RAM, more syscalls).
+// If size <= 0, a sensible default is used.
+func WithMuxerBuffer(size int) Option {
+	return func(s *segmenter) {
+		s.useMuxerBuffer = true
+		if size > 0 {
+			s.ioBufInitSize = size
+		}
+	}
+}
+
 type segmenter struct {
 	lifecycle.AsyncManager[*segmenter]
 	log               logger.Logger
@@ -184,6 +196,8 @@ type segmenter struct {
 	preBufferDuration time.Duration
 	maxEventDuration  time.Duration
 	dirPerm           os.FileMode
+	useMuxerBuffer    bool
+	ioBufInitSize     int
 	// Per-URL stream state management
 	sources   []string                // ordered list of registered URLs
 	streams   map[string]*streamState // map of URL to stream state
@@ -271,6 +285,7 @@ func New(dest string, segSize time.Duration, recordMode gomedia.RecordMode, chan
 			name := fmt.Sprintf("%d_%s.mp4", streamIdx, startTime.Format("2006-01-02T15:04:05"))
 			return dir, name
 		},
+		ioBufInitSize: defaultIOBufInitSize,
 	}
 	for _, o := range opts {
 		o(newArch)
@@ -310,8 +325,9 @@ func (s *segmenter) createFile(path string) (*os.File, error) {
 }
 
 // openNewSegment opens a file on disk and initializes the MP4 muxer for a new segment.
-// The muxer buffers header + packet data in memory; nothing is written to the file
-// until Flush() or WriteTrailer() is called.
+// If WithMuxerBuffer is enabled, the muxer batches header + packet data in memory
+// and writes on Flush/WriteTrailer. Otherwise packet payloads are written directly
+// to the file as they arrive.
 func (s *segmenter) openNewSegment(url string, stream *streamState, startTime time.Time) error {
 	if stream.codecPar.VideoCodecParameters == nil {
 		return errors.New("cannot open file with nil video codec parameters")
@@ -330,10 +346,15 @@ func (s *segmenter) openNewSegment(url string, stream *streamState, startTime ti
 		return err
 	}
 
-	if stream.ioBuf == nil {
-		stream.ioBuf = buffer.Get(ioBufInitSize)
+	var muxer *mp4.Muxer
+	if s.useMuxerBuffer {
+		if stream.ioBuf == nil {
+			stream.ioBuf = buffer.Get(s.ioBufInitSize)
+		}
+		muxer = mp4.NewMuxer(f, mp4.WithBuffer(stream.ioBuf))
+	} else {
+		muxer = mp4.NewMuxer(f)
 	}
-	muxer := mp4.NewMuxer(f, mp4.WithBuffer(stream.ioBuf))
 	if err = muxer.Mux(stream.codecPar); err != nil {
 		_ = f.Close()
 		_ = os.Remove(filename)

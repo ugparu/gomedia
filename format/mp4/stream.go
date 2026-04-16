@@ -436,9 +436,9 @@ func (s *Stream) readPacket(tm time.Duration, url string) (pkt gomedia.Packet, e
 	}
 }
 
-// writePacket buffers a media packet's data for later writing.
-// All data is accumulated via muxer.appendPending; nothing is written to the
-// writer until Flush() or WriteTrailer() is called.
+// writePacket writes a media packet payload into mdat.
+// With WithBuffer it appends directly to the muxer's buffer;
+// otherwise each NALU + payload is written to the writer individually.
 func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
 	defer func() {
 		s.lastPacket = nPkt
@@ -454,48 +454,37 @@ func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
 	pktData := pkt.Data()
 	pktSize := pkt.Len()
 
-	// Build a single contiguous chunk: [SPS/PPS/VPS headers (if keyframe)] + packet data.
+	var extras [maxExtras][]byte
+	var numExtras int
 	var extraSize int
-	var extras [][]byte // parameter set NALUs with 4-byte length prefix
 
 	if vPacket, casted := pkt.(gomedia.VideoPacket); casted && vPacket.IsKeyFrame() {
 		switch pkt.(gomedia.VideoPacket).CodecParameters().(type) {
 		case *h264.CodecParameters:
 			h264Pkt, _ := pkt.(*h264.Packet)
 			h264Par, _ := h264Pkt.CodecParameters().(*h264.CodecParameters)
-			sps := h264Par.SPS()
-			pps := h264Par.PPS()
-			extras = [][]byte{sps, pps}
-			extraSize = len(sps) + len(pps) + 8 //nolint:mnd // two 4-byte length prefixes
+			extras[0] = h264Par.SPS()
+			extras[1] = h264Par.PPS()
+			numExtras = 2
+			extraSize = len(extras[0]) + len(extras[1]) + 8 //nolint:mnd // two 4-byte length prefixes
 		case *h265.CodecParameters:
 			h265Pkt, _ := pkt.(*h265.Packet)
 			h265Par, _ := h265Pkt.CodecParameters().(*h265.CodecParameters)
-			vps := h265Par.VPS()
-			sps := h265Par.SPS()
-			pps := h265Par.PPS()
-			extras = [][]byte{vps, sps, pps}
-			extraSize = len(vps) + len(sps) + len(pps) + 12 //nolint:mnd // three 4-byte length prefixes
+			extras[0] = h265Par.VPS()
+			extras[1] = h265Par.SPS()
+			extras[2] = h265Par.PPS()
+			numExtras = 3
+			extraSize = len(extras[0]) + len(extras[1]) + len(extras[2]) + 12 //nolint:mnd // three 4-byte length prefixes
 		}
 		pktSize += extraSize
 	}
 
-	// Track where the actual packet data starts (after SPS/PPS/VPS).
 	s.lastPacketDataOffset = s.muxer.writePosition + int64(extraSize)
 	s.lastPacketDataSize = int64(pkt.Len())
 
-	// Assemble a single chunk and append to pending.
-	chunk := make([]byte, pktSize)
-	off := 0
-	for _, nalu := range extras {
-		binary.BigEndian.PutUint32(chunk[off:], uint32(len(nalu))) //nolint:gosec
-		off += 4                                                   //nolint:mnd
-		copy(chunk[off:], nalu)
-		off += len(nalu)
+	if err = s.muxer.writePayload(&extras, numExtras, pktData); err != nil {
+		return err
 	}
-	copy(chunk[off:], pktData)
-
-	s.muxer.pending = append(s.muxer.pending, chunk)
-	s.muxer.pendingSize += pktSize
 
 	// For video packets, update sync sample information.
 	if vPkt, casted := pkt.(gomedia.VideoPacket); casted {
