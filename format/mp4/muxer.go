@@ -9,37 +9,47 @@ import (
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/format/mp4/mp4io"
 	"github.com/ugparu/gomedia/utils/bits/pio"
-	"github.com/ugparu/gomedia/utils/buffer"
 )
 
 const (
 	headerSize = 56 //nolint:mnd // ftyp(32) + free(8) + mdat_tag(16)
+	maxExtras  = 3  //nolint:mnd // VPS + SPS + PPS at most
 )
+
+// pendingWrite stores a deferred mdat write: parameter-set NALUs + packet data.
+// The muxer holds a reference to the packet to keep the ring allocator slot alive.
+type pendingWrite struct {
+	pkt       gomedia.Packet
+	extras    [maxExtras][]byte
+	numExtras int
+	extraSize int
+	totalSize int // extraSize + pkt.Len()
+}
 
 // MuxerOption is a functional option for configuring a Muxer.
 type MuxerOption func(*Muxer)
 
-// WithBuffer sets an external reusable buffer for I/O assembly.
-// The buffer grows via Resize() if capacity is insufficient; across segments
-// it stays at the high-water mark, avoiding re-allocation in steady state.
-func WithBuffer(buf buffer.Buffer) MuxerOption {
-	return func(m *Muxer) { m.buf = buf }
+// WithBatchedDump makes Flush/WriteTrailer assemble all pending data into a
+// single temporary buffer and write it in one syscall. Without this option
+// the muxer writes directly from packet data (zero-copy, more syscalls).
+// The temporary buffer is short-lived and collected by GC quickly.
+func WithBatchedDump() MuxerOption {
+	return func(m *Muxer) { m.batchedDump = true }
 }
 
 // Muxer represents an MP4 muxer that combines multiple media streams into a single MP4 file.
-// If WithBuffer is used, writes are batched in memory until Flush/WriteTrailer.
-// Without WithBuffer, packet payloads are written directly to writer (more syscalls, less RAM).
+// Packets are accumulated via WritePacket; actual I/O is deferred until Flush or WriteTrailer.
 type Muxer struct {
 	writer        io.WriteSeeker
 	writePosition int64
 	streams       []*Stream
-	buf           buffer.Buffer // reusable buffer for I/O assembly
-	bufUsed       int           // bytes written into buf so far
-	flushed       bool          // true after first Flush() call
+	batchedDump   bool           // assemble into single buffer before writing
+	pending       []pendingWrite // accumulated writes awaiting Flush
+	pendingSize   int            // total mdat bytes across all pending entries
+	flushed       bool           // true after first Flush() call
 }
 
 // NewMuxer creates a new Muxer instance with the given writer.
-// Use WithBuffer to enable in-memory batching; by default writes go directly to writer.
 func NewMuxer(writer io.WriteSeeker, opts ...MuxerOption) *Muxer {
 	m := &Muxer{
 		writer: writer,
@@ -195,14 +205,13 @@ func (mux *Muxer) newStream(codec gomedia.CodecParameters) (err error) {
 	return
 }
 
-// Mux combines the specified video and audio streams into a single MP4 file.
-// With WithBuffer, header is staged in memory and written on Flush/WriteTrailer.
-// Without WithBuffer, header is written immediately.
+// Mux initializes the muxer for the given streams. No I/O is performed;
+// the header and packet data are written at Flush/WriteTrailer time.
 func (mux *Muxer) Mux(streams gomedia.CodecParametersPair) (err error) {
+	mux.releasePending()
 	mux.streams = []*Stream{}
-	mux.bufUsed = 0
 	mux.flushed = false
-	mux.writePosition = 0
+	mux.writePosition = headerSize
 
 	if streams.VideoCodecParameters != nil {
 		if err = mux.newStream(streams.VideoCodecParameters); err != nil {
@@ -216,22 +225,6 @@ func (mux *Muxer) Mux(streams gomedia.CodecParametersPair) (err error) {
 		}
 	}
 
-	var hdr [headerSize]byte
-	mux.marshalHeader(hdr[:])
-	if mux.buf != nil {
-		mux.buf.Resize(headerSize)
-		copy(mux.buf.Data()[:headerSize], hdr[:])
-		mux.bufUsed = headerSize
-	} else {
-		if _, err = mux.writer.Write(hdr[:]); err != nil {
-			return
-		}
-		mux.flushed = true // header already written in direct-write mode
-	}
-
-	mux.writePosition = headerSize
-
-	// Prepare video streams for muxing.
 	for _, stream := range mux.streams {
 		if stream.Type().IsVideo() {
 			stream.sample.CompositionOffset = new(mp4io.CompositionOffset)
@@ -253,55 +246,8 @@ func (mux *Muxer) marshalHeader(dst []byte) {
 	pio.PutU32BE(dst[off+4:], uint32(mp4io.MDAT)) //nolint:mnd
 }
 
-const maxExtras = 3 //nolint:mnd // VPS + SPS + PPS at most
-
-// writePayload writes parameter-set NALUs (with 4-byte length prefix each)
-// followed by packet data. In buffered mode data is appended to the internal
-// buffer; in direct mode it is written straight to the underlying writer.
-func (mux *Muxer) writePayload(extras *[maxExtras][]byte, numExtras int, pktData []byte) error {
-	if mux.buf != nil {
-		return mux.appendPayload(extras, numExtras, pktData)
-	}
-	return mux.writePayloadDirect(extras, numExtras, pktData)
-}
-
-func (mux *Muxer) appendPayload(extras *[maxExtras][]byte, numExtras int, pktData []byte) error {
-	totalSize := len(pktData)
-	for i := range numExtras {
-		totalSize += 4 + len(extras[i]) //nolint:mnd // 4-byte NALU length prefix
-	}
-	needed := mux.bufUsed + totalSize
-	mux.buf.Resize(needed)
-	out := mux.buf.Data()
-	off := mux.bufUsed
-
-	for i := range numExtras {
-		pio.PutU32BE(out[off:], uint32(len(extras[i]))) //nolint:gosec
-		off += 4                                         //nolint:mnd
-		copy(out[off:], extras[i])
-		off += len(extras[i])
-	}
-	copy(out[off:], pktData)
-	mux.bufUsed = needed
-	return nil
-}
-
-func (mux *Muxer) writePayloadDirect(extras *[maxExtras][]byte, numExtras int, pktData []byte) error {
-	var hdr [4]byte //nolint:mnd
-	for i := range numExtras {
-		pio.PutU32BE(hdr[:], uint32(len(extras[i]))) //nolint:gosec
-		if _, err := mux.writer.Write(hdr[:]); err != nil {
-			return err
-		}
-		if _, err := mux.writer.Write(extras[i]); err != nil {
-			return err
-		}
-	}
-	_, err := mux.writer.Write(pktData)
-	return err
-}
-
-// WritePacket writes a media packet to the muxer's in-memory buffer.
+// WritePacket accumulates the packet for later writing at Flush/WriteTrailer.
+// The muxer takes ownership of the packet and will Release it at flush time.
 func (mux *Muxer) WritePacket(pkt gomedia.Packet) (err error) {
 	idx := int(pkt.StreamIndex())
 	if idx >= len(mux.streams) {
@@ -310,19 +256,123 @@ func (mux *Muxer) WritePacket(pkt gomedia.Packet) (err error) {
 	return mux.streams[idx].writePacket(pkt)
 }
 
-// Flush writes buffered data to the underlying writer in a single Write call.
-// On the first call it includes the MP4 header (ftyp + free + mdat tag with
-// placeholder size). Subsequent calls write only newly accumulated packet data.
-// After Flush has been called, WriteTrailer will need to seek back to patch
-// the mdat size.
+// ReleasePending releases all accumulated packets without writing.
+// Use this to discard a segment on error or when the segment is too short.
+func (mux *Muxer) ReleasePending() { mux.releasePending() }
+
+func (mux *Muxer) releasePending() {
+	for i := range mux.pending {
+		if mux.pending[i].pkt != nil {
+			mux.pending[i].pkt.Release()
+			mux.pending[i].pkt = nil
+		}
+	}
+	mux.pending = mux.pending[:0]
+	mux.pendingSize = 0
+	for _, s := range mux.streams {
+		if s.lastPacket != nil {
+			s.lastPacket.Release()
+			s.lastPacket = nil
+		}
+	}
+}
+
+// Flush writes accumulated data to the underlying writer.
+// On the first call it includes the MP4 header (with placeholder mdat size).
+// After Flush, WriteTrailer will seek back to patch the mdat size.
+// All flushed packets are released.
 func (mux *Muxer) Flush() error {
-	if mux.buf == nil || mux.bufUsed == 0 {
+	if len(mux.pending) == 0 && mux.flushed {
 		return nil
 	}
-	_, err := mux.writer.Write(mux.buf.Data()[:mux.bufUsed])
-	mux.bufUsed = 0
-	mux.flushed = true
+	if mux.batchedDump {
+		return mux.flushBatched()
+	}
+	return mux.flushDirect()
+}
+
+func (mux *Muxer) flushDirect() error {
+	if !mux.flushed {
+		var hdr [headerSize]byte
+		mux.marshalHeader(hdr[:])
+		if _, err := mux.writer.Write(hdr[:]); err != nil {
+			return err
+		}
+		mux.flushed = true
+	}
+	if err := mux.writePendingDirect(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (mux *Muxer) flushBatched() error {
+	total := mux.pendingSize
+	if !mux.flushed {
+		total += headerSize
+	}
+	if total == 0 {
+		return nil
+	}
+
+	buf := make([]byte, total)
+	off := 0
+	if !mux.flushed {
+		mux.marshalHeader(buf[:headerSize])
+		off = headerSize
+		mux.flushed = true
+	}
+	off = mux.copyPendingInto(buf, off)
+
+	_, err := mux.writer.Write(buf[:off])
 	return err
+}
+
+// writePendingDirect writes all pending entries directly from packet data
+// and releases the packets. Used by the non-batched flush/trailer paths.
+func (mux *Muxer) writePendingDirect() error {
+	var hdr [4]byte //nolint:mnd
+	for i := range mux.pending {
+		pw := &mux.pending[i]
+		for j := range pw.numExtras {
+			pio.PutU32BE(hdr[:], uint32(len(pw.extras[j]))) //nolint:gosec
+			if _, err := mux.writer.Write(hdr[:]); err != nil {
+				return err
+			}
+			if _, err := mux.writer.Write(pw.extras[j]); err != nil {
+				return err
+			}
+		}
+		if _, err := mux.writer.Write(pw.pkt.Data()); err != nil {
+			return err
+		}
+		pw.pkt.Release()
+		pw.pkt = nil
+	}
+	mux.pending = mux.pending[:0]
+	mux.pendingSize = 0
+	return nil
+}
+
+// copyPendingInto copies all pending entries into dst starting at off,
+// releases the packets, and returns the new offset.
+func (mux *Muxer) copyPendingInto(dst []byte, off int) int {
+	for i := range mux.pending {
+		pw := &mux.pending[i]
+		for j := range pw.numExtras {
+			pio.PutU32BE(dst[off:], uint32(len(pw.extras[j]))) //nolint:gosec
+			off += 4                                            //nolint:mnd
+			copy(dst[off:], pw.extras[j])
+			off += len(pw.extras[j])
+		}
+		copy(dst[off:], pw.pkt.Data())
+		off += pw.pkt.Len()
+		pw.pkt.Release()
+		pw.pkt = nil
+	}
+	mux.pending = mux.pending[:0]
+	mux.pendingSize = 0
+	return off
 }
 
 // buildMoov constructs the MOOV atom and returns its serialized bytes.
@@ -351,16 +401,16 @@ func (mux *Muxer) buildMoov() ([]byte, error) {
 }
 
 // WriteTrailer completes the MP4 file by writing the trailer and necessary metadata.
-// If Flush was never called, the entire MP4 is assembled in memory and written in
-// a single Write call with no seeks. If Flush was called, remaining data is flushed
-// and then the mdat size is patched via seek.
+// All accumulated packets are released (even on error).
+// If Flush was never called, the entire MP4 is written without seeks.
+// If Flush was called earlier, remaining data is flushed and the mdat size is patched via seek.
 func (mux *Muxer) WriteTrailer() (err error) {
-	// Write remaining packets for each stream.
+	defer mux.releasePending()
+
+	// Flush remaining lastPacket per stream into pending.
 	for _, stream := range mux.streams {
 		if stream.lastPacket != nil {
 			if err = stream.writePacket(stream.lastPacket); err != nil {
-				stream.lastPacket.Release()
-				stream.lastPacket = nil
 				return
 			}
 			stream.lastPacket = nil
@@ -380,25 +430,43 @@ func (mux *Muxer) WriteTrailer() (err error) {
 	return mux.writeTrailerSeek(moovBytes, mdatSize)
 }
 
-// writeTrailerFast assembles the entire MP4 into the reusable buffer and writes
-// it in a single Write call. No seeks are performed.
+// writeTrailerFast writes header (with correct mdat size) + all pending data + moov
+// without any seeks. Used when Flush was never called.
 func (mux *Muxer) writeTrailerFast(moovBytes []byte, mdatSize int64) error {
-	if mux.buf == nil {
-		return mux.writeTrailerSeek(moovBytes, mdatSize)
+	if mux.batchedDump {
+		return mux.writeTrailerFastBatched(moovBytes, mdatSize)
 	}
+	return mux.writeTrailerFastDirect(moovBytes, mdatSize)
+}
 
-	totalSize := mux.bufUsed + len(moovBytes)
-	mux.buf.Resize(totalSize)
-	out := mux.buf.Data()
-
-	// Patch mdat extended size in the header region (offset 48).
+func (mux *Muxer) writeTrailerFastDirect(moovBytes []byte, mdatSize int64) error {
+	var hdr [headerSize]byte
+	mux.marshalHeader(hdr[:])
 	const mdatExtSizeOffset = 48 //nolint:mnd // ftyp(32) + free(8) + mdat_tag(8) = 48
-	pio.PutU64BE(out[mdatExtSizeOffset:], uint64(mdatSize))
+	pio.PutU64BE(hdr[mdatExtSizeOffset:], uint64(mdatSize))
 
-	copy(out[mux.bufUsed:], moovBytes)
-	mux.bufUsed = 0
+	if _, err := mux.writer.Write(hdr[:]); err != nil {
+		return err
+	}
+	if err := mux.writePendingDirect(); err != nil {
+		return err
+	}
+	_, err := mux.writer.Write(moovBytes)
+	return err
+}
 
-	_, err := mux.writer.Write(out[:totalSize])
+func (mux *Muxer) writeTrailerFastBatched(moovBytes []byte, mdatSize int64) error {
+	total := headerSize + mux.pendingSize + len(moovBytes)
+	buf := make([]byte, total)
+
+	mux.marshalHeader(buf[:headerSize])
+	const mdatExtSizeOffset = 48 //nolint:mnd // ftyp(32) + free(8) + mdat_tag(8) = 48
+	pio.PutU64BE(buf[mdatExtSizeOffset:], uint64(mdatSize))
+
+	off := mux.copyPendingInto(buf, headerSize)
+	copy(buf[off:], moovBytes)
+
+	_, err := mux.writer.Write(buf[:total])
 	return err
 }
 

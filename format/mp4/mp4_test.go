@@ -16,7 +16,6 @@ import (
 	"github.com/ugparu/gomedia/codec/h264"
 	"github.com/ugparu/gomedia/format/mp4/mp4io"
 	"github.com/ugparu/gomedia/utils/bits/pio"
-	"github.com/ugparu/gomedia/utils/buffer"
 )
 
 const testDataDir = "../../tests/data/h264_aac/"
@@ -136,8 +135,7 @@ func createTempMP4(t *testing.T, pair gomedia.CodecParametersPair, packets []gom
 	require.NoError(t, err)
 	path := f.Name()
 
-	buf := buffer.Get(512 * 1024) //nolint:mnd // test reusable muxer buffer
-	mux := NewMuxer(f, WithBuffer(buf))
+	mux := NewMuxer(f, WithBatchedDump())
 	require.NoError(t, mux.Mux(pair))
 
 	for _, pkt := range packets {
@@ -163,8 +161,7 @@ func TestMuxer_Mux_VideoAndAudio(t *testing.T) {
 	defer os.Remove(f.Name())
 	defer f.Close()
 
-	buf := buffer.Get(512 * 1024) //nolint:mnd // test reusable muxer buffer
-	mux := NewMuxer(f, WithBuffer(buf))
+	mux := NewMuxer(f, WithBatchedDump())
 	require.NoError(t, mux.Mux(pair))
 
 	// Should have created two streams
@@ -183,8 +180,7 @@ func TestMuxer_Mux_VideoOnly(t *testing.T) {
 	defer os.Remove(f.Name())
 	defer f.Close()
 
-	buf := buffer.Get(512 * 1024) //nolint:mnd // test reusable muxer buffer
-	mux := NewMuxer(f, WithBuffer(buf))
+	mux := NewMuxer(f, WithBatchedDump())
 	require.NoError(t, mux.Mux(pair))
 	require.Len(t, mux.streams, 1)
 	assert.Equal(t, gomedia.H264, mux.streams[0].Type())
@@ -200,8 +196,7 @@ func TestMuxer_Mux_AudioOnly(t *testing.T) {
 	defer os.Remove(f.Name())
 	defer f.Close()
 
-	buf := buffer.Get(512 * 1024) //nolint:mnd // test reusable muxer buffer
-	mux := NewMuxer(f, WithBuffer(buf))
+	mux := NewMuxer(f, WithBatchedDump())
 	require.NoError(t, mux.Mux(pair))
 	require.Len(t, mux.streams, 1)
 	assert.Equal(t, gomedia.AAC, mux.streams[0].Type())
@@ -216,8 +211,7 @@ func TestMuxer_GetPreLastPacket_NoPackets(t *testing.T) {
 	defer os.Remove(f.Name())
 	defer f.Close()
 
-	buf := buffer.Get(512 * 1024) //nolint:mnd // test reusable muxer buffer
-	mux := NewMuxer(f, WithBuffer(buf))
+	mux := NewMuxer(f, WithBatchedDump())
 	require.NoError(t, mux.Mux(pair))
 
 	// No packets written yet
@@ -237,8 +231,7 @@ func TestMuxer_WritePacket_InvalidStreamIndex(t *testing.T) {
 	defer os.Remove(f.Name())
 	defer f.Close()
 
-	buf := buffer.Get(512 * 1024) //nolint:mnd // test reusable muxer buffer
-	mux := NewMuxer(f, WithBuffer(buf))
+	mux := NewMuxer(f, WithBatchedDump())
 	require.NoError(t, mux.Mux(pair))
 
 	// Create a packet with stream index 5 (out of range)
@@ -1057,8 +1050,7 @@ func TestMuxer_Flush_WritesToWriter(t *testing.T) {
 	require.NoError(t, err)
 	defer os.Remove(f.Name())
 
-	buf := buffer.Get(512 * 1024) //nolint:mnd // test reusable muxer buffer
-	mux := NewMuxer(f, WithBuffer(buf))
+	mux := NewMuxer(f, WithBatchedDump())
 	require.NoError(t, mux.Mux(pair))
 
 	// Write some packets
@@ -1123,8 +1115,7 @@ func TestMuxer_NoFlush_WriteTrailer_ProducesValidMP4(t *testing.T) {
 	path := f.Name()
 	defer os.Remove(path)
 
-	buf := buffer.Get(512 * 1024) //nolint:mnd // test reusable muxer buffer
-	mux := NewMuxer(f, WithBuffer(buf))
+	mux := NewMuxer(f, WithBatchedDump())
 	require.NoError(t, mux.Mux(pair))
 
 	for _, pkt := range packets {
