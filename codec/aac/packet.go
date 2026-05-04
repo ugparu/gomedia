@@ -7,7 +7,8 @@ import (
 	"github.com/ugparu/gomedia/codec"
 )
 
-// Packet stores raw aac data without adts headers.
+// Packet carries a single AAC access unit (raw AudioMuxElement payload,
+// no ADTS header). Decoder configuration travels on the CodecParameters side.
 type Packet struct {
 	codec.AudioPacket[*CodecParameters]
 }

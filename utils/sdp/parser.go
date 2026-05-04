@@ -9,12 +9,12 @@ import (
 	"github.com/ugparu/gomedia"
 )
 
-// Session represents the information related to an SDP session.
+// Session holds session-level SDP data.
 type Session struct {
 	URI string
 }
 
-// Media represents the information related to a media stream in an SDP session.
+// Media describes a single media stream parsed from SDP ("m=" line plus its attributes).
 type Media struct {
 	AVType             string
 	Type               gomedia.CodecType
@@ -35,7 +35,6 @@ type Media struct {
 	Height             int
 }
 
-// parseMediaDescription parses the media description line
 func parseMediaDescription(fields []string) (*Media, bool) {
 	if len(fields) == 0 {
 		return nil, false
@@ -45,35 +44,23 @@ func parseMediaDescription(fields []string) (*Media, bool) {
 	case "audio", "video":
 		media := Media{
 			AVType:             fields[0],
-			Type:               0,
-			FPS:                0,
-			TimeScale:          0,
-			Control:            "",
-			Rtpmap:             0,
-			ChannelCount:       0,
 			Config:             []byte{},
 			SpropParameterSets: [][]byte{},
 			SpropVPS:           []byte{},
 			SpropSPS:           []byte{},
 			SpropPPS:           []byte{},
-			PayloadType:        0,
-			SizeLength:         0,
-			IndexLength:        0,
-			Width:              0,
-			Height:             0,
 		}
 
 		mfields := strings.Split(fields[1], " ")
-		if len(mfields) >= 3 { //nolint:mnd
+		if len(mfields) >= 3 { //nolint:mnd // m-line format: <port> <proto> <fmt>
 			media.PayloadType, _ = strconv.Atoi(mfields[2])
 		}
 
+		// RFC 3551 static payload types; dynamic types (>=96) are resolved later via rtpmap.
 		const (
 			pcmu = 0
 			pcma = 8
 		)
-
-		// Set codec type based on payload type
 		switch media.PayloadType {
 		case pcmu:
 			media.Type = gomedia.PCMUlaw
@@ -87,7 +74,6 @@ func parseMediaDescription(fields []string) (*Media, bool) {
 	}
 }
 
-// parseCodecType sets the codec type based on the key
 func parseCodecType(media *Media, key string, keyval []string) {
 	switch strings.ToUpper(key) {
 	case "MPEG4-GENERIC":
@@ -96,7 +82,7 @@ func parseCodecType(media *Media, key string, keyval []string) {
 		media.Type = gomedia.PCM
 	case "OPUS":
 		media.Type = gomedia.OPUS
-		// Parse additional parameters for OPUS codec
+		// RFC 7587: rtpmap for Opus is "opus/48000/2" — channel count lives in the third slash-separated field.
 		if len(keyval) > 2 { //nolint:mnd
 			if i, err := strconv.Atoi(keyval[2]); err == nil {
 				media.ChannelCount = i
@@ -118,7 +104,6 @@ func parseCodecType(media *Media, key string, keyval []string) {
 		media.Type = gomedia.MJPEG
 	}
 
-	// Parse time scale
 	if len(keyval) > 1 {
 		if i, err := strconv.Atoi(keyval[1]); err == nil {
 			media.TimeScale = i
@@ -126,7 +111,6 @@ func parseCodecType(media *Media, key string, keyval []string) {
 	}
 }
 
-// parseAttributeKeyValue processes attribute key-value pairs
 func parseAttributeKeyValue(media *Media, key, val string) {
 	switch key {
 	case "config":
@@ -136,27 +120,20 @@ func parseAttributeKeyValue(media *Media, key, val string) {
 	case "indexlength":
 		media.IndexLength, _ = strconv.Atoi(val)
 	case "sprop-vps":
-		// Decode base64 and handle errors
-		decoded, err := base64.StdEncoding.DecodeString(val)
-		if err == nil {
+		if decoded, err := base64.StdEncoding.DecodeString(val); err == nil {
 			media.SpropVPS = decoded
 		}
 	case "sprop-sps":
-		// Decode base64 and handle errors
-		decoded, err := base64.StdEncoding.DecodeString(val)
-		if err == nil {
+		if decoded, err := base64.StdEncoding.DecodeString(val); err == nil {
 			media.SpropSPS = decoded
 		}
 	case "sprop-pps":
-		// Decode base64 and handle errors
-		decoded, err := base64.StdEncoding.DecodeString(val)
-		if err == nil {
+		if decoded, err := base64.StdEncoding.DecodeString(val); err == nil {
 			media.SpropPPS = decoded
 		}
 	case "sprop-parameter-sets":
-		// Split by "," and decode base64 for each field
-		fields := strings.Split(val, ",")
-		for _, field := range fields {
+		// RFC 6184 §8.1: comma-separated, base64-encoded parameter sets.
+		for _, field := range strings.Split(val, ",") {
 			if field == "" {
 				continue
 			}
@@ -166,10 +143,8 @@ func parseAttributeKeyValue(media *Media, key, val string) {
 	}
 }
 
-// parseAttribute processes attribute lines
 func parseAttribute(media *Media, fields []string) {
 	for _, field := range fields {
-		// Process key:value format
 		keyval := strings.SplitN(field, ":", 2) //nolint:mnd
 		if len(keyval) >= 2 {                   //nolint:mnd
 			key := keyval[0]
@@ -183,20 +158,18 @@ func parseAttribute(media *Media, fields []string) {
 				media.FPS, _ = strconv.Atoi(val)
 			case "x-dimensions":
 				dims := strings.Split(val, ",")
-				if len(dims) == 2 {
+				if len(dims) == 2 { //nolint:mnd // "WxH" coordinate pair
 					media.Width, _ = strconv.Atoi(dims[0])
 					media.Height, _ = strconv.Atoi(dims[1])
 				}
 			}
 		}
 
-		// Process key/value format
 		keyval = strings.Split(field, "/")
 		if len(keyval) >= 2 { //nolint:mnd
 			parseCodecType(media, keyval[0], keyval)
 		}
 
-		// Process key=value format in semicolon-separated list
 		keyval = strings.Split(field, ";")
 		if len(keyval) > 1 {
 			for _, subfield := range keyval {
@@ -211,18 +184,18 @@ func parseAttribute(media *Media, fields []string) {
 	}
 }
 
-// Parse parses the SDP content and returns Session and Media information.
+// Parse parses an SDP payload and returns the session and every "m=" media block.
 func Parse(content string) (sess Session, medias []Media) {
 	var media *Media
 
 	for _, line := range strings.Split(content, "\n") {
 		line = strings.TrimSpace(line)
-		// Handle special case for x-framerate
+		// Some cameras emit "x-framerate: 25" with stray whitespace; collapse it so the
+		// subsequent split on "=" still yields a clean key/value pair.
 		if strings.Contains(line, "x-framerate") {
-			line = strings.Replace(line, " ", "", -1) //nolint:gocritic
+			line = strings.ReplaceAll(line, " ", "")
 		}
 
-		// Split line into key and value
 		typeval := strings.SplitN(line, "=", 2) //nolint:mnd
 		if len(typeval) != 2 {                  //nolint:mnd
 			continue
@@ -232,7 +205,6 @@ func Parse(content string) (sess Session, medias []Media) {
 
 		switch typeval[0] {
 		case "m":
-			// Start of a new media description
 			newMedia, valid := parseMediaDescription(fields)
 			if valid {
 				medias = append(medias, *newMedia)
@@ -240,13 +212,9 @@ func Parse(content string) (sess Session, medias []Media) {
 			} else {
 				media = nil
 			}
-
 		case "u":
-			// Session URI
 			sess.URI = typeval[1]
-
 		case "a":
-			// Attribute information
 			if media != nil {
 				parseAttribute(media, fields)
 			}

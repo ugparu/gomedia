@@ -1,37 +1,30 @@
 package utils
 
-// TryAgainError represents an error indicating that the operation should be retried.
-type TryAgainError struct {
-}
+// TryAgainError signals a transient failure — the caller should retry the same operation.
+type TryAgainError struct{}
 
-// Error returns the error message for TryAgainError.
 func (TryAgainError) Error() string {
 	return "Try again"
 }
 
-// UnimplementedError represents an error indicating that the operation is not implemented.
-type UnimplementedError struct {
-}
+// UnimplementedError marks an interface method that has no implementation for the current codec or container.
+type UnimplementedError struct{}
 
-// Error returns the error message for UnimplementedError.
 func (UnimplementedError) Error() string {
 	return "Not implemented"
 }
 
-// NoCodecDataError represents an error indicating that the no codec data was provided.
-type NoCodecDataError struct {
-}
+// NoCodecDataError is returned when a muxer or writer is asked to process a packet
+// before the demuxer has delivered codec parameters.
+type NoCodecDataError struct{}
 
-// Error returns the error message for NoCodecDataError.
 func (NoCodecDataError) Error() string {
 	return "No codec data"
 }
 
-// NilPacketError represents an error indicating that the provided packet is nil.
-type NilPacketError struct {
-}
+// NilPacketError signals that a nil packet reached a stage that cannot handle one.
+type NilPacketError struct{}
 
-// Error method implementation for NilPacketError.
 func (NilPacketError) Error() string {
 	return "nil packet"
 }

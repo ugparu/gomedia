@@ -58,7 +58,9 @@ func (d *h264Demuxer) Demux() (codecs gomedia.CodecParametersPair, err error) {
 	return
 }
 
-// processNALUnit handles a single NAL unit based on its type
+// processNALUnit dispatches one H.264 NAL by its nal_unit_type (RFC 6184 §5.4):
+// VCL slices become packets, SPS/PPS update codec parameters, STAP-A/FU-A are
+// unwrapped into constituent NALs. Unknown types are logged and skipped.
 func (d *h264Demuxer) processNALUnit(nalU []byte) error {
 	naluType := nalU[0] & control1
 	switch {
@@ -75,14 +77,15 @@ func (d *h264Demuxer) processNALUnit(nalU []byte) error {
 	case naluType == nalLFUA:
 		return d.processLFUA()
 	case naluType == nalUnitDel:
-		// No operation needed
+		// Access-unit delimiter: discard, it carries no payload we care about.
 	default:
 		d.baseDemuxer.log.Debugf(d, "Currently unsupported NAL type %v", naluType)
 	}
 	return nil
 }
 
-// processSTAPA handles STAP-A NAL units
+// processSTAPA unpacks a STAP-A aggregation packet (RFC 6184 §5.7.1), which
+// carries several NALs back-to-back each prefixed with a 16-bit size.
 func (d *h264Demuxer) processSTAPA(nalU []byte) error {
 	packet := nalU[1:]
 	for len(packet) >= 2 {
@@ -108,7 +111,9 @@ func (d *h264Demuxer) processSTAPA(nalU []byte) error {
 	return nil
 }
 
-// processLFUA handles FU-A NAL units
+// processLFUA reassembles a NAL that was fragmented across RTP packets using
+// FU-A mode (RFC 6184 §5.8). Start fragments seed the buffer, middle fragments
+// append, and the end fragment triggers finalizeFUAPacket.
 func (d *h264Demuxer) processLFUA() error {
 	if d.end-d.offset < 2 { //nolint:mnd // FU-A requires at least FU indicator + FU header
 		return fmt.Errorf("H.264 FU-A packet too short: %d bytes", d.end-d.offset)
@@ -136,7 +141,8 @@ func (d *h264Demuxer) processLFUA() error {
 	return nil
 }
 
-// finalizeFUAPacket processes the completed FU-A packet
+// finalizeFUAPacket emits the fully reassembled NAL. For SPS/PPS wrappers we
+// also split out any nested parameter sets so the codec parameters stay in sync.
 func (d *h264Demuxer) finalizeFUAPacket() error {
 	d.fuStarted = false
 	naluTypef := d.BufferRTPPacket.Bytes()[0] & control1

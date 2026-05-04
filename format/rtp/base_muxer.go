@@ -42,39 +42,35 @@ func newBaseMuxer(w io.Writer, media sdp.Media, channel uint8, streamIndex uint8
 		streamIndex: streamIndex,
 	}
 
-	// Initialize SSRC and sequence with pseudo-random values to avoid collisions.
-	// This is inexpensive and good enough for our purposes.
+	// Randomize SSRC and sequence to avoid collisions with concurrent senders (RFC 3550 §5.1).
 	m.ssrc = rand.Uint32()
 	m.sequence = uint16(rand.UintN(1 << 16)) //nolint:gosec // non-crypto random is sufficient here
 
-	// Fallback to default video clockrate if SDP is incomplete.
 	if m.clockRate == 0 {
-		m.clockRate = 90000
+		m.clockRate = 90000 // standard video clock rate (RFC 3551) when SDP omits it
 	}
 
 	return m
 }
 
-// writeRTP builds and writes a single RTP packet with the given payload and
-// presentation timestamp. The timestamp is expressed as time.Duration and
-// converted to the RTP timestamp space using the media clock rate.
+// writeRTP frames one RTP packet inside an RTSP interleaved header and writes
+// it to the underlying io.Writer. ts (presentation time) is converted into the
+// media's RTP timestamp space using the SDP-declared clock rate.
 func (m *baseMuxer) writeRTP(payload []byte, ts time.Duration, marker bool) error {
-	// Convert PTS to RTP timestamp according to clock rate.
 	rtpTimestamp := uint32(uint64(ts) * uint64(m.clockRate) / uint64(time.Second))
 
-	// Build RTP header.
 	rtpPacketLen := rtpHeaderSize + len(payload)
 	size := rtspHeaderSize + rtpPacketLen
 	m.buf.Resize(size)
 	buf := m.buf.Data()
 
-	// RTSP interleaved header.
+	// RTSP interleaved header (RFC 2326 §10.12): '$' | channel | length.
 	buf[0] = 0x24
 	buf[1] = m.channel
 	binary.BigEndian.PutUint16(buf[2:4], uint16(rtpPacketLen))
 
-	// RTP fixed header (no CSRC, no extension).
-	buf[4] = 0x80 // Version 2, no padding, no extension, CC=0.
+	// RTP fixed header (no CSRC, no extension) — RFC 3550 §5.1.
+	buf[4] = 0x80 // V=2, P=0, X=0, CC=0
 	if marker {
 		buf[5] = 0x80 | m.payloadType
 	} else {

@@ -10,20 +10,15 @@ import (
 	"github.com/ugparu/gomedia/utils/logger"
 )
 
-// Option is a functional option for configuring an rtspWriter.
 type Option func(*rtspWriter)
 
-// WithLogger sets the logger for the RTSP writer.
 func WithLogger(l logger.Logger) Option {
 	return func(w *rtspWriter) { w.log = l }
 }
 
-// rtspWriter is a Writer implementation that publishes a single video stream
-// to a remote RTSP server using format/rtsp.Muxer.
-//
-// It is intentionally single-stream (one source URL, one destination URL)
-// to mirror the existing rtsp-to-rtsp example while keeping the same Writer
-// interface as other writers (HLS, WebRTC, Segmenter).
+// rtspWriter republishes a single source to one remote RTSP destination,
+// lazily building the muxer from the first video packet's codec parameters
+// so upstream ordering between Demux and packet delivery doesn't matter.
 type rtspWriter struct {
 	lifecycle.AsyncManager[*rtspWriter]
 	log logger.Logger
@@ -40,8 +35,6 @@ type rtspWriter struct {
 	started bool
 }
 
-// New creates a new RTSP writer that will publish packets from srcURL to dstURL.
-// chanSize controls the size of internal channels.
 func New(srcURL, dstURL string, chanSize int, opts ...Option) gomedia.Writer {
 	w := &rtspWriter{
 		log:      logger.Default,
@@ -65,7 +58,6 @@ func New(srcURL, dstURL string, chanSize int, opts ...Option) gomedia.Writer {
 	return w
 }
 
-// Write starts the writer processing loop.
 func (w *rtspWriter) Write() {
 	startFunc := func(*rtspWriter) error {
 		return nil
@@ -73,14 +65,12 @@ func (w *rtspWriter) Write() {
 	_ = w.Start(startFunc)
 }
 
-// Step processes one unit of work for the writer.
 func (w *rtspWriter) Step(stopCh <-chan struct{}) (err error) {
 	select {
 	case <-stopCh:
 		return &lifecycle.BreakError{}
 
 	case url := <-w.addSrcCh:
-		// Configure or reconfigure the source URL.
 		if w.srcURL != "" && w.srcURL != url {
 			w.log.Warningf(w, "RTSP writer already has source %s, replacing with %s", w.srcURL, url)
 		}
@@ -97,7 +87,6 @@ func (w *rtspWriter) Step(stopCh <-chan struct{}) (err error) {
 			return &utils.NilPacketError{}
 		}
 
-		// If source URL is set, drop packets from other sources.
 		if w.srcURL != "" && pkt.SourceID() != w.srcURL {
 			pkt.Release()
 			return nil
@@ -105,7 +94,6 @@ func (w *rtspWriter) Step(stopCh <-chan struct{}) (err error) {
 
 		switch p := pkt.(type) {
 		case gomedia.VideoPacket:
-			// Initialize muxer on first video packet if not started yet.
 			if !w.started {
 				if err = w.initMuxerFromVideoPacket(p); err != nil {
 					pkt.Release()
@@ -126,8 +114,7 @@ func (w *rtspWriter) Step(stopCh <-chan struct{}) (err error) {
 			pkt.Release()
 
 		default:
-			// Ignore non-video packets for now, as RTSP muxer currently
-			// only supports video packets. Close to free resources.
+			// Audio is not yet plumbed through format/rtsp.Muxer; drop for now.
 			pkt.Release()
 			return nil
 		}
@@ -136,14 +123,11 @@ func (w *rtspWriter) Step(stopCh <-chan struct{}) (err error) {
 	return nil
 }
 
-// initMuxerFromVideoPacket initializes the RTSP muxer using codec parameters
-// from the first video packet.
 func (w *rtspWriter) initMuxerFromVideoPacket(vp gomedia.VideoPacket) error {
 	if w.dstURL == "" {
 		return fmt.Errorf("rtsp writer destination URL is empty")
 	}
 
-	// Prepare codec parameters pair with only video for now.
 	w.codecPar = gomedia.CodecParametersPair{
 		SourceID:             w.srcURL,
 		AudioCodecParameters: nil,
@@ -162,7 +146,6 @@ func (w *rtspWriter) initMuxerFromVideoPacket(vp gomedia.VideoPacket) error {
 	return nil
 }
 
-// resetMuxer closes and clears the current muxer and state.
 func (w *rtspWriter) resetMuxer() {
 	if w.muxer != nil {
 		w.muxer.Close()
@@ -172,10 +155,8 @@ func (w *rtspWriter) resetMuxer() {
 	w.codecPar = gomedia.CodecParametersPair{}
 }
 
-// Release is called by AsyncManager to gracefully stop the writer.
 func (w *rtspWriter) Release() { //nolint:revive
 	w.resetMuxer()
-	// Drain remaining packets from the channel to prevent leaks.
 	for {
 		select {
 		case pkt, ok := <-w.inpPktCh:
@@ -192,22 +173,18 @@ func (w *rtspWriter) Release() { //nolint:revive
 	}
 }
 
-// Packets returns the input packet channel for the writer.
 func (w *rtspWriter) Packets() chan<- gomedia.Packet {
 	return w.inpPktCh
 }
 
-// RemoveSource returns the channel to remove a source URL.
 func (w *rtspWriter) RemoveSource() chan<- string {
 	return w.rmSrcCh
 }
 
-// AddSource returns the channel to add/configure a source URL.
 func (w *rtspWriter) AddSource() chan<- string {
 	return w.addSrcCh
 }
 
-// String implements fmt.Stringer for logging.
 func (w *rtspWriter) String() string {
 	return fmt.Sprintf("RTSP_WRITER src=%s dst=%s", w.srcURL, w.dstURL)
 }

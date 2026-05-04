@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -15,10 +16,8 @@ import (
 	"github.com/ugparu/gomedia/utils/logger"
 )
 
-// Option is a functional option for configuring a webRTCWriter.
 type Option func(*webRTCWriter)
 
-// WithLogger sets the logger for the WebRTC writer.
 func WithLogger(l logger.Logger) Option {
 	return func(w *webRTCWriter) { w.log = l }
 }
@@ -44,8 +43,6 @@ type webRTCWriter struct {
 	signaling        SignalingHandler
 }
 
-// New creates a new Streamer with the given channel size.
-// It initializes an innerWriter and embeds it into an outerWebRTC, providing synchronization and lifecycle management.
 func New(chanSize int, targetDuration time.Duration, opts ...Option) gomedia.WebRTCStreamer {
 	wr := &webRTCWriter{
 		AsyncManager: nil,
@@ -78,8 +75,6 @@ func New(chanSize int, targetDuration time.Duration, opts ...Option) gomedia.Web
 	return wr
 }
 
-// Start is a method of innerWriter that starts the innerWriter.
-// It satisfies the SafeStarter interface from goutils/lifecycle package.
 func (element *webRTCWriter) Write() {
 	startFunc := func(*webRTCWriter) error {
 		return nil
@@ -87,21 +82,20 @@ func (element *webRTCWriter) Write() {
 	_ = element.Start(startFunc)
 }
 
-// Step is a method of innerWriter that performs a single step of processing.
-// It handles various channels to update codec parameters, write packets, manage peers, and close peers.
+// Step multiplexes source add/remove, peer lifecycle (connect, rebind, close),
+// and packet write events onto a single goroutine so streams state is never
+// touched concurrently.
 func (element *webRTCWriter) Step(stopCh <-chan struct{}) (err error) {
 	select {
 	case <-stopCh:
 		return &lifecycle.BreakError{}
 	case peer := <-element.peersChan:
-		// Validate that target URL is provided
 		if peer.TargetURL == "" {
 			peer.Err = errors.New("target URL is empty")
 			close(peer.Done)
 			return peer.Err
 		}
 
-		// Validate that target stream exists
 		targetStream, ok := element.streams.streams[peer.TargetURL]
 		if !ok || targetStream == nil || targetStream.codecPar.VideoCodecParameters == nil {
 			peer.Err = errors.New("target stream not found: " + peer.TargetURL)
@@ -168,18 +162,12 @@ func (element *webRTCWriter) Step(stopCh <-chan struct{}) (err error) {
 	return nil
 }
 
-// hasSource checks if a source URL is registered in the sources slice.
 func (element *webRTCWriter) hasSource(addr string) bool {
-	for _, src := range element.sources {
-		if src == addr {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(element.sources, addr)
 }
 
-// addSource adds a new source URL to the sources slice.
-// The stream will be created when codec parameters are received.
+// addSource registers a source URL. The underlying stream is not created
+// until the first packet arrives so codec parameters are known.
 func (element *webRTCWriter) addSource(addr string) {
 	if element.hasSource(addr) {
 		element.log.Infof(element, "Source %s already exists, skipping", addr)
@@ -197,30 +185,24 @@ func (element *webRTCWriter) addSource(addr string) {
 	}
 }
 
-// removeSource removes a source URL from the sources slice and streams.
 func (element *webRTCWriter) removeSource(addr string) {
-	// Remove from sources slice
 	for i, src := range element.sources {
 		if src == addr {
 			element.sources = append(element.sources[:i], element.sources[i+1:]...)
 			break
 		}
 	}
-
-	// Remove from streams if it exists
 	element.streams.Remove(addr)
 }
 
-// checkCodecParameters updates the codec parameters based on the provided map.
-// It manages stream sizes, updates codec parameters, and sends messages to inform peers about available streams.
-// If the stream doesn't exist yet but the source is registered, creates the stream with the codec parameters.
+// checkCodecParameters lazily creates the stream on first packet and tears
+// down peers whose negotiated codec no longer matches after a parameter
+// change (e.g. SPS/PPS updates incompatible with the original offer).
 func (element *webRTCWriter) checkCodecParameters(addr string, codecPar gomedia.CodecParameters) (err error) {
-	// Only process sources that were registered via AddSource
 	if !element.hasSource(addr) {
 		return
 	}
 
-	// If stream doesn't exist yet, create it with the codec parameters
 	if !element.streams.Exists(addr) {
 		_ = element.streams.Add(addr, codecPar)
 		element.sendAvailableStreams()
@@ -243,7 +225,6 @@ func (element *webRTCWriter) checkCodecParameters(addr string, codecPar gomedia.
 	return nil
 }
 
-// buildAvailableStreamsMessage builds the setAvailableStreams message with current resolutions.
 func (element *webRTCWriter) buildAvailableStreamsMessage() ([]byte, error) {
 	resolutions := make([]gomedia.Resolution, 0, len(element.streams.sortedURLs))
 	for _, url := range element.streams.sortedURLs {
@@ -257,8 +238,6 @@ func (element *webRTCWriter) buildAvailableStreamsMessage() ([]byte, error) {
 	return element.signaling.BuildAvailableStreams(resolutions)
 }
 
-// sendAvailableStreamsToPeer sends setAvailableStreams message to a single peer.
-// This is called when a new peer connects to send them the current available streams.
 func (element *webRTCWriter) sendAvailableStreamsToPeer(peer *peerTrack) {
 	if peer.DataChannel == nil || len(element.streams.sortedURLs) == 0 {
 		return
@@ -276,8 +255,8 @@ func (element *webRTCWriter) sendAvailableStreamsToPeer(peer *peerTrack) {
 	}
 }
 
-// sendAvailableStreams sends setAvailableStreams message to all connected peers.
-// This should be called whenever streams are added or removed to keep peers in sync.
+// sendAvailableStreams broadcasts the current stream list to every connected
+// and pending peer; call after any change to streams so peers can re-subscribe.
 func (element *webRTCWriter) sendAvailableStreams() {
 	bytes, err := element.buildAvailableStreamsMessage()
 	if err != nil {
@@ -296,7 +275,6 @@ func (element *webRTCWriter) sendAvailableStreams() {
 		}
 	}
 
-	// Also notify pending peers if any
 	for peer := range element.streams.pendingPeers {
 		element.log.Infof(element, "Sending message to pending peer %s", bytes)
 		if peer.DataChannel != nil {
@@ -307,13 +285,14 @@ func (element *webRTCWriter) sendAvailableStreams() {
 	}
 }
 
-// extractFmtpLineFromSDP parses the SDP to find the first fmtp line that matches the given codec type
+// extractFmtpLineFromSDP finds the fmtp parameters (e.g. profile-level-id,
+// sprop-parameter-sets) for the offer's H.264/H.265 payload type so the local
+// track advertises a compatible format in the answer.
 func extractFmtpLineFromSDP(sdp string, codecType gomedia.CodecType) string {
 	lines := strings.Split(sdp, "\n")
 	var payloadType string
 	var targetCodec string
 
-	// Map codec type to SDP codec name
 	switch codecType {
 	case gomedia.H264:
 		targetCodec = "H264"
@@ -323,18 +302,13 @@ func extractFmtpLineFromSDP(sdp string, codecType gomedia.CodecType) string {
 		return ""
 	}
 
-	// Find the payload type for the target codec
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-
-		// Look for rtpmap lines: a=rtpmap:96 H264/90000
 		if strings.HasPrefix(line, "a=rtpmap:") {
 			parts := strings.Split(line, " ")
 			if len(parts) >= 2 {
-				// Extract payload type (e.g., "96" from "a=rtpmap:96")
 				ptPart := strings.Split(parts[0], ":")
 				if len(ptPart) >= 2 {
-					// Check if codec matches (e.g., "H264/90000")
 					if strings.HasPrefix(parts[1], targetCodec+"/") {
 						payloadType = ptPart[1]
 						break
@@ -348,13 +322,11 @@ func extractFmtpLineFromSDP(sdp string, codecType gomedia.CodecType) string {
 		return ""
 	}
 
-	// Find the fmtp line for this payload type
 	fmtpPrefix := "a=fmtp:" + payloadType + " "
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, fmtpPrefix) {
-			// Return the fmtp parameters (everything after "a=fmtp:PT ")
-			return strings.TrimPrefix(line, fmtpPrefix)
+		if rest, ok := strings.CutPrefix(line, fmtpPrefix); ok {
+			return rest
 		}
 	}
 
@@ -511,43 +483,33 @@ func (element *webRTCWriter) addConnection(inpPeer *gomedia.WebRTCPeer, targetUR
 	return nil
 }
 
-// removePeer removes a peer from all existing and to-be-added peers, removes associated tracks,
-// closes the DataChannel, and closes the PeerConnection.
-// This function is idempotent - calling it multiple times is safe.
+// removePeer is idempotent: it detects prior removal via peer.done before
+// closing the PeerConnection and DataChannel, then drains v/aChan so cloned
+// packets don't leak their ring-buffer slots.
 func (element *webRTCWriter) removePeer(peer *peerTrack) (err error) {
-	// Check if already removed by testing if done channel is closed
 	select {
 	case <-peer.done:
-		// Already closed, nothing to do
 		return nil
 	default:
 	}
 
 	for _, peers := range element.streams.streams {
-		element.log.Debug(element, "Removing peer track from stream")
 		delete(peers.tracks, peer)
 		delete(peers.toAdd, peer)
 	}
-
-	// Also remove from pendingPeers if present
 	delete(element.streams.pendingPeers, peer)
 
 	senders := peer.PeerConnection.GetSenders()
-	element.log.Debug(element, "Removing peer track from senders")
 	for _, stream := range senders {
 		_ = peer.RemoveTrack(stream)
 	}
 	if peer.DataChannel != nil {
-		element.log.Debug(element, "Closing data channel")
 		_ = peer.DataChannel.Close()
 	}
-	element.log.Debug(element, "Closing peer connection")
 	_ = peer.PeerConnection.Close()
 
-	element.log.Debug(element, "Closing done channel")
 	close(peer.done)
 
-	// Drain remaining packets from channels to avoid leaking cloned packets
 	for {
 		select {
 		case pkt := <-peer.vChan:
@@ -560,8 +522,6 @@ func (element *webRTCWriter) removePeer(peer *peerTrack) (err error) {
 	}
 }
 
-// Close closes the innerWriter by closing the input packet channel and removing all existing peers.
-// It calls the removePeer method for each existing peer.
 func (element *webRTCWriter) Release() { //nolint: revive
 	close(element.inpPktCh)
 	for pkt := range element.inpPktCh {
@@ -581,14 +541,11 @@ func (element *webRTCWriter) Release() { //nolint: revive
 			element.log.Errorf(element, "%v", err)
 		}
 	}
-	// Close stream buffers to release remaining packets
 	for _, str := range element.streams.streams {
 		str.buffer.Close()
 	}
 }
 
-// Parameters returns the sorted URLs and codec parameters map of the innerWriter.
-// It returns nil for both values if the innerWriter is nil.
 func (element *webRTCWriter) SortedResolutions() *gomedia.WebRTCCodec {
 	codec := &gomedia.WebRTCCodec{HasAudio: false, Resolutions: make([]gomedia.Resolution, 0, len(element.streams.sortedURLs))}
 
@@ -607,27 +564,22 @@ func (element *webRTCWriter) SortedResolutions() *gomedia.WebRTCCodec {
 	return codec
 }
 
-// Packets returns the input packet channel of the innerWriter.
 func (element *webRTCWriter) Packets() chan<- gomedia.Packet {
 	return element.inpPktCh
 }
 
-// Peers returns the peers channel of the innerWriter.
 func (element *webRTCWriter) Peers() chan<- *gomedia.WebRTCPeer {
 	return element.peersChan
 }
 
-// RemoveSource returns the remove source channel of the writer.
 func (element *webRTCWriter) RemoveSource() chan<- string {
 	return element.rmSrcCh
 }
 
-// AddSource returns the add source channel of the writer.
 func (element *webRTCWriter) AddSource() chan<- string {
 	return element.addSrcCh
 }
 
-// String returns a string representation of the innerWriter, including the number of tracks.
 func (element *webRTCWriter) String() string {
 	return element.name
 }

@@ -34,22 +34,19 @@ func (e *alawEncoder) Init(params *pcm.CodecParameters) error {
 	var err error
 	e.inpChannels = params.Channels()
 
-	// Convert sample rate to int32 to prevent overflow
 	sampleRate := params.SampleRate()
-	// Use a safer max value comparison
-	const maxInt32 = 1<<31 - 1 // maximum value for int32
+	const maxInt32 = 1<<31 - 1
 	if sampleRate > uint64(maxInt32) {
 		sampleRate = uint64(maxInt32)
 	}
 
-	// Input frame size scales with channel count so we consume a full duration of multi-channel audio
+	// Frame size grows with channel count so one frame = one time-slice of multi-channel audio.
 	e.inpFrameSize = AlawFrameSize * int(e.inpChannels)
 
-	// Resampler operates on mono data — multi-channel input is downmixed before resampling
+	// Resampler takes mono S16; multi-channel input is downmixed to channel 0 before resampling.
 	e.r, err = utils.NewPcmS16leResampler(AlawChannels, int(uint32(sampleRate)), ALAWSampleRate)
 
-	// Division by 10 is used to create 100ms frame duration
-	const frameDurationDivisor = 10 // creates 100ms frame duration
+	const frameDurationDivisor = 10 // 100 ms frames
 	e.frameDuration = time.Duration(ALAWSampleRate/frameDurationDivisor) * time.Second / time.Duration(ALAWSampleRate)
 
 	e.codecPar = pcm.NewCodecParameters(params.StreamIndex(), gomedia.PCMAlaw, 1, ALAWSampleRate)
@@ -74,15 +71,13 @@ func (e *alawEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err e
 		if e.inpChannels == 1 {
 			inBuf = inData
 		} else {
-			// For multi-channel 16-bit PCM, properly extract the first channel
-			// Each sample is 2 bytes, and samples are interleaved by channel
+			// Pick channel 0 out of interleaved S16 multi-channel PCM.
 			bytesPerSample := 2
 			totalChannels := int(e.inpChannels)
 			monoSize := len(inData) / totalChannels
 			poolBuf = buffer.Get(monoSize)
 			inBuf = poolBuf.Data()[:0]
 			for i := 0; i < len(inData); i += bytesPerSample * totalChannels {
-				// Take the 2 bytes of the first channel's sample
 				if i+1 < len(inData) {
 					inBuf = append(inBuf, inData[i], inData[i+1])
 				}
@@ -108,7 +103,7 @@ func (e *alawEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err e
 		resp = append(resp, p)
 	}
 
-	// Compact: copy remaining samples to the front to prevent unbounded backing-array growth
+	// Compact leftover samples to the front so the buffer doesn't grow without bound.
 	remaining := len(e.buf) - consumed
 	copy(e.buf, e.buf[consumed:])
 	e.buf = e.buf[:remaining]

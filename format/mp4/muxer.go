@@ -1,4 +1,5 @@
-// Package mp4 provides functionality for working with MP4 files, specifically for muxing video streams.
+// Package mp4 implements an ISO/IEC 14496-12 (MP4) demuxer and muxer for
+// H.264, H.265, MJPEG and AAC streams.
 package mp4
 
 import (
@@ -37,8 +38,8 @@ func WithBatchedDump() MuxerOption {
 	return func(m *Muxer) { m.batchedDump = true }
 }
 
-// Muxer represents an MP4 muxer that combines multiple media streams into a single MP4 file.
-// Packets are accumulated via WritePacket; actual I/O is deferred until Flush or WriteTrailer.
+// Muxer assembles one or more media streams into a single MP4 file.
+// Packets are buffered by WritePacket; I/O is deferred until Flush or WriteTrailer.
 type Muxer struct {
 	writer        io.WriteSeeker
 	writePosition int64
@@ -49,7 +50,6 @@ type Muxer struct {
 	flushed       bool           // true after first Flush() call
 }
 
-// NewMuxer creates a new Muxer instance with the given writer.
 func NewMuxer(writer io.WriteSeeker, opts ...MuxerOption) *Muxer {
 	m := &Muxer{
 		writer: writer,
@@ -64,8 +64,9 @@ func (mux *Muxer) GetWritePosition() int64 {
 	return mux.writePosition
 }
 
-// GetPreLastPacket returns the pre-last packet (the packet that will be written on next WritePacket call)
-// for the given stream index. Returns nil if no packet is buffered for that stream.
+// GetPreLastPacket returns the packet currently buffered for streamIndex — the
+// one that will be flushed on the next WritePacket call. Returns nil if the
+// stream has no pending packet.
 func (mux *Muxer) GetPreLastPacket(streamIndex uint8) gomedia.Packet {
 	if int(streamIndex) >= len(mux.streams) {
 		return nil
@@ -73,18 +74,14 @@ func (mux *Muxer) GetPreLastPacket(streamIndex uint8) gomedia.Packet {
 	return mux.streams[streamIndex].lastPacket
 }
 
-// newStream creates a new media stream based on the provided codec parameters and adds it to the muxer.
 func (mux *Muxer) newStream(codec gomedia.CodecParameters) (err error) {
-	// Check if the codec type is supported.
 	switch codec.Type() {
 	case gomedia.H264, gomedia.H265, gomedia.MJPEG, gomedia.AAC:
-		// Supported codecs.
 	default:
 		err = fmt.Errorf("mp4: codec type=%v is not supported", codec.Type())
 		return
 	}
 
-	// Create a new stream with default sample table and track atom settings.
 	stream := new(Stream)
 	stream.CodecParameters = codec
 	stream.timeScale = 90000 //nolint: mnd

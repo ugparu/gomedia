@@ -114,7 +114,6 @@ func (dcd *ffmpegRKMPPDecoder) sendCodecHeaders(vpar gomedia.VideoCodecParameter
 			nalUnits = append(nalUnits, nal)
 		}
 	default:
-		// Неизвестный тип — просто не шлём заголовки
 		return nil
 	}
 
@@ -123,7 +122,7 @@ func (dcd *ffmpegRKMPPDecoder) sendCodecHeaders(vpar gomedia.VideoCodecParameter
 			dcd.dcd,
 			(*C.uint8_t)(unsafe.Pointer(&nal[0])),
 			C.int(len(nal)),
-			C.int64_t(0), // параметры считаем вне временной шкалы кадров
+			C.int64_t(0), // codec headers carry no frame timestamp
 		)
 		if ret < 0 {
 			return video.NewFFmpegError("can not feed codec header to rkmpp", int(ret))
@@ -197,7 +196,7 @@ func extractPacketData(pkt gomedia.VideoPacket) (data []byte, ptsMs int64, codec
 }
 
 func (dcd *ffmpegRKMPPDecoder) Feed(pkt gomedia.VideoPacket) (err error) {
-	// Перед первым обычным пакетом отправляем VPS/SPS/PPS
+	// RKMPP needs VPS/SPS/PPS before any coded slice; sendCodecHeaders is a no-op after the first call.
 	if err := dcd.sendCodecHeaders(pkt.CodecParameters()); err != nil {
 		return err
 	}
@@ -231,7 +230,7 @@ func (dcd *ffmpegRKMPPDecoder) Feed(pkt gomedia.VideoPacket) (err error) {
 }
 
 func (dcd *ffmpegRKMPPDecoder) Decode(pkt gomedia.VideoPacket) (rgb.ReleasableImage, error) {
-	// Перед первым обычным пакетом отправляем VPS/SPS/PPS
+	// RKMPP needs VPS/SPS/PPS before any coded slice; sendCodecHeaders is a no-op after the first call.
 	if err := dcd.sendCodecHeaders(pkt.CodecParameters()); err != nil {
 		return nil, err
 	}

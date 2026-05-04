@@ -29,9 +29,8 @@ type Resampler struct {
 	rcs uint64 // For channel=1
 }
 
-// Create resampler to transform pcm
-// from sampleRate to nSampleRate, where pcm contains number of channels
-// @remark each sample is 16bits in short int.
+// NewPcmS16leResampler returns a cubic-spline resampler for 16-bit little-endian
+// interleaved PCM with 1 or 2 channels.
 func NewPcmS16leResampler(channels, sampleRate int, nSampleRate int) (*Resampler, error) {
 	if channels < 1 || channels > 2 {
 		return nil, fmt.Errorf("invalid channels=%v", channels)
@@ -72,19 +71,18 @@ func (v *Resampler) Resample(pcm []byte) (npcm []byte, err error) {
 
 	ms := len(pcm) * 1000 / (2 * v.channels * v.isr)
 
-	// At least 4 samples when not init.
+	// Cubic spline interpolation needs 4 surrounding samples per output.
 	if nbSamples := len(pcm) / 2 / v.channels; nbSamples < 4 {
 		return nil, fmt.Errorf("invalid pcm, at least 4 samples, actual %v samples", nbSamples)
 	}
 
-	// Convert pcm to int16 values
 	ipcmLeft := resamplerInitChannel(pcm, v.channels, 0)
 	ipcmRight := resamplerInitChannel(pcm, v.channels, 1)
 	if ipcmRight != nil && len(ipcmLeft) != len(ipcmRight) {
 		return nil, fmt.Errorf("invalid pcm, L%v!=%v", len(ipcmLeft), len(ipcmRight))
 	}
 
-	// Insert the cache at the beginning.
+	// Prepend the tail of the previous call so the interpolator has a continuous window.
 	if v.lcache != nil {
 		ipcmLeft = append(v.lcache, ipcmLeft...)
 		v.lcache = nil
@@ -94,7 +92,6 @@ func (v *Resampler) Resample(pcm []byte) (npcm []byte, err error) {
 		v.rcache = nil
 	}
 
-	// Resample all channels
 	var consumed int
 	var opcmLeft []int16
 	if opcmLeft, consumed, err = resampleChannel(ipcmLeft, v.isr, v.osr, v.lws, v.lcs); err != nil {

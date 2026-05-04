@@ -7,12 +7,11 @@ import (
 	"github.com/ugparu/gomedia/codec"
 )
 
-// Packet represents an MJPEG video packet
+// Packet carries a single JPEG-compressed frame. Every MJPEG frame is a keyframe.
 type Packet struct {
 	codec.VideoPacket[*CodecParameters]
 }
 
-// NewPacket creates a new MJPEG packet
 func NewPacket(
 	key bool,
 	timestamp time.Duration,
@@ -37,7 +36,6 @@ func NewPacket(
 	}
 }
 
-// Clone creates a copy of the packet
 func (pkt *Packet) Clone(copyData bool) gomedia.Packet {
 	return &Packet{
 		VideoPacket: pkt.VideoPacket.Clone(copyData),

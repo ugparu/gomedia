@@ -13,13 +13,12 @@ import (
 	"github.com/ugparu/gomedia/utils/logger"
 )
 
-// Constants for safe integer conversions
 const (
-	maxInt32Value = int64(^uint32(0) >> 1) // Maximum value for int32
-	minInt32Value = -maxInt32Value - 1     // Minimum value for int32
+	maxInt32Value = int64(^uint32(0) >> 1)
+	minInt32Value = -maxInt32Value - 1
 )
 
-// safeInt32Conversion safely converts an int64 value to int32
+// safeInt32Conversion clamps val to the int32 range, logging an error when saturation happens.
 func safeInt32Conversion(log logger.Logger, src any, val int64, name string) int32 {
 	if val >= minInt32Value && val <= maxInt32Value {
 		//nolint:gosec // This is a safe int32 conversion
@@ -51,7 +50,7 @@ func NewMuxer(log logger.Logger) *Muxer {
 	}
 }
 
-// safeUint32Conversion safely converts an int value to uint32
+// safeUint32Conversion clamps val to the uint32 range, logging when out-of-range inputs are replaced with 0.
 func (m *Muxer) safeUint32Conversion(val int, name string) uint32 {
 	if val < 0 || val > int(^uint32(0)) {
 		m.log.Errorf(m, "%s value %d is outside uint32 range, using 0", name, val)
@@ -71,11 +70,9 @@ func (m *Muxer) newStream(codec gomedia.CodecParameters) (err error) {
 	stream.log = m.log
 	stream.timeScale = 90000
 	if codec.Type() == gomedia.AAC {
-		// Safely convert sample rate to int64 to avoid overflow
-		aacCodec, ok := codec.(*aac.CodecParameters)
-		if ok {
-			// This conversion is safe as audio sample rates are typically well within int64 range
-			stream.timeScale = int64(aacCodec.SampleRate()) //nolint:gosec // Audio sample rates are always within int64 range
+		// MP4 track timescale must match the audio sample rate so CTS/DTS are in sample units.
+		if aacCodec, ok := codec.(*aac.CodecParameters); ok {
+			stream.timeScale = int64(aacCodec.SampleRate()) //nolint:gosec // sample rate always fits in int64
 		}
 	}
 	stream.CodecParameters = codec
@@ -113,7 +110,6 @@ func (m *Muxer) newStream(codec gomedia.CodecParameters) (err error) {
 	}
 	stream.trackAtom.Media = new(mp4io.Media)
 
-	// Use int32 conversion with validation to avoid potential overflow
 	timeScaleInt32 := safeInt32Conversion(m.log, m, stream.timeScale, "timeScale")
 
 	stream.trackAtom.Media.Header = &mp4io.MediaHeader{
@@ -240,12 +236,10 @@ func (m *Muxer) GetInit() buffer.Buffer {
 		},
 	}
 
-	// Safe int->int32 conversion with a check
 	nextTrackID := safeInt32Conversion(m.log, m, int64(len(m.strs)+1), "next track ID")
 	moov.Header.NextTrackID = nextTrackID
 
 	for i, stream := range m.strs {
-		// Safe int->uint32 conversion with validation
 		trackID := m.safeUint32Conversion(i+1, "track ID")
 
 		moov.MovieExtend.Tracks = append(moov.MovieExtend.Tracks, &mp4io.TrackExtend{
@@ -283,8 +277,8 @@ func (m *Muxer) WritePacket(pkt gomedia.Packet) error {
 	return m.strs[idx].writePacket(pkt)
 }
 
-// processMuxer handles the common processing of streams within GetMP4Fragment
-// to reduce cyclomatic complexity
+// processMuxer tears down all stream buffers and rebuilds them from the current
+// CodecParametersPair. Called after each fragment to reset per-fragment state.
 func (m *Muxer) processMuxer() {
 	m.strs = m.strs[:0]
 
@@ -301,13 +295,13 @@ func (m *Muxer) processMuxer() {
 	}
 }
 
-// processTrackHeader processes track header data to reduce complexity
+// processTrackHeader fills the traf/tfhd/tfdt atoms for one stream. Split out
+// of GetMP4Fragment purely to keep cyclomatic complexity within the linter budget.
 func (m *Muxer) processTrackHeader(track *mp4io.TrackFrag, s *Stream) {
 	if len(s.packets) == 0 {
 		return
 	}
 
-	// Safe conversion with validation for DefaultDuration
 	durationTS := s.timeToTS(s.packets[0].Duration())
 	if durationTS < 0 || durationTS > int64(^uint32(0)) {
 		m.log.Errorf(m, "Duration time value %d is outside uint32 range", durationTS)
@@ -316,7 +310,6 @@ func (m *Muxer) processTrackHeader(track *mp4io.TrackFrag, s *Stream) {
 		track.Header.DefaultDuration = uint32(durationTS)
 	}
 
-	// Safe conversion with validation for DefaultSize
 	pktSize := s.packets[0].Len()
 	if pktSize < 0 || pktSize > int(^uint32(0)) {
 		m.log.Errorf(m, "Packet size %d is outside uint32 range", pktSize)
@@ -343,14 +336,13 @@ func (m *Muxer) processTrackHeader(track *mp4io.TrackFrag, s *Stream) {
 	}
 }
 
-// processPackets processes packets within a stream to reduce complexity
+// processPackets translates each buffered packet into a trun entry for the moof.
 func (m *Muxer) processPackets(track *mp4io.TrackFrag, s *Stream) {
 	for j, pkt := range s.packets {
 		if pkt.Len() != int(track.Header.DefaultSize) {
 			track.Run.Flags |= mp4io.TRUNSampleSize
 		}
 
-		// Safe conversion with validation
 		pktDurationTS := s.timeToTS(pkt.Duration())
 		if pktDurationTS < 0 || pktDurationTS > int64(^uint32(0)) {
 			m.log.Errorf(m, "Packet duration %d is outside uint32 range", pktDurationTS)
@@ -358,7 +350,6 @@ func (m *Muxer) processPackets(track *mp4io.TrackFrag, s *Stream) {
 			track.Run.Flags |= mp4io.TRUNSampleDuration
 		}
 
-		// Use a different name to avoid shadowing
 		entryRunFlag := mp4io.SampleNoDependencies
 		if vPkt, casted := pkt.(gomedia.VideoPacket); casted && !vPkt.IsKeyFrame() {
 			entryRunFlag = mp4io.SampleNonKeyframe
@@ -368,7 +359,6 @@ func (m *Muxer) processPackets(track *mp4io.TrackFrag, s *Stream) {
 			track.Run.Flags |= mp4io.TRUNSampleFlags
 		}
 
-		// Safe conversions with validation
 		var entryDuration uint32
 		if pktDurationTS < 0 || pktDurationTS > int64(^uint32(0)) {
 			m.log.Errorf(m, "Packet duration %d is outside uint32 range, using 0", pktDurationTS)
@@ -396,10 +386,11 @@ func (m *Muxer) processPackets(track *mp4io.TrackFrag, s *Stream) {
 	}
 }
 
-// processDataOffsets processes data offsets for tracks to reduce complexity
+// processDataOffsets fills each trun's data_offset (relative to the moof start) and
+// appends the payload bytes of every packet into out. The offsets must be patched
+// after the moof size is known, which is why this runs after the header scaffolding.
 func (m *Muxer) processDataOffsets(moof *mp4io.MovieFrag, startMOOF int, out []byte, n int) int {
 	for i, s := range m.strs {
-		// Safe conversion with validation
 		offset := n - startMOOF
 		dataOffset := m.safeUint32Conversion(offset, "data offset")
 		moof.Tracks[i].Run.DataOffset = dataOffset
@@ -411,8 +402,9 @@ func (m *Muxer) processDataOffsets(moof *mp4io.MovieFrag, startMOOF int, out []b
 	return n
 }
 
-// GetMP4Fragment returns an MP4 fragment
-// This function is complex but has been refactored to reduce cyclomatic complexity
+// GetMP4Fragment assembles one fMP4 fragment (styp + moof + mdat) from the packets
+// buffered since the previous call and returns it as a pooled buffer. Buffers are
+// reset afterwards via processMuxer.
 func (m *Muxer) GetMP4Fragment(idx int) buffer.Buffer {
 	defer m.processMuxer()
 
@@ -429,7 +421,6 @@ func (m *Muxer) GetMP4Fragment(idx int) buffer.Buffer {
 	}
 
 	for _, s := range m.strs {
-		// Define runFlag at function level to avoid shadowing
 		outerRunFlag := mp4io.SampleNoDependencies
 		if len(s.packets) > 0 {
 			if vPkt, casted := s.packets[0].(gomedia.VideoPacket); casted && !vPkt.IsKeyFrame() {
@@ -437,14 +428,12 @@ func (m *Muxer) GetMP4Fragment(idx int) buffer.Buffer {
 			}
 		}
 
-		// Safe conversion with validation for TrackID
 		streamIndex := int(s.StreamIndex())
 		trackID := m.safeUint32Conversion(streamIndex+1, "track ID")
 
 		track := &mp4io.TrackFrag{
 			Header: &mp4io.TrackFragHeader{
 				Version: 0,
-				// Split long line to fix line length issue
 				Flags: mp4io.TFHDDefaultDuration | mp4io.TFHDDefaultSize |
 					mp4io.TFHDDefaultFlags | mp4io.TFHDDefaultBaseIsMOOF,
 				TrackID:         trackID,
@@ -461,7 +450,6 @@ func (m *Muxer) GetMP4Fragment(idx int) buffer.Buffer {
 			DecodeTime: &mp4io.TrackFragDecodeTime{
 				Version: 1,
 				Flags:   0,
-				// Safe conversion with validation
 				Time: func() uint64 {
 					timeValue := s.timeToTS(s.firstPacketTime)
 					if timeValue < 0 {
@@ -528,7 +516,6 @@ func (m *Muxer) GetMP4Fragment(idx int) buffer.Buffer {
 	n = m.processDataOffsets(moof, startMOOF, buf.Data(), n)
 	moof.Marshal(buf.Data()[startMOOF:])
 
-	// Safe conversion with validation
 	mdatSizeValue := n - mdatStart
 	mdatSize := m.safeUint32Conversion(mdatSizeValue, "MDAT size")
 	pio.PutU32BE(buf.Data()[mdatStart:], mdatSize)

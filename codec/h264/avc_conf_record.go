@@ -2,14 +2,15 @@ package h264
 
 import "github.com/ugparu/gomedia/utils/bits/pio"
 
-// AVCDecoderConfRecord represents the HEVC (High-Efficiency Video Coding) decoder configuration record.
+// AVCDecoderConfRecord is the H.264/AVC decoder configuration record
+// as defined in ISO/IEC 14496-15 §5.2.4.1.
 type AVCDecoderConfRecord struct {
-	AVCProfileIndication uint8    // Profile indication for the AVC stream.
-	ProfileCompatibility uint8    // Profile compatibility for the AVC stream.
-	AVCLevelIndication   uint8    // Level indication for the AVC stream.
-	LengthSizeMinusOne   uint8    // Length size (in bytes) minus one for the AVC stream.
-	SPS                  [][]byte // Sequence Parameter Sets (SPS) containing the SPS NALUs.
-	PPS                  [][]byte // Picture Parameter Sets (PPS) containing the PPS NALUs.
+	AVCProfileIndication uint8
+	ProfileCompatibility uint8
+	AVCLevelIndication   uint8
+	LengthSizeMinusOne   uint8 // NALU length-prefix size in bytes - 1 (0, 1, or 3)
+	SPS                  [][]byte
+	PPS                  [][]byte
 }
 
 // Unmarshal decodes the binary representation of AVCDecoderConfRecord from the given byte slice.

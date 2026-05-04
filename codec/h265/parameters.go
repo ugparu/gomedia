@@ -21,15 +21,15 @@ func NewCodecDataFromHEVCDecoderConfRecord(record []byte) (codecPar CodecParamet
 		return
 	}
 	if len(codecPar.RecordInfo.SPS) == 0 {
-		err = errors.New("h265parser: no SPS found in AVCDecoderConfRecord")
+		err = errors.New("h265parser: no SPS found in HEVCDecoderConfRecord")
 		return
 	}
 	if len(codecPar.RecordInfo.PPS) == 0 {
-		err = errors.New("h265parser: no PPS found in AVCDecoderConfRecord")
+		err = errors.New("h265parser: no PPS found in HEVCDecoderConfRecord")
 		return
 	}
 	if len(codecPar.RecordInfo.VPS) == 0 {
-		err = errors.New("h265parser: no VPS found in AVCDecoderConfRecord")
+		err = errors.New("h265parser: no VPS found in HEVCDecoderConfRecord")
 		return
 	}
 	if codecPar.SPSInfo, err = ParseSPS(codecPar.RecordInfo.SPS[0]); err != nil {

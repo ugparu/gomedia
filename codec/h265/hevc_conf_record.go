@@ -14,8 +14,13 @@ func IsDataNALU(b []byte) bool {
 	return typ < 32            //nolint:mnd // RFC 7798 §1.1.4: types 0-31 are VCL (data) NAL units
 }
 
+// StartCodeBytes is the 3-byte Annex-B NAL unit start prefix (ISO/IEC 14496-10 Annex B).
 var StartCodeBytes = []byte{0, 0, 1}
-var AUDBytes = []byte{0, 0, 0, 1, 0x9, 0xf0, 0, 0, 0, 1} // AUD
+
+// AUDBytes is an H.265 Access Unit Delimiter NAL wrapped by Annex-B start codes.
+// Some cameras omit AUDs; prepending this forces a clean access-unit boundary
+// for downstream parsers.
+var AUDBytes = []byte{0, 0, 0, 1, 0x9, 0xf0, 0, 0, 0, 1}
 
 type HEVCDecoderConfRecord struct {
 	AVCProfileIndication uint8
@@ -27,7 +32,7 @@ type HEVCDecoderConfRecord struct {
 	PPS                  [][]byte
 }
 
-var ErrDecconfInvalid = errors.New("h265parser: AVCDecoderConfRecord invalid")
+var ErrDecconfInvalid = errors.New("h265parser: HEVCDecoderConfRecord invalid")
 
 func (avc *HEVCDecoderConfRecord) Unmarshal(b []byte) (n int, err error) {
 	if len(b) < 30 { //nolint:mnd // 30 is the minimum size for a valid AVCDecoderConfRecord

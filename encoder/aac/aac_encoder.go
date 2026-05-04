@@ -35,33 +35,26 @@ func NewAacEncoder() encoder.InnerAudioEncoder {
 	}
 }
 
-// Initialize the encoder in LC profile.
-// @remark the encoder use sampleRate and channels, user should resample the PCM to fit it,
-//
-//	that is, the channels and sampleRate of PCM should always equals to encoder's.
-//
-// @remark for the fdkaac always use 16bits sample, so the bits of pcm always 16,
-//
-//	which must be: [SHORT PCM] [SHORT PCM] ... ...
+// Init configures an fdk-aac encoder for AAC-LC at 32 kbps/channel. Input PCM
+// must already match the codec's sample rate, channel count, and 16-bit
+// interleaved layout — the encoder does not resample.
 func (v *aacEncoder) Init(codecPar *pcm.CodecParameters) (err error) {
 	v.channels = int(codecPar.Channels())
 
-	// Initialize AAC encoder with specific parameters
 	//nolint:gocritic // CGO function call
 	r := C.aacenc_init(
 		&v.m,
 		2,
 		C.int(v.channels),
 		C.int(codecPar.SampleRate()),
-		C.int(32*v.channels*1000), //nolint:mnd // bitrate calculation (32kbps per channel in Hz)
+		C.int(32*v.channels*1000), //nolint:mnd // 32 kbps per channel
 	)
 
 	if int(r) != 0 {
 		return fmt.Errorf("initialize encoder failed, code=%v", int(r))
 	}
 
-	// Size of int16 in bytes is 2
-	const bytesPerInt16 = 2 // size of int16 in bytes
+	const bytesPerInt16 = 2
 	v.frameSize = bytesPerInt16 * v.channels * v.FrameSize()
 	v.frameDuration = time.Duration(v.FrameSize()) * time.Second / time.Duration(codecPar.SampleRate())
 
@@ -93,16 +86,9 @@ func (v *aacEncoder) Init(codecPar *pcm.CodecParameters) (err error) {
 	return
 }
 
-// Encode the pcm to aac, pcm must contains bytes for one aac frame,
-//
-//	that is the bytes must be NbBytesPerFrame().
-//
-// @remark fdkaac always use 16bits pcm, so the bits of pcm always 16.
-// @remark user should resample the pcm to fit the encoder, so the channels of pcm equals to encoder's.
-// @remark user should resample the pcm to fit the encoder, so the sampleRate of pcm equals to encoder's.
-// @return when aac is nil, encoded completed(the Flush() return nil also),
-//
-//	because we will flush the encoder automatically to got the last frames.
+// Encode buffers incoming S16 PCM until at least NbBytesPerFrame bytes are
+// available, then emits one AAC packet per full frame. When the encoder returns
+// an empty output it is drained via flush so the last partial frame is not lost.
 func (v *aacEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err error) {
 	data := pkt.Data()
 	needed := v.pcmLen + len(data)
@@ -115,7 +101,6 @@ func (v *aacEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err er
 	for v.pcmLen >= v.frameSize {
 		pcm := v.pcmBuf.Data()[:v.frameSize]
 
-		// The maximum packet size is 8KB aka 768 bytes per channel.
 		nbAac := int(C.aacenc_max_output_buffer_size(&v.m)) //nolint:gocritic // CGO function call
 		v.aacBuf.Resize(nbAac)
 
@@ -133,11 +118,10 @@ func (v *aacEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err er
 
 		valid := int(pAacSize)
 
-		// Shift consumed frame out of the PCM buffer.
 		v.pcmLen -= v.frameSize
 		copy(v.pcmBuf.Data(), v.pcmBuf.Data()[v.frameSize:v.frameSize+v.pcmLen])
 
-		// when got nil packet, flush encoder.
+		// Zero-byte output signals that fdkaac has a frame withheld; drain it.
 		if valid == 0 {
 			flushed, flushErr := v.flush(pkt.Timestamp(), pkt.SourceID(), pkt.StartTime())
 			if flushErr != nil {
@@ -198,17 +182,18 @@ func (v *aacEncoder) flush(ts time.Duration, sourceID string, startTime time.Tim
 	}
 }
 
-// Get the channels of encoder.
 func (v *aacEncoder) Channels() int {
 	return v.channels
 }
 
-// Get the frame size of encoder.
+// FrameSize reports the encoder's native frame length in samples per channel
+// (1024 for AAC-LC).
 func (v *aacEncoder) FrameSize() int {
 	return int(C.aacenc_frame_size(&v.m)) //nolint:gocritic // CGO function call
 }
 
-// Get the number of bytes per a aac frame.
+// NbBytesPerFrame is the exact PCM byte count Encode needs to produce one
+// AAC output frame (2 bytes × channels × samples).
 func (v *aacEncoder) NbBytesPerFrame() int {
 	return 2 * v.channels * v.FrameSize()
 }

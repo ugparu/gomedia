@@ -37,7 +37,7 @@ func (ssc *failsafeAsyncLifecycleManager[T]) Start(startFunc func(T) error) (err
 	ssc.startOnce.Do(func() {
 		ssc.log.Debugf(ssc.instance, "Starting failsafe async")
 		if err = startFunc(ssc.instance); err != nil {
-			ssc.log.Warningf(ssc.instance, "Detected error ons start: %s", err.Error())
+			ssc.log.Warningf(ssc.instance, "Detected error on start: %s", err.Error())
 		}
 		go ssc.process()
 	})

@@ -85,35 +85,35 @@ const (
 	h265FirstSliceBit = 7    // Bit position for first_slice_segment_in_pic_flag
 )
 
-// isH265Slice checks if a NALU is a H.265 slice
+// isH265Slice reports whether nal is an H.265 VCL slice (nal_unit_types 0-31 per
+// ITU-T H.265 Table 7-1).
 func isH265Slice(nal []byte) bool {
 	if len(nal) < h265MinNALUSize {
 		return false
 	}
 	naluType := (nal[0] >> 1) & h265NALTypeMask
-	// H.265 slice types (VCL NAL units)
 	return naluType >= h265.NalUnitCodedSliceTrailR && naluType <= h265.NalUnitReservedVcl31
 }
 
-// isH265FirstSliceInPicture checks if a H.265 slice is the first slice in a picture
+// isH265FirstSliceInPicture reads first_slice_segment_in_pic_flag from the slice
+// segment header so callers know where one AU ends and the next begins.
 func isH265FirstSliceInPicture(nal []byte) bool {
 	if len(nal) < h265MinNALUSize || !isH265Slice(nal) {
 		return false
 	}
-	// Check first_slice_segment_in_pic_flag (bit 7 of the third byte)
 	return nal[2]>>h265FirstSliceBit&1 == 1
 }
 
-// fillTrackAtom fills the Track Atom with information based on the stream's codec parameters.
+// fillTrackAtom populates the SampleDescription for this stream's codec so the
+// track atom reflects the configured width/height/codec config. Called after
+// stts/stsc/stco entries have been accumulated.
 func (s *Stream) fillTrackAtom() (err error) {
-	// Set time scale and duration in the media header of the Track Atom.
 	s.trackAtom.Media.Header.TimeScale = int32(s.timeScale) //nolint:gosec
 	s.trackAtom.Media.Header.Duration = s.duration
 
 	const defaultDPI = 72
 	const defaultDepth = 24
 
-	// Customize settings based on the codec type (specifically handling H.264 codec parameters).
 	switch codecPar := s.CodecParameters.(type) {
 	case *h264.CodecParameters:
 		width, height := codecPar.Width(), codecPar.Height()
@@ -301,9 +301,13 @@ func (s *Stream) incSampleIndex() (duration int64) {
 	return
 }
 
+// readPacket returns the next access unit for this stream. For H.265 the packet
+// spans all slice NALUs that share a picture (first_slice_segment_in_pic_flag
+// marks the boundary), so one MP4 sample can span multiple returned slices or
+// multiple MP4 samples can coalesce into one returned packet.
 func (s *Stream) readPacket(tm time.Duration, url string) (pkt gomedia.Packet, err error) {
 	for {
-		// Check if we have a buffered H.265 sliced packet to return first
+		// Flush any still-buffered H.265 picture once samples are exhausted.
 		if s.h265SlicedPacket != nil && !s.isSampleValid() {
 			pkt = s.h265SlicedPacket
 			s.h265SlicedPacket = nil
@@ -357,11 +361,10 @@ func (s *Stream) readPacket(tm time.Duration, url string) (pkt gomedia.Packet, e
 			for _, nal := range nalus {
 				naluType := (nal[0] >> 1) & h265NALTypeMask
 
-				// Handle parameter sets (VPS, SPS, PPS) and other non-slice NALUs
+				// Non-VCL NALs (VPS/SPS/PPS/AUD/SEI) attach to the picture in progress.
 				if naluType == h265.NalUnitVps || naluType == h265.NalUnitSps || naluType == h265.NalUnitPps ||
 					naluType == h265.NalUnitAccessUnitDelimiter || naluType == h265.NalUnitPrefixSei || naluType == h265.NalUnitSuffixSei {
-					// Non-slice NALUs: add to current sliced packet if exists, otherwise create new packet
-					buf := make([]byte, 4)                            //nolint:mnd // size of header
+					buf := make([]byte, 4)                            //nolint:mnd // length prefix
 					binary.BigEndian.PutUint32(buf, uint32(len(nal))) //nolint:gosec
 					naluWithHeader := append(buf, nal...)
 
@@ -369,48 +372,41 @@ func (s *Stream) readPacket(tm time.Duration, url string) (pkt gomedia.Packet, e
 						oldLen := s.h265SlicedPacket.Len()
 						s.h265SlicedPacket.Buf = append(s.h265SlicedPacket.Buf[:oldLen], naluWithHeader...)
 					} else {
-						// Create new packet for parameter sets
 						pkt = h265.NewPacket(false, tm, time.Now(), naluWithHeader, url, h265Par)
 					}
 					continue
 				}
 
-				// Handle slice NALUs (VCL NAL units)
 				if isH265Slice(nal) {
-					buf := make([]byte, 4)                            //nolint:mnd // size of header
+					buf := make([]byte, 4)                            //nolint:mnd // length prefix
 					binary.BigEndian.PutUint32(buf, uint32(len(nal))) //nolint:gosec
 					naluWithHeader := append(buf, nal...)
 
-					// Check if this slice indicates a key frame
 					sliceIsKey := isKeyFrame || h265.IsKey(naluType)
 
-					if isH265FirstSliceInPicture(nal) {
-						// First slice in picture: finalize previous packet and start new one
+					switch {
+					case isH265FirstSliceInPicture(nal):
+						// Boundary: flush the previous picture and start a fresh one.
 						if s.h265SlicedPacket != nil {
 							pkt = s.h265SlicedPacket
 						}
 						s.h265SlicedPacket = h265.NewPacket(sliceIsKey, tm, time.Now(), naluWithHeader, url, h265Par)
 						s.h265BufferHasKey = sliceIsKey
-					} else if s.h265SlicedPacket != nil {
-						// Subsequent slice: add to current buffered packet
+					case s.h265SlicedPacket != nil:
 						oldLen := s.h265SlicedPacket.Len()
 						s.h265SlicedPacket.Buf = append(s.h265SlicedPacket.Buf[:oldLen], naluWithHeader...)
 						s.h265SlicedPacket.IsKeyFrm = s.h265SlicedPacket.IsKeyFrm || sliceIsKey
 						s.h265BufferHasKey = s.h265BufferHasKey || sliceIsKey
-					} else {
-						// Unexpected: slice without first slice in picture
-						// Treat as new frame
+					default:
+						// Non-first slice without a buffered picture — recover by
+						// treating it as the start of a new picture.
 						s.h265SlicedPacket = h265.NewPacket(sliceIsKey, tm, time.Now(), naluWithHeader, url, h265Par)
 						s.h265BufferHasKey = sliceIsKey
 					}
 				}
 			}
 
-			// If we have a packet to return but no new sliced packet was started,
-			// it means we finished processing all slices for the current frame
 			if pkt == nil && s.h265SlicedPacket != nil {
-				// Check if we should return the buffered packet
-				// This happens when we've read all NALUs in the sample and have a complete frame
 				pkt = s.h265SlicedPacket
 				s.h265SlicedPacket = nil
 				s.h265BufferHasKey = false
@@ -426,8 +422,7 @@ func (s *Stream) readPacket(tm time.Duration, url string) (pkt gomedia.Packet, e
 
 		s.incSampleIndex()
 
-		// For H.265, if we don't have a packet yet but we're still buffering slices,
-		// loop to read the next sample to continue building the frame
+		// H.265 only: keep draining samples until we have a complete picture.
 		if pkt == nil && s.CodecParameters.Type() == gomedia.H265 && s.h265SlicedPacket != nil {
 			continue
 		}
@@ -484,7 +479,6 @@ func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
 	s.muxer.pending = append(s.muxer.pending, pw)
 	s.muxer.pendingSize += pktSize
 
-	// For video packets, update sync sample information.
 	if vPkt, casted := pkt.(gomedia.VideoPacket); casted {
 		if vPkt.IsKeyFrame() && s.sample.SyncSample != nil {
 			s.sample.SyncSample.Entries = append(s.sample.SyncSample.Entries, uint32(s.sampleIndex+1)) //nolint:gosec
@@ -514,13 +508,11 @@ func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
 		s.cttsEntry.Count++
 	}
 
-	// Update duration and sample index.
 	s.duration += int64(sDr)
 	s.sampleIndex++
 	s.sample.ChunkOffset.Entries = append(s.sample.ChunkOffset.Entries, uint64(s.muxer.writePosition)) //nolint:gosec
 	s.sample.SampleSize.Entries = append(s.sample.SampleSize.Entries, uint32(pktSize))                 //nolint:gosec
 
-	// Update write position.
 	s.muxer.writePosition += int64(pktSize)
 	return
 }

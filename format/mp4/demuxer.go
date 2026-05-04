@@ -1,4 +1,3 @@
-// Package mp4 provides functionality for working with MP4 files, specifically for demuxing video streams.
 package mp4
 
 import (
@@ -61,22 +60,19 @@ func (dmx *Demuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 		return
 	}
 
-	var chosen *Stream
-	// Filter streams to only include those with valid samples remaining
 	validStreams := make([]*Stream, 0, len(dmx.streams))
 	for _, stream := range dmx.streams {
 		if stream.isSampleValid() {
 			validStreams = append(validStreams, stream)
 		}
 	}
-
-	// If no streams have valid samples remaining, return EOF
 	if len(validStreams) == 0 {
 		err = io.EOF
 		return
 	}
 
-	// Choose the stream with the earliest timestamp from valid streams
+	// Interleave streams by DTS so downstream consumers see packets in monotonic order.
+	var chosen *Stream
 	for _, stream := range validStreams {
 		if chosen == nil || stream.tsToTime(stream.dts) < chosen.tsToTime(chosen.dts) {
 			chosen = stream
@@ -87,12 +83,10 @@ func (dmx *Demuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 	return chosen.readPacket(tm, dmx.url)
 }
 
-// VideoParameters returns the video codec parameters associated with the demuxer.
 func (dmx *Demuxer) VideoParameters() gomedia.VideoCodecParameters {
 	return dmx.videoCodecData
 }
 
-// AudioParameters returns the audio codec parameters associated with the demuxer.
 func (dmx *Demuxer) AudioParameters() gomedia.AudioCodecParameters {
 	return dmx.audioCodecData
 }

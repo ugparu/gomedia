@@ -23,30 +23,30 @@ func (b *staticBuffer) Cap() int     { return cap(b.data) }
 func (b *staticBuffer) Release()     {}
 func (b *staticBuffer) Resize(int)   {}
 
-// segment represents a segment of an HLS video stream.
+// segment is one .m4s file in the HLS playlist, composed of one or more fragments
+// (LL-HLS parts). Packets are retained by their ring-buffer slots until release().
 type segment struct {
-	id                 uint64                      // Identifier for the segment.
-	targetFragDuration time.Duration               // Target duration for each fragment in the segment.
-	targetDuration     time.Duration               // Target duration for the entire segment.
-	duration           time.Duration               // Actual duration of the segment.
-	finished           chan struct{}               // Channel to signal completion of the segment.
-	curFragment        *fragment                   // Atomic value to store the current fragment.
-	manifestEntry      string                      // HLS manifest entry for the segment.
-	codecPars          gomedia.CodecParametersPair // Codec parameters for the segment.
-	cacheEntry         string                      // Cache entry for manifest generation.
-	fragments          []*fragment                 // List of fragments in the segment.
-	time               time.Time                   // Time when the segment was created.
-	cachedMp4          []byte                      // Lazily generated full-segment MP4.
-	mu                 sync.RWMutex                // Protects fragments slice, lazy MP4 generation, and packet release.
-	released           bool                        // True after packets have been released.
-	discontinuity      bool                        // True if this segment starts after a codec change.
-	initVersion        int                         // Init segment version this segment belongs to.
-	mediaName          string                      // Base filename used in manifest URIs (e.g. "media").
-	blockingTimeout    time.Duration               // Timeout for blocking fragment requests.
+	id                 uint64
+	targetFragDuration time.Duration
+	targetDuration     time.Duration
+	duration           time.Duration
+	finished           chan struct{}
+	curFragment        *fragment
+	manifestEntry      string
+	codecPars          gomedia.CodecParametersPair
+	cacheEntry         string
+	fragments          []*fragment
+	time               time.Time
+	cachedMp4          []byte       // lazily generated full-segment MP4
+	mu                 sync.RWMutex // guards fragments, lazy MP4 generation, and release
+	released           bool
+	discontinuity      bool // true if this segment starts after a codec change
+	initVersion        int
+	mediaName          string
+	blockingTimeout    time.Duration
 	log                logger.Logger
 }
 
-// newSegment creates a new segment with the specified parameters.
 func newSegment(
 	id uint64,
 	targetFragmentDuration,
@@ -78,10 +78,9 @@ func newSegment(
 	return seg
 }
 
-// writePacket writes a multimedia packet to the current fragment of the segment.
-// Segment closure is NOT handled here — it is driven by the muxer based on
-// target duration (and optionally deferred to a keyframe when configured).
-// Returns true if a fragment was closed and the manifest needs rebuilding.
+// writePacket forwards the packet to the current fragment and rotates to a new
+// fragment when the old one fills. Segment rotation is the muxer's job, not ours.
+// Returns true when a fragment boundary was crossed (manifest needs a rebuild).
 func (element *segment) writePacket(packet gomedia.Packet) (changed bool, err error) {
 	curFrag := element.curFragment
 	if err = curFrag.writePacket(packet); err != nil {
@@ -108,10 +107,9 @@ func (element *segment) writePacket(packet gomedia.Packet) (changed bool, err er
 	return
 }
 
-// closeSeg finalizes the segment when the muxer triggers a rotation. Any
-// in-progress fragment is closed: if it contains video data it becomes the
-// last part of this segment; otherwise it is silently closed (audio-only
-// data remains in the segment's fMP4 but is not listed as a part).
+// closeSeg finishes the current fragment and writes the segment's manifest
+// entry. A fragment with zero duration (audio-only tail) is closed silently —
+// its samples are still in the fMP4, but not advertised as an LL-HLS part.
 func (element *segment) closeSeg() {
 	curFrag := element.curFragment
 	select {
@@ -134,18 +132,16 @@ func (element *segment) closeSeg() {
 	_ = element.close()
 }
 
-// close finalizes the segment metadata and signals completion.
-// MP4 data is NOT generated here — it is produced lazily on first HTTP request.
-// Packets are NOT released here — they stay alive for lazy generation and are
-// released in release() when the segment is evicted from the playlist.
+// close signals completion. Packets are kept alive for lazy MP4 generation and
+// only freed when release() is called (segment eviction).
 func (element *segment) close() (err error) {
 	element.log.Tracef(element, "Finishing segment")
 	close(element.finished)
 	return nil
 }
 
-// release frees all retained ring-buffer packet slots.
-// Called when the segment is evicted from the playlist or the muxer is closed.
+// release frees all retained ring-buffer slots. Safe to call more than once.
+// Called on playlist eviction or muxer close.
 func (element *segment) release() {
 	element.mu.Lock()
 	defer element.mu.Unlock()
@@ -163,8 +159,8 @@ func (element *segment) release() {
 	}
 }
 
-// getMp4Buffer lazily generates and returns the full-segment MP4 data.
-// Returns nil if the segment's packets have already been released.
+// getMp4Buffer returns the full-segment MP4, generating it on first call.
+// Returns nil once release() has freed the underlying packets.
 func (element *segment) getMp4Buffer() buffer.Buffer {
 	element.mu.Lock()
 	defer element.mu.Unlock()
@@ -196,8 +192,9 @@ func (element *segment) getMp4Buffer() buffer.Buffer {
 	return &staticBuffer{element.cachedMp4}
 }
 
-// getFragment lazily generates and returns the MP4 content of a specific fragment.
-// Returns nil if the segment's packets have already been released.
+// getFragment blocks until fragment id closes, then returns its MP4 bytes.
+// Blocks up to blockingTimeout (LL-HLS block-GET). Returns nil if the packets
+// have been released or the timeout elapses.
 func (element *segment) getFragment(ctx context.Context, id uint8) buffer.Buffer {
 	element.mu.RLock()
 	if id >= uint8(len(element.fragments)) {
@@ -230,7 +227,7 @@ func (element *segment) getFragment(ctx context.Context, id uint8) buffer.Buffer
 	return frag.getMp4Buffer()
 }
 
-// waitFragment waits until a specific fragment in the segment is finished.
+// waitFragment blocks until fragment id closes, the segment finishes, or ctx is cancelled.
 func (element *segment) waitFragment(ctx context.Context, id uint8) {
 	for {
 		element.mu.RLock()
@@ -242,7 +239,6 @@ func (element *segment) waitFragment(ctx context.Context, id uint8) {
 		}
 		select {
 		case <-ctx.Done():
-			// Explicitly return when context is done to prevent deadlocks
 			return
 		case <-element.finished:
 			return
@@ -254,7 +250,6 @@ func (element *segment) waitFragment(ctx context.Context, id uint8) {
 	}
 }
 
-// String returns a string representation of the segment for debugging purposes.
 func (element *segment) String() string {
 	return fmt.Sprintf("SEGMENT id=%d frgs=%d", element.id, len(element.fragments))
 }

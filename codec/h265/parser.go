@@ -9,8 +9,8 @@ import (
 )
 
 var (
-	ErrH265IncorectUnitSize = errors.New("invorect Unit Size")
-	ErrH265IncorectUnitType = errors.New("incorect Unit Type")
+	ErrH265IncorectUnitSize = errors.New("incorrect unit size")
+	ErrH265IncorectUnitType = errors.New("incorrect unit type")
 )
 
 //nolint:gocyclo,cyclop // This function is complex due to the H.265 specification requirements

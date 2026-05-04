@@ -1,4 +1,5 @@
-// Package screenshoter provides functionality for capturing screenshots from RTSP video streams.
+// Package screenshoter captures JPEG screenshots from RTSP video streams
+// by wiring up a short-lived Reader + CPU decoder pipeline per call.
 package screenshoter
 
 //go:generate mockgen -source=ffmpeg_screenshoter.go -destination=../../mocks/mock_screenshoter.go -package=mocks
@@ -19,31 +20,26 @@ import (
 	"golang.org/x/image/draw"
 )
 
-// bufSize represents the buffer size for channels.
 const bufSize = 100
 
-// Screenshoter is the interface for capturing screenshots from RTSP video streams.
 type Screenshoter interface {
 	Screenshot(url string) ([]byte, error)
 }
 
-// ffmpegScreenshoter is an implementation of the Screenshoter interface.
 type ffmpegScreenshoter struct {
 	log logger.Logger
 }
 
-// NewScreenshoter creates a new instance of the Screenshoter interface using ffmpegScreenshoter.
 func NewScreenshoter() Screenshoter {
 	return &ffmpegScreenshoter{log: logger.Default}
 }
 
-// Screenshot captures a screenshot from the provided RTSP video stream URL.
+// Screenshot connects to url, waits for a decoded keyframe, and returns it as a JPEG.
+// Returns an error if the full pipeline (connect + decode) does not complete within 30s.
 func (screenshoter *ffmpegScreenshoter) Screenshot(url string) ([]byte, error) {
-	// Create a new RTSP reader with a buffer size.
 	screenshotReader := reader.NewRTSP(bufSize)
 	defer screenshotReader.Close()
 
-	// Set a timer for a maximum waiting time (30 seconds).
 	const screenshotProbeTime = 30 * time.Second
 	timer := time.After(screenshotProbeTime)
 
@@ -53,10 +49,8 @@ func (screenshoter *ffmpegScreenshoter) Screenshot(url string) ([]byte, error) {
 		return nil, errors.New("timed out")
 	}
 
-	// Read codec parameters from the RTSP stream.
 	screenshotReader.Read()
 
-	// Create a new video decoder with CPU acceleration and the specified buffer size.
 	screenshotDecoder := decoder.NewVideo(bufSize, -1, map[gomedia.CodecType]func() decoder.InnerVideoDecoder{
 		gomedia.H264:  cpu.NewFFmpegCPUDecoder,
 		gomedia.H265:  cpu.NewFFmpegCPUDecoder,
@@ -68,10 +62,8 @@ func (screenshoter *ffmpegScreenshoter) Screenshot(url string) ([]byte, error) {
 
 	for {
 		select {
-		// Handle timeout.
 		case <-timer:
 			return nil, errors.New("timed out")
-		// Receive packets from the RTSP stream.
 		case packet := <-screenshotReader.Packets():
 			if vPkt, ok := packet.(gomedia.VideoPacket); ok {
 				select {
@@ -86,7 +78,6 @@ func (screenshoter *ffmpegScreenshoter) Screenshot(url string) ([]byte, error) {
 			} else {
 				packet.Release()
 			}
-		// Receive images from the video decoder.
 		case mat := <-screenshotDecoder.Images():
 			buff := new(bytes.Buffer)
 
@@ -101,7 +92,6 @@ func (screenshoter *ffmpegScreenshoter) Screenshot(url string) ([]byte, error) {
 				return nil, err
 			}
 
-			// Log successful extraction of the screenshot.
 			screenshoter.log.Debugf(screenshoter, "Screenshot extracted successfully from %s", url)
 
 			return buff.Bytes(), nil

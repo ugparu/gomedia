@@ -7,7 +7,6 @@ import (
 	"github.com/ugparu/gomedia/codec"
 )
 
-// CodecParameters represents MJPEG codec parameters
 type CodecParameters struct {
 	codec.BaseParameters
 	width  uint
@@ -15,7 +14,6 @@ type CodecParameters struct {
 	fps    uint
 }
 
-// NewCodecParameters creates new MJPEG codec parameters
 func NewCodecParameters(width, height, fps uint) *CodecParameters {
 	codecPar := &CodecParameters{
 		width:  width,
@@ -24,29 +22,25 @@ func NewCodecParameters(width, height, fps uint) *CodecParameters {
 	}
 	codecPar.CodecType = gomedia.MJPEG
 
-	// Calculate bitrate estimation for MJPEG
-	// MJPEG typically uses higher bitrates than compressed codecs
-	codecPar.BRate = uint(float64(width) * float64(height) * float64(fps) * 0.5)
+	// MJPEG has no inter-frame prediction, so per-pixel cost is roughly constant;
+	// 0.5 bits/px/frame is a rough average for typical camera JPEG quality.
+	codecPar.BRate = uint(float64(width) * float64(height) * float64(fps) * 0.5) //nolint:mnd
 
 	return codecPar
 }
 
-// Width returns the video frame width in pixels
 func (par *CodecParameters) Width() uint {
 	return par.width
 }
 
-// Height returns the video frame height in pixels
 func (par *CodecParameters) Height() uint {
 	return par.height
 }
 
-// FPS returns the video frame rate
 func (par *CodecParameters) FPS() uint {
 	return par.fps
 }
 
-// Tag returns a string tag representing the codec information
 func (par *CodecParameters) Tag() string {
 	return fmt.Sprintf("mjpeg.%dx%d", par.width, par.height)
 }

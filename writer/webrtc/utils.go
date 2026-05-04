@@ -13,68 +13,63 @@ import (
 	"github.com/ugparu/gomedia/utils/nal"
 )
 
-// minPktSz is the minimum packet size constant.
 const minPktSz = 5
+
+// correctionStep is how far each packet's duration is nudged per frame to
+// steer playback back toward the configured delay target without audible jumps.
 const correctionStep = time.Millisecond * 3
 
-// peerURL represents the information associated with a peer track, including token and URL.
 type peerURL struct {
-	*peerTrack        // Peer track information.
-	Token      string // Token associated with the peer.
-	URL        string // URL associated with the peer track.
+	*peerTrack
+	Token string
+	URL   string
 }
 
-// dataChanReq represents a request for changing settings or state.
 type dataChanReq struct {
-	Token   string `json:"token"`   // Token associated with the request.
-	Command string `json:"command"` // Command indicating the type of change.
-	Message string `json:"message"` // Additional message or information associated with the change.
+	Token   string `json:"token"`
+	Command string `json:"command"`
+	Message string `json:"message"`
 }
 
-// codecReq represents a request related to video codec settings.
 type codecReq struct {
-	Token   string `json:"token"`   // Token associated with the request.
-	Command string `json:"command"` // Command indicating the type of codec-related change.
-	Message codec  `json:"message"` // Codec-specific information or settings associated with the change.
+	Token   string `json:"token"`
+	Command string `json:"command"`
+	Message codec  `json:"message"`
 }
 
-// codec represents information about a video codec and its associated resolutions.
 type codec struct {
-	Type        string       `json:"type"`        // Type of the video codec.
-	Resolutions []resolution `json:"resolutions"` // Resolutions supported by the codec.
+	Type        string       `json:"type"`
+	Resolutions []resolution `json:"resolutions"`
 }
 
-// resolution represents the width, height, and URL of a video resolution.
 type resolution struct {
-	URL    string `json:"url"`    // URL associated with the resolution.
-	Width  int    `json:"width"`  // Width of the video resolution.
-	Height int    `json:"height"` // Height of the video resolution.
-	Codec  string `json:"codec"`  // Codec identifier string.
+	URL    string `json:"url"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+	Codec  string `json:"codec"`
 }
 
-// resp represents a response with a token, message, and status.
 type resp struct {
-	Token   string `json:"token"`   // Token associated with the response.
-	Message string `json:"message"` // Message content of the response.
-	Status  int    `json:"status"`  // Status code of the response.
+	Token   string `json:"token"`
+	Message string `json:"message"`
+	Status  int    `json:"status"`
 }
 
-// peerTrack represents a combination of a WebRTC peer connection, a track, and a data channel.
 type peerTrack struct {
-	*webrtc.PeerConnection // WebRTC peer connection.
-	log                    logger.Logger
-	vt                     *webrtc.TrackLocalStaticSample
-	at                     *webrtc.TrackLocalStaticSample
-	targetURL              string
-	aChan                  chan gomedia.AudioPacket
-	aBuf                   buffer.Buffer
-	vChan                  chan gomedia.VideoPacket
-	vBuf                   buffer.Buffer
-	vflush                 chan struct{}
-	aflush                 chan struct{}
-	delay                  time.Duration
-	done                   chan struct{}
-	*webrtc.DataChannel    // Data channel associated with the peer.
+	*webrtc.PeerConnection
+	log       logger.Logger
+	vt        *webrtc.TrackLocalStaticSample
+	at        *webrtc.TrackLocalStaticSample
+	targetURL string
+	aChan     chan gomedia.AudioPacket
+	aBuf      buffer.Buffer
+	vChan     chan gomedia.VideoPacket
+	vBuf      buffer.Buffer
+	vflush    chan struct{}
+	aflush    chan struct{}
+	delay     time.Duration
+	done      chan struct{}
+	*webrtc.DataChannel
 }
 
 func writeVideoPacketsToPeer(pt *peerTrack,
@@ -86,23 +81,21 @@ func writeVideoPacketsToPeer(pt *peerTrack,
 	processPkt := func(pkt gomedia.VideoPacket) {
 		defer pkt.Release()
 
-		// Split NALUs and calculate total size
 		var nalus [][]byte
 		var nalusSize int
 		nalus, _ = nal.SplitNALUs(pkt.Data(), naluBuf)
 		for _, nalu := range nalus {
-			nalusSize += 4 + len(nalu) // start code (4 bytes) + nalu data
+			nalusSize += 4 + len(nalu) // 4-byte start code + NALU payload
 		}
 
-		// Resize vBuf once to fit all data; write codec headers directly into it
-		// to avoid an intermediate heap allocation on every keyframe.
+		// Single Resize per frame; codec params go in the same buffer so
+		// keyframes don't incur an extra heap allocation.
 		totalSize := nalusSize
 		if pkt.IsKeyFrame() {
 			totalSize += codecParametersSize(pkt.CodecParameters())
 		}
 		vBuf.Resize(totalSize)
 
-		// Write codec params (SPS/PPS/VPS) then NALUs directly into vBuf.
 		offset := 0
 		if pkt.IsKeyFrame() {
 			offset = writeCodecParameters(vBuf.Data(), pkt.CodecParameters())
@@ -157,12 +150,13 @@ func writeVideoPacketsToPeer(pt *peerTrack,
 						url = pktURL
 					}
 					if pktURL != url {
-						// Packet with new URL is being sent to WebRTC
+						// First packet after a stream switch — emit it, then exit
+						// the drain so subsequent packets are rendered normally.
 						processPkt(pkt)
 						url = pktURL
 						break loop
 					}
-					pkt.Release() // stale same-URL packet drained during flush
+					pkt.Release()
 				default:
 					break loop
 				}
@@ -172,7 +166,6 @@ func writeVideoPacketsToPeer(pt *peerTrack,
 			if url == "" {
 				url = pktURL
 			} else if pktURL != url {
-				// Packet with new URL is being sent to WebRTC
 				url = pktURL
 			}
 			processPkt(pkt)
@@ -234,12 +227,11 @@ func writeAudioPacketsToPeer(pt *peerTrack, aflush chan struct{}, aChan chan gom
 						url = pktURL
 					}
 					if pktURL != url {
-						// Packet with new URL is being sent to WebRTC
 						processPkt(pkt)
 						url = pktURL
 						break loop
 					}
-					pkt.Release() // stale same-URL packet drained during flush
+					pkt.Release()
 				default:
 					break loop
 				}

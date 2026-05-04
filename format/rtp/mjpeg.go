@@ -73,46 +73,38 @@ func (d *mjpegDemuxer) Close() {
 	d.packets = nil
 }
 
-// Demux returns the codec parameters for MJPEG
+// Demux reports the codec parameters. Frame dimensions start at a default and are
+// corrected when the first packet reveals the actual width/height.
 func (d *mjpegDemuxer) Demux() (codecs gomedia.CodecParametersPair, err error) {
-	// Get framerate from SDP if available, otherwise default to 30
-	fps := uint(30) //nolint:mnd // default framerate
+	fps := uint(30) //nolint:mnd // default framerate when SDP doesn't advertise one
 	if d.sdp.FPS > 0 {
 		fps = uint(d.sdp.FPS)
 	}
 
-	// Create initial codec parameters with default dimensions;
-	// updated when we receive the first packet with actual dimensions
-	d.codec = mjpeg.NewCodecParameters(320, 240, fps) //nolint:mnd // default dimensions
+	d.codec = mjpeg.NewCodecParameters(320, 240, fps) //nolint:mnd // placeholder dimensions, replaced on first frame
 	d.codec.SetStreamIndex(d.index)
 
 	codecs.VideoCodecParameters = d.codec
 	return
 }
 
-// ReadPacket reads and processes RTP/JPEG packets
 func (d *mjpegDemuxer) ReadPacket() (pkt gomedia.Packet, err error) {
-	// Return any buffered packets first
 	if len(d.packets) > 0 {
 		pkt = d.packets[0]
 		d.packets = d.packets[1:]
 		return
 	}
 
-	// Read RTP packet
 	if _, err = d.baseDemuxer.ReadPacket(); err != nil {
 		return
 	}
 
-	// Extract RTP marker bit (bit 7 of second RTP header byte)
-	d.markerBit = (d.baseDemuxer.payload.Data()[5] & 0x80) != 0 //nolint:mnd
+	d.markerBit = (d.baseDemuxer.payload.Data()[5] & 0x80) != 0 //nolint:mnd // RTP marker bit (RFC 3550 §5.1)
 
-	// Parse MJPEG RTP payload
 	if err = d.parseMJPEGPacket(); err != nil {
 		return
 	}
 
-	// Return packet if we have one ready
 	if len(d.packets) > 0 {
 		pkt = d.packets[0]
 		d.packets = d.packets[1:]
@@ -121,16 +113,16 @@ func (d *mjpegDemuxer) ReadPacket() (pkt gomedia.Packet, err error) {
 	return
 }
 
-// parseMJPEGPacket parses an MJPEG RTP packet according to RFC 2435
+// parseMJPEGPacket parses one RTP/JPEG fragment per RFC 2435 and appends the
+// reassembled frame to d.packets when the marker bit terminates it.
 func (d *mjpegDemuxer) parseMJPEGPacket() error {
 	if d.end-d.offset < mjpegHeaderSize {
 		return errors.New("incomplete MJPEG header")
 	}
 
-	// Parse main JPEG header (8 bytes, present in every fragment)
+	// Main JPEG header (8 bytes, present in every fragment) — RFC 2435 §3.1.
 	headerData := d.payload.Data()[d.offset : d.offset+mjpegHeaderSize]
 
-	// typeSpecific := headerData[0]
 	fragOffset := binary.BigEndian.Uint32([]byte{0, headerData[1], headerData[2], headerData[3]}) //nolint:mnd // 24-bit fragment offset
 	mjpegType := headerData[4]
 	quality := headerData[5]
@@ -139,7 +131,7 @@ func (d *mjpegDemuxer) parseMJPEGPacket() error {
 
 	d.offset += mjpegHeaderSize
 
-	// Restart marker header (types 64-127, present in every fragment)
+	// Restart marker header (types 64-127, present in every fragment) — RFC 2435 §3.1.3.
 	if mjpegType >= 64 && mjpegType <= 127 { //nolint:mnd
 		if d.end-d.offset < restartHeaderSize {
 			return errors.New("incomplete restart marker header")
@@ -147,14 +139,13 @@ func (d *mjpegDemuxer) parseMJPEGPacket() error {
 
 		restartData := d.payload.Data()[d.offset : d.offset+restartHeaderSize]
 		d.restartInterval = binary.BigEndian.Uint16(restartData[0:2])
-		// Bytes 2-3 contain F, L, and Restart Count fields used for partial
-		// decoding of restart intervals. We reassemble full frames using
-		// fragment offsets, so these fields are not needed.
+		// F, L, and Restart Count (bytes 2-3) matter only for partial-frame decode;
+		// we always reassemble full frames via fragment offsets and ignore them.
 
 		d.offset += restartHeaderSize
 	}
 
-	// Quantization table header (Q 128-255, only in first packet per RFC 2435 Section 3.1.8)
+	// Quantization table header (Q 128-255, first packet only) — RFC 2435 §3.1.8.
 	var qtableData []byte
 	var qtablePrecision uint8
 	if quality >= 128 && fragOffset == 0 { //nolint:mnd
@@ -163,7 +154,6 @@ func (d *mjpegDemuxer) parseMJPEGPacket() error {
 		}
 
 		qtableHeader := d.payload.Data()[d.offset : d.offset+qtableHeaderSize]
-		// MBZ := qtableHeader[0] // Must be zero
 		qtablePrecision = qtableHeader[1]
 		qtableLength := binary.BigEndian.Uint16(qtableHeader[2:4])
 
@@ -177,27 +167,24 @@ func (d *mjpegDemuxer) parseMJPEGPacket() error {
 			copy(qtableData, d.payload.Data()[d.offset:d.offset+int(qtableLength)])
 			d.offset += int(qtableLength)
 
-			// Cache tables for Q 128-254 (static mapping per RFC 2435)
-			if quality < 255 { //nolint:mnd
+			if quality < 255 { //nolint:mnd // Q 128-254 carries a static table we can cache
 				d.cachedQTables[quality] = cachedQTable{
 					precision: qtablePrecision,
 					data:      qtableData,
 				}
 			}
 		} else if quality < 255 { //nolint:mnd
-			// Length=0: use previously cached tables for this Q value
+			// Length=0: reuse previously cached tables for this Q value.
 			if cached, ok := d.cachedQTables[quality]; ok {
 				qtableData = cached.data
 				qtablePrecision = cached.precision
 			}
 		}
-		// Q=255 with Length=0 is invalid per RFC; silently fall through
-		// to computed tables as a best-effort degradation.
+		// Q=255 with Length=0 is invalid per RFC; fall through and use computed
+		// tables as a best-effort recovery instead of dropping the frame.
 	}
 
-	// Handle frame fragmentation with proper ordering
 	if fragOffset == 0 {
-		// Start of new frame - clear any previous fragments
 		d.fragments = d.fragments[:0]
 		d.timestamp = d.baseDemuxer.timestamp
 		d.lastTimestamp = d.baseDemuxer.timestamp
@@ -207,7 +194,6 @@ func (d *mjpegDemuxer) parseMJPEGPacket() error {
 		d.quality = quality
 		d.qtablePrecision = qtablePrecision
 
-		// Update codec parameters with actual frame dimensions
 		if d.codec != nil {
 			actualWidth := uint(width) * 8  //nolint:mnd // width is in 8-pixel blocks
 			actualHeight := uint(height) * 8 //nolint:mnd // height is in 8-pixel blocks
@@ -229,7 +215,6 @@ func (d *mjpegDemuxer) parseMJPEGPacket() error {
 		}
 	}
 
-	// Add this fragment to our collection
 	payloadData := make([]byte, d.end-d.offset)
 	copy(payloadData, d.payload.Data()[d.offset:d.end])
 
@@ -238,7 +223,6 @@ func (d *mjpegDemuxer) parseMJPEGPacket() error {
 		data:       payloadData,
 	})
 
-	// If this is the last fragment (RTP marker bit set), assemble the complete frame
 	if d.markerBit {
 		if err := d.assembleFrame(); err != nil {
 			return err
@@ -248,32 +232,29 @@ func (d *mjpegDemuxer) parseMJPEGPacket() error {
 	return nil
 }
 
-// assembleFrame assembles all fragments into a complete JPEG frame
+// assembleFrame sorts the buffered fragments by offset, concatenates them onto
+// the reconstructed JPEG headers, and emits the complete frame as an MJPEG packet.
 func (d *mjpegDemuxer) assembleFrame() error {
 	if len(d.fragments) == 0 {
 		return errors.New("no fragments to assemble")
 	}
 
-	// Sort fragments by offset to ensure correct order
 	sort.Slice(d.fragments, func(i, j int) bool {
 		return d.fragments[i].fragOffset < d.fragments[j].fragOffset
 	})
 
-	// Check that we have the first fragment (offset 0)
 	if d.fragments[0].fragOffset != 0 {
-		// Missing start of frame, discard
+		// Missing start-of-frame: drop the partial frame.
 		d.fragments = d.fragments[:0]
 		return nil
 	}
 
-	// Calculate total size for allocation
 	totalSize := len(d.frameHeaders)
 	for _, frag := range d.fragments {
 		totalSize += len(frag.data)
 	}
-	totalSize += 2 //nolint:mnd // space for potential EOI marker
+	totalSize += 2 //nolint:mnd // reserve 2 bytes for a trailing EOI marker
 
-	// Allocate from ring buffer or fall back to heap
 	var data []byte
 	var handle *buffer.SlotHandle
 
@@ -284,14 +265,12 @@ func (d *mjpegDemuxer) assembleFrame() error {
 		data = make([]byte, totalSize)
 	}
 
-	// Write JPEG headers
 	off := copy(data, d.frameHeaders)
 
-	// Write all fragment data in order, checking for gaps
 	expectedOffset := uint32(0)
 	for _, frag := range d.fragments {
 		if frag.fragOffset != expectedOffset {
-			// Gap in fragments, discard frame
+			// Gap between fragments: drop the incomplete frame.
 			d.fragments = d.fragments[:0]
 			handle.Release() // no-op if nil
 			return nil
@@ -300,15 +279,14 @@ func (d *mjpegDemuxer) assembleFrame() error {
 		expectedOffset += uint32(len(frag.data))
 	}
 
-	// Add EOI marker if not present
-	if off < 2 || data[off-2] != 0xFF || data[off-1] != 0xD9 { //nolint:mnd // EOI = FF D9
+	// Append EOI (FF D9) if the payload didn't already end with one.
+	if off < 2 || data[off-2] != 0xFF || data[off-1] != 0xD9 { //nolint:mnd
 		data[off] = 0xFF
-		data[off+1] = 0xD9 //nolint:mnd // EOI marker
-		off += 2            //nolint:mnd
+		data[off+1] = 0xD9 //nolint:mnd
+		off += 2           //nolint:mnd
 	}
 	data = data[:off]
 
-	// Create MJPEG packet
 	ts := (time.Duration(d.timestamp) * time.Second) / time.Duration(jpegClockRate)
 
 	packet := mjpeg.NewPacket(
@@ -328,29 +306,24 @@ func (d *mjpegDemuxer) assembleFrame() error {
 	return nil
 }
 
-// reconstructJPEGHeaders reconstructs JPEG headers according to RFC 2435 Appendix B
+// reconstructJPEGHeaders rebuilds the SOI/APP0/DQT/DRI/SOF0/DHT/SOS headers that
+// RTP/JPEG strips from the wire (RFC 2435 Appendix B). The returned bytes are
+// prepended to the reassembled scan data to produce a playable JPEG frame.
 func reconstructJPEGHeaders(mjpegType, width, height, quality uint8,
 	restartInterval uint16, precision uint8, qtableData []byte) []byte {
 	var headers bytes.Buffer
 
-	// SOI marker
-	headers.Write([]byte{0xFF, 0xD8}) //nolint:mnd
-
-	// APP0 JFIF segment for compatibility
+	headers.Write([]byte{0xFF, 0xD8}) //nolint:mnd // SOI
 	headers.Write(createAPP0Segment())
 
-	// Quantization tables
 	if quality >= 128 && len(qtableData) > 0 { //nolint:mnd
-		// Wrap raw table data from RTP Q-table header in DQT segments
 		headers.Write(createDQTFromRawTables(precision, qtableData))
 	} else {
-		// Generate standard quantization tables based on quality factor
 		lqt, cqt := generateQuantizationTables(quality)
 		headers.Write(createDQTSegment(lqt, 0))
 		headers.Write(createDQTSegment(cqt, 1))
 	}
 
-	// Add DRI segment if restart interval is present
 	if restartInterval > 0 {
 		headers.Write(createDRISegment(restartInterval))
 	}
@@ -429,8 +402,8 @@ func generateQuantizationTables(quality uint8) ([]byte, []byte) {
 	lqt := make([]byte, 64) //nolint:mnd
 	cqt := make([]byte, 64) //nolint:mnd
 
-	for i := 0; i < 64; i++ { //nolint:mnd
-		lq := (jpegLumaQuantizer[i]*scaleFactor + 50) / 100 //nolint:mnd
+	for i := range 64 { //nolint:mnd
+		lq := (jpegLumaQuantizer[i]*scaleFactor + 50) / 100   //nolint:mnd
 		cq := (jpegChromaQuantizer[i]*scaleFactor + 50) / 100 //nolint:mnd
 
 		if lq < 1 {

@@ -41,7 +41,9 @@ func (esds ElemStreamDesc) Len() (n int) {
 
 func encodeLength(v uint32) []byte {
 	b := make([]byte, 4)
-	b[3] = byte(v & 0x7F) // младшие 7 бит
+	// MP4 descriptor size is a sequence of 4 bytes; each byte carries 7 payload bits,
+	// with the high bit set on all but the last byte (ISO/IEC 14496-1 §8.3.3).
+	b[3] = byte(v & 0x7F)
 	b[2] = 0x80 | byte((v>>7)&0x7F)
 	b[1] = 0x80 | byte((v>>14)&0x7F)
 	b[0] = 0x80 | byte((v>>21)&0x7F)

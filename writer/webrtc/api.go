@@ -13,7 +13,11 @@ import (
 var api *webrtc.API
 var Conf webrtc.Configuration
 
-// Init initializes the WebRTC configuration and API.
+// Init builds the shared pion API with an ICE UDP mux on minPort and
+// registers every H.264/H.265 profile-level-id + RTX payload the server is
+// willing to answer with, so browsers can negotiate whichever matches.
+// hosts lets the server advertise 1:1 NAT public addresses when running
+// behind a mapped UDP port.
 func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer) (err error) {
 	udpListener, err := net.ListenPacket("udp", fmt.Sprintf(":%d", minPort))
 	if err != nil {
@@ -21,7 +25,6 @@ func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer
 	}
 	udpMux := webrtc.NewICEUDPMux(nil, udpListener)
 
-	// Configure WebRTC settings
 	Conf = webrtc.Configuration{
 		ICEServers:           iceServers,
 		ICETransportPolicy:   webrtc.ICETransportPolicyAll,
@@ -35,7 +38,6 @@ func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer
 
 	m := new(webrtc.MediaEngine)
 
-	// Default Pion Audio Codecs
 	for _, codec := range []webrtc.RTPCodecParameters{
 		{
 			RTPCodecCapability: webrtc.RTPCodecCapability{
@@ -426,31 +428,19 @@ func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer
 		}
 	}
 
-	// Create a new interceptor.Registry
 	i := &interceptor.Registry{}
 	if err := webrtc.RegisterDefaultInterceptors(m, i); err != nil {
 		return err
 	}
 
-	// Create a new SettingEngine
 	var s webrtc.SettingEngine
-
 	s.SetICEUDPMux(udpMux)
 
-	// if minPort > 0 && maxPort > 0 && maxPort > minPort {
-	// 	logger.Default.Infof("WEBRTC", "Setting port range from %d to %d", minPort, maxPort)
-	// 	if err := s.SetEphemeralUDPPortRange(minPort+1, maxPort); err != nil {
-	// 		panic(err)
-	// 	}
-	// }
-
-	// Set host candidates if provided
 	if len(hosts) > 0 {
 		logger.Default.Infof("WEBRTC", "Setting host candidates to %v", hosts)
 		s.SetNAT1To1IPs(hosts, webrtc.ICECandidateTypeHost)
 	}
 
-	// Create a new WebRTC API with the configured settings
 	api = webrtc.NewAPI(webrtc.WithMediaEngine(m), webrtc.WithInterceptorRegistry(i), webrtc.WithSettingEngine(s))
 
 	return nil

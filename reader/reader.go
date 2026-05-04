@@ -13,15 +13,12 @@ import (
 	"github.com/ugparu/gomedia/utils/logger"
 )
 
-// Constants for configuring the reader.
 const (
-	maxReconnectInterval = time.Second * 8
+	maxReconnectInterval = time.Second * 8 // exponential backoff cap for reconnect
 )
 
-// Option is a functional option for configuring a reader.
 type Option func(*reader)
 
-// WithLogger sets the logger for the reader.
 func WithLogger(l logger.Logger) Option {
 	return func(r *reader) { r.log = l }
 }
@@ -30,21 +27,22 @@ func WithRTSPParams(params ...rtsp.DemuxerOption) Option {
 	return func(r *reader) { r.opts = params }
 }
 
-// reader is an internal structure implementing the gomedia.Reader interface.
+// reader fans packets from many RTSP demuxers (one per URL) into a single
+// channel. Each demuxer runs in its own goroutine; Step only handles URL
+// add/remove.
 type reader struct {
-	lifecycle.AsyncManager[*reader] // Embedding an AsyncManager for asynchronous operations.
-	log                             logger.Logger
-	newDmx                          func(string, ...rtsp.DemuxerOption) gomedia.Demuxer
-	packets                         chan gomedia.Packet
-	addURLCh                        chan string
-	removeURLCh                     chan string
-	dmxStoppers                     map[string]chan struct{}
-	name                            string
-	mu                              sync.Mutex
-	opts                            []rtsp.DemuxerOption
+	lifecycle.AsyncManager[*reader]
+	log         logger.Logger
+	newDmx      func(string, ...rtsp.DemuxerOption) gomedia.Demuxer
+	packets     chan gomedia.Packet
+	addURLCh    chan string
+	removeURLCh chan string
+	dmxStoppers map[string]chan struct{}
+	name        string
+	mu          sync.Mutex
+	opts        []rtsp.DemuxerOption
 }
 
-// NewRTSP creates a new RTSP reader with the specified channel size, reader options, and demuxer options.
 func NewRTSP(chanSize int, opts ...Option) gomedia.Reader {
 	rdr := &reader{
 		AsyncManager: nil,
@@ -107,13 +105,11 @@ func (rdr *reader) repackPackets(src string, stopCh <-chan struct{}) {
 			continue
 		}
 
-		// If the packet is nil, return.
 		if pkt == nil {
 			continue
 		}
 		rdr.log.Tracef(rdr, "Read new packet %v", pkt)
 
-		// Increment the packet count.
 		pktCnt++
 
 		switch pkt.(type) {
@@ -128,7 +124,6 @@ func (rdr *reader) repackPackets(src string, stopCh <-chan struct{}) {
 			}
 
 			videoOffsetHandler.lastPacket.SetDuration(pkt.Timestamp() - videoOffsetHandler.lastPacket.Timestamp())
-			// pkt.SetStartTime(videoOffsetHandler.lastPacket.StartTime().Add(videoOffsetHandler.lastPacket.Duration()))
 			videoOffsetHandler.lastDuration = videoOffsetHandler.lastPacket.Duration()
 
 			select {
@@ -149,7 +144,6 @@ func (rdr *reader) repackPackets(src string, stopCh <-chan struct{}) {
 				pkt.Release()
 				continue
 			}
-			// pkt.SetStartTime(audioOffsetHandler.lastPacket.StartTime().Add(audioOffsetHandler.lastPacket.Duration()))
 			audioOffsetHandler.lastDuration = audioOffsetHandler.lastPacket.Duration()
 
 			select {
@@ -167,21 +161,21 @@ func (rdr *reader) repackPackets(src string, stopCh <-chan struct{}) {
 	}
 }
 
-// handleReadError handles packet read errors by closing the current demuxer,
-// waiting to reconnect, and creating a new demuxer.
+// handleReadError tears down the failing demuxer, sleeps for recInterval, and
+// opens a new one. On repeated failure the interval doubles up to
+// maxReconnectInterval and further log messages are silenced to avoid spam.
+// Offset handlers are rewound on success so timestamps stay monotonic across
+// the reconnection boundary.
 func (rdr *reader) handleReadError(dmx gomedia.Demuxer, src string, recInterval time.Duration,
 	stopCh <-chan struct{}, videoHandler, audioHandler *offsetHandler, readErr error) (time.Duration, gomedia.Demuxer) {
-	// Log only if we haven't reached the max reconnect interval yet
 	if recInterval < maxReconnectInterval {
 		rdr.log.Warningf(rdr, "Packet read error: %s", readErr.Error())
 		rdr.log.Infof(rdr, "Restarting demuxer with %.fs interval", recInterval.Seconds())
 	}
 
 	rdr.log.Debug(rdr, "Closing demuxer")
-	// Close the demuxer
 	dmx.Close()
 
-	// Wait for reconnect interval or stop
 	select {
 	case <-time.After(recInterval):
 	case <-stopCh:
@@ -189,13 +183,11 @@ func (rdr *reader) handleReadError(dmx gomedia.Demuxer, src string, recInterval 
 	}
 
 	rdr.log.Debug(rdr, "Creating new demuxer")
-	// Create a new demuxer and start it
 	reconOpts := append([]rtsp.DemuxerOption{rtsp.WithLogger(rdr.log)}, rdr.opts...)
 	dmx = rdr.newDmx(src, reconOpts...)
 
 	rdr.log.Debug(rdr, "Starting demuxing")
 	par, err := dmx.Demux()
-	// Handle demux error
 	if err != nil {
 		if recInterval < maxReconnectInterval {
 			rdr.log.Warningf(rdr, "Failed to start demuxer: %s", err.Error())
@@ -206,25 +198,20 @@ func (rdr *reader) handleReadError(dmx gomedia.Demuxer, src string, recInterval 
 	rdr.log.Infof(rdr, "Demuxer started. Video: %t, Audio: %t",
 		par.VideoCodecParameters != nil, par.AudioCodecParameters != nil)
 
-	// Reset handlers after successful reconnect
 	videoHandler.RecalcForGap()
 	audioHandler.RecalcForGap()
 
-	return time.Second, dmx // Reset interval on success
+	return time.Second, dmx
 }
 
-// updateReconnectInterval increases the reconnect interval exponentially up to the maximum
 func (rdr *reader) updateReconnectInterval(current time.Duration) time.Duration {
-	// Only increase and log if we're below the maximum
 	if current >= maxReconnectInterval {
 		return current
 	}
 
 	const scaleFactor = 2
-	// Double the interval
 	newInterval := current * scaleFactor
 
-	// Check if we've exceeded the maximum after doubling
 	if newInterval >= maxReconnectInterval {
 		newInterval = maxReconnectInterval
 		rdr.log.Infof(rdr, "Max reconnect interval reached. Further attempts will be silent")
@@ -233,7 +220,6 @@ func (rdr *reader) updateReconnectInterval(current time.Duration) time.Duration 
 	return newInterval
 }
 
-// Step performs a single step of reading from the RTSP stream.
 func (rdr *reader) Step(stopCh <-chan struct{}) (err error) {
 	rdr.log.Trace(rdr, "Running reader step")
 	select {
@@ -266,7 +252,6 @@ func (rdr *reader) Step(stopCh <-chan struct{}) (err error) {
 	return
 }
 
-// Read initiates the demuxer and returns codec parameters.
 func (rdr *reader) Read() {
 	startFunc := func(*reader) error {
 		return nil
@@ -274,7 +259,8 @@ func (rdr *reader) Read() {
 	_ = rdr.Start(startFunc)
 }
 
-// Release closes the demuxer and the packets channel.
+// Release signals every demuxer goroutine to stop and drains the packet
+// channel so ring-buffer slot handles are released instead of leaked.
 func (rdr *reader) Release() { //nolint: revive
 	rdr.mu.Lock()
 	defer rdr.mu.Unlock()
@@ -286,7 +272,6 @@ func (rdr *reader) Release() { //nolint: revive
 		delete(rdr.dmxStoppers, src)
 	}
 
-	// Drain remaining ring-backed packets to release their SlotHandles.
 	for {
 		select {
 		case pkt := <-rdr.packets:
@@ -299,12 +284,10 @@ func (rdr *reader) Release() { //nolint: revive
 	}
 }
 
-// Packets returns the channel for receiving media packets.
 func (rdr *reader) Packets() <-chan gomedia.Packet {
 	return rdr.packets
 }
 
-// String returns a string representation of the reader.
 func (rdr *reader) String() string {
 	return rdr.name
 }

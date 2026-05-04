@@ -3,6 +3,7 @@ package webrtc
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/ugparu/gomedia"
@@ -17,28 +18,30 @@ type stream struct {
 	codecPar gomedia.CodecParametersPair
 }
 
-// sortedStreams is a map of sorted stream URLs based on their sizes.
+// sortedStreams maintains per-source streams sorted ascending by resolution so
+// ABR clients see the smallest stream first. pendingPeers holds peers whose
+// target stream has momentarily vanished (e.g. during a source restart) and
+// lets them rejoin as soon as any stream reappears.
 type sortedStreams struct {
 	log            logger.Logger
-	sortedURLs     []string            // Sorted list of stream URLs based on their sizes.
-	streams        map[string]*stream  // Map of streams indexed by their URLs.
-	pendingPeers   map[*peerTrack]bool // Peers waiting for a stream (when last stream was removed)
-	failedPeers    []*peerTrack        // Peers that failed seeding and need full cleanup by the caller.
+	sortedURLs     []string
+	streams        map[string]*stream
+	pendingPeers   map[*peerTrack]bool
+	failedPeers    []*peerTrack
 	targetDuration time.Duration
 	videoCodecType gomedia.CodecType
 	signaling      SignalingHandler
 }
 
-// Exists checks if a stream URL exists in the sortedStreams.
 func (ss *sortedStreams) Exists(url string) bool {
 	_, found := ss.streams[url]
 	return found
 }
 
-// Update updates codec parameters for an existing stream.
-// When the video codec type changes (e.g. H264 → H265), all peers on the stream are returned
-// for disconnection because their WebRTC tracks are bound to the old codec MIME type.
-// Returns a list of peers to disconnect and a boolean indicating if a change was made.
+// Update rebinds codec parameters on a live stream. A change in video codec
+// type (H264 ↔ H265) returns every attached peer for tear-down — WebRTC
+// tracks are pinned to the negotiated MIME type and cannot be repointed.
+// Resolution changes only flush peer buffers so the next keyframe re-syncs.
 func (ss *sortedStreams) Update(newURL string, newCodecPar gomedia.CodecParameters) ([]*peerTrack, bool) {
 	stream, found := ss.streams[newURL]
 	if !found {
@@ -101,13 +104,14 @@ func (ss *sortedStreams) Update(newURL string, newCodecPar gomedia.CodecParamete
 		return nil, false
 	}
 
-	// Sort the URLs by resolution
 	ss.sortURLsByResolution()
 
 	return nil, true
 }
 
-// sortURLsByResolution sorts the sortedURLs slice by video resolution (smallest first).
+// sortURLsByResolution performs a single insertion-sort pass since only the
+// just-updated stream's position can be wrong; O(n) is plenty for the few
+// streams a single source set contains.
 func (ss *sortedStreams) sortURLsByResolution() {
 	for i := len(ss.sortedURLs) - 1; i >= 1; i-- {
 		oldResolution := ss.streams[ss.sortedURLs[i-1]].codecPar.VideoCodecParameters.Width() *
@@ -123,15 +127,16 @@ func (ss *sortedStreams) sortURLsByResolution() {
 	}
 }
 
-// Add adds a new stream URL with its codec parameters to the sortedStreams.
-// Requires video codec parameters - streams without video codec parameters are not created.
-// Returns a list of peers that were moved from pendingPeers and need setStreamUrl notification.
+// Add creates the stream once its video codec parameters are known. Audio-only
+// first packets are ignored — without video parameters there is nothing to
+// negotiate against a WebRTC offer. Any peers parked in pendingPeers (from
+// a previous Remove) are migrated onto the new stream and returned so the
+// caller can notify them via setStreamUrl.
 func (ss *sortedStreams) Add(url string, newCodecPar gomedia.CodecParameters) []*peerTrack {
 	if _, found := ss.streams[url]; found {
 		return nil
 	}
 
-	// Only create streams with video codec parameters
 	videoPar, ok := newCodecPar.(gomedia.VideoCodecParameters)
 	if !ok || videoPar == nil {
 		return nil
@@ -159,11 +164,9 @@ func (ss *sortedStreams) Add(url string, newCodecPar gomedia.CodecParameters) []
 
 	ss.sortURLsByResolution()
 
-	// Move pending peers to this stream
 	var movedPeers []*peerTrack
 	if len(ss.pendingPeers) > 0 {
 		for peer := range ss.pendingPeers {
-			// Flush stale packets from peer channels before adding to new stream
 			const flushDuration = time.Second * 3
 			timer := time.After(flushDuration)
 			vFlushed := false
@@ -181,17 +184,19 @@ func (ss *sortedStreams) Add(url string, newCodecPar gomedia.CodecParameters) []
 				}
 			}
 
-			// Mark as seeded=true because these are already connected peers switching streams
-			// They will receive setStreamUrl notification when packets with new URL are sent to WebRTC
+			// Mark seeded=true: these peers already completed WebRTC negotiation on a
+			// prior stream, so they only need setStreamUrl, not a fresh seed.
 			ss.streams[url].tracks[peer] = true
 			movedPeers = append(movedPeers, peer)
-			delete(ss.pendingPeers, peer) // Remove moved peers individually
+			delete(ss.pendingPeers, peer)
 		}
 	}
 	return movedPeers
 }
 
-// Remove removes a stream URL from the sortedStreams.
+// Remove migrates attached peers to the adjacent stream in sort order so
+// clients keep playing during a source rotation. When no other stream
+// exists the peers are parked in pendingPeers until Add brings one back.
 func (ss *sortedStreams) Remove(removeURL string) {
 	str, found := ss.streams[removeURL]
 	if !found {
@@ -216,13 +221,10 @@ func (ss *sortedStreams) Remove(removeURL string) {
 	}
 
 	if changeURL == "" {
-		// Instead of closing peers, save them to pending so they can be moved to the next stream
 		if ss.pendingPeers == nil {
 			ss.pendingPeers = make(map[*peerTrack]bool)
 		}
-		for peer, seeded := range str.tracks {
-			ss.pendingPeers[peer] = seeded
-		}
+		maps.Copy(ss.pendingPeers, str.tracks)
 		for peer := range str.toAdd {
 			ss.pendingPeers[peer] = true
 		}
@@ -247,15 +249,16 @@ func (ss *sortedStreams) Remove(removeURL string) {
 		}
 	}
 
-	// Clean up buffer before deletion to prevent memory leaks
 	str.buffer.Close()
 
 	delete(ss.streams, removeURL)
 	ss.sortedURLs = append(ss.sortedURLs[:index], ss.sortedURLs[index+1:]...)
 }
 
+// Insert attaches a freshly connected peer to its chosen stream or parks it
+// in pendingPeers when the stream is absent (seeded=false so writePacket
+// will later send the initial keyframe burst).
 func (ss *sortedStreams) Insert(pt *peerTrack) (err error) {
-	// If peer has a targetURL and such stream exists, attach peer to that stream
 	if str, ok := ss.streams[pt.targetURL]; ok && str != nil {
 		str.tracks[pt] = false
 		return nil
@@ -263,7 +266,6 @@ func (ss *sortedStreams) Insert(pt *peerTrack) (err error) {
 		return fmt.Errorf("unknown URL: %s", pt.targetURL)
 	}
 
-	// No streams available - add to pending
 	if ss.pendingPeers == nil {
 		ss.pendingPeers = make(map[*peerTrack]bool)
 	}
@@ -281,13 +283,11 @@ func (ss *sortedStreams) Move(pu *peerURL) (err error) {
 	return nil
 }
 
-// Define sentinel errors
 var (
 	ErrPacketTooSmall = errors.New("packet data too small")
 	ErrStreamNotFound = errors.New("stream not found for URL")
 )
 
-// validatePacket validates the input packet and returns the corresponding stream
 func (ss *sortedStreams) validatePacket(pkt gomedia.Packet) (*stream, error) {
 	if pkt == nil {
 		return nil, &utils.NilPacketError{}
@@ -306,7 +306,6 @@ func (ss *sortedStreams) validatePacket(pkt gomedia.Packet) (*stream, error) {
 	return str, nil
 }
 
-// processPendingTracks processes tracks that are pending addition to the stream
 func (ss *sortedStreams) processPendingTracks(str *stream, pkt gomedia.Packet) []*peerTrack {
 	var removeFromToAdd []*peerTrack
 
@@ -320,25 +319,27 @@ func (ss *sortedStreams) processPendingTracks(str *stream, pkt gomedia.Packet) [
 	return removeFromToAdd
 }
 
-// canAddTrackToPeer determines if a track can be added to a peer
+// canAddTrackToPeer reports whether seed data up to the peer's delay window
+// already contains a keyframe the track can decode from. It also returns the
+// buffer slice the caller should splice in, potentially prepended with seed
+// frames so the player starts at a valid IDR rather than mid-GoP.
 func (ss *sortedStreams) canAddTrackToPeer(str *stream, pkt gomedia.Packet, pu *peerURL) (bool, []gomedia.Packet) {
 	seedBuf, peerBuf := str.buffer.GetBuffer(time.Now().Add(-pu.delay))
 
-	// Case 1: Empty buffer requires a key frame in the current packet
 	if len(peerBuf) == 0 {
 		return ss.hasKeyFrame(pkt), peerBuf
 	}
 
-	// Analyze last 3 from seed buffer and first 3 video frames from peer buffer
+	const lookback = 3
 	seedStart := 0
-	if len(seedBuf) > 3 {
-		seedStart = len(seedBuf) - 3
+	if len(seedBuf) > lookback {
+		seedStart = len(seedBuf) - lookback
 	}
 	seedFrames := seedBuf[seedStart:]
 
 	peerVideoCount := 0
-	var keyframeInSeedIdx int = -1
-	var keyframeInPeerIdx int = -1
+	keyframeInSeedIdx := -1
+	keyframeInPeerIdx := -1
 
 	for i, vp := range seedFrames {
 		if vp.IsKeyFrame() {
@@ -355,7 +356,7 @@ func (ss *sortedStreams) canAddTrackToPeer(str *stream, pkt gomedia.Packet, pu *
 					break
 				}
 				peerVideoCount++
-				if peerVideoCount >= 3 {
+				if peerVideoCount >= lookback {
 					break
 				}
 			}
@@ -363,7 +364,6 @@ func (ss *sortedStreams) canAddTrackToPeer(str *stream, pkt gomedia.Packet, pu *
 	}
 
 	if keyframeInSeedIdx >= 0 {
-		// Prepend seedBuf from keyframe to peerBuf
 		newPeerBuf := make([]gomedia.Packet, 0, len(seedBuf)-keyframeInSeedIdx+len(peerBuf))
 		for _, vp := range seedBuf[keyframeInSeedIdx:] {
 			newPeerBuf = append(newPeerBuf, vp)
@@ -377,15 +377,12 @@ func (ss *sortedStreams) canAddTrackToPeer(str *stream, pkt gomedia.Packet, pu *
 	return false, nil
 }
 
-// hasKeyFrame checks if the packet is a video key frame
 func (ss *sortedStreams) hasKeyFrame(pkt gomedia.Packet) bool {
 	vPkt, ok := pkt.(gomedia.VideoPacket)
 	return ok && vPkt.IsKeyFrame()
 }
 
-// moveTrackToStream moves a track to a specific stream
 func (ss *sortedStreams) moveTrackToStream(str *stream, pu *peerURL, peerBuf []gomedia.Packet) {
-	// Remove from all other streams
 	for _, curPeers := range ss.streams {
 		delete(curPeers.tracks, pu.peerTrack)
 	}
@@ -405,10 +402,9 @@ func (ss *sortedStreams) moveTrackToStream(str *stream, pu *peerURL, peerBuf []g
 
 	const sendTimeout = time.Millisecond * 100
 	for _, bufPkt := range peerBuf {
-		// Check if peer is closed during move
 		select {
 		case <-pu.done:
-			return // Peer closed during move
+			return
 		default:
 		}
 
@@ -432,10 +428,8 @@ func (ss *sortedStreams) moveTrackToStream(str *stream, pu *peerURL, peerBuf []g
 		}
 	}
 
-	// Add to current stream
 	str.tracks[pu.peerTrack] = true
 
-	// Send stream moved notification with token (if any) after moving the track
 	if pu.peerTrack != nil && pu.peerTrack.DataChannel != nil {
 		bytes, err := ss.signaling.BuildStreamMoved(pu.Token, pu.URL)
 		if err != nil {
@@ -443,10 +437,8 @@ func (ss *sortedStreams) moveTrackToStream(str *stream, pu *peerURL, peerBuf []g
 			return
 		}
 
-		// Check if peer is already closed before sending
 		select {
 		case <-pu.done:
-			// Peer already closed
 			return
 		default:
 			ss.log.Infof(ss, "Sending stream moved message %s", bytes)
@@ -457,7 +449,6 @@ func (ss *sortedStreams) moveTrackToStream(str *stream, pu *peerURL, peerBuf []g
 	}
 }
 
-// processExistingTracks processes tracks that are already part of the stream
 func (ss *sortedStreams) processExistingTracks(str *stream, pkt gomedia.Packet) error {
 	for peer, seeded := range str.tracks {
 		if !seeded {
@@ -474,9 +465,10 @@ func (ss *sortedStreams) processExistingTracks(str *stream, pkt gomedia.Packet) 
 	return nil
 }
 
-// seedTrack initializes a new track with buffer data
+// seedTrack primes a freshly connected peer with the current GoP so the
+// decoder can start on a keyframe. Seed frames get a tiny synthetic duration
+// so the player flushes them quickly and converges on real-time playback.
 func (ss *sortedStreams) seedTrack(str *stream, peer *peerTrack) error {
-	// Check for nil DataChannel before proceeding
 	if peer.DataChannel == nil {
 		return errors.New("peer data channel is nil")
 	}
@@ -495,7 +487,6 @@ func (ss *sortedStreams) seedTrack(str *stream, peer *peerTrack) error {
 		}
 	}
 
-	// Buffer packets for the peer
 	for _, bufPkt := range peerBuf {
 		switch packet := bufPkt.(type) {
 		case gomedia.VideoPacket:
@@ -533,11 +524,13 @@ func (ss *sortedStreams) seedTrack(str *stream, peer *peerTrack) error {
 	return nil
 }
 
-// bufferPacketForPeer adds a packet to peer's buffer
+// bufferPacketForPeer forwards a clone into the peer's channel; if the
+// channel is full the clone is dropped rather than blocking the writer
+// goroutine — in real-time delivery a stale frame is worse than a gap.
 func (ss *sortedStreams) bufferPacketForPeer(peer *peerTrack, pkt gomedia.Packet) {
 	select {
 	case <-peer.done:
-		return // peer already closed
+		return
 	default:
 	}
 
@@ -548,7 +541,7 @@ func (ss *sortedStreams) bufferPacketForPeer(peer *peerTrack, pkt gomedia.Packet
 		case peer.vChan <- clonePkt:
 		case <-peer.done:
 			clonePkt.Release()
-		default: // drop if full — real-time streaming, stale frames useless
+		default:
 			clonePkt.Release()
 		}
 	case gomedia.AudioPacket:
@@ -563,36 +556,29 @@ func (ss *sortedStreams) bufferPacketForPeer(peer *peerTrack, pkt gomedia.Packet
 	}
 }
 
-// writePacket processes a packet and distributes it to relevant peers
 func (ss *sortedStreams) writePacket(pkt gomedia.Packet) (err error) {
-	// Validate input packet
 	str, err := ss.validatePacket(pkt)
 	if err != nil {
 		if pkt != nil {
 			pkt.Release()
 		}
-		// Ignore specific errors that shouldn't propagate
 		if errors.Is(err, ErrPacketTooSmall) || errors.Is(err, ErrStreamNotFound) {
 			return nil
 		}
 		return err
 	}
 
-	// Add packet to buffer; if dropped (pre-first-keyframe) release and bail —
-	// distributing a pre-keyframe packet to peers serves no purpose.
+	// AddPacket returns false until the first keyframe — drop anything
+	// before that point, no decoder can use it without a seed.
 	if stored := str.buffer.AddPacket(pkt); !stored {
 		pkt.Release()
 		return nil
 	}
 
-	// Process pending tracks
 	removeFromToAdd := ss.processPendingTracks(str, pkt)
-
-	// Remove processed tracks from pending list
 	for _, pt := range removeFromToAdd {
 		delete(str.toAdd, pt)
 	}
 
-	// Process existing tracks
 	return ss.processExistingTracks(str, pkt)
 }

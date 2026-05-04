@@ -26,10 +26,8 @@ func generateUID() string {
 	return hex.EncodeToString(b[:])
 }
 
-// Option is a functional option for configuring an hlsWriter.
 type Option func(*hlsWriter)
 
-// WithLogger sets the logger for the HLS writer.
 func WithLogger(l logger.Logger) Option {
 	return func(h *hlsWriter) { h.log = l }
 }
@@ -49,15 +47,17 @@ func WithVersion(v int) Option {
 	return func(h *hlsWriter) { h.version = v }
 }
 
-// WithKeyframeSplit controls segment rotation strategy for the underlying
-// HLS muxers. When false (default) segments rotate strictly on target
-// duration, which may split mid-GOP. When true, rotation is deferred to the
-// next video keyframe after the target duration is reached.
+// WithKeyframeSplit defers segment rotation to the next video keyframe
+// after the target duration expires. Default (false) rotates strictly on
+// duration, which may split mid-GoP and hurt seek accuracy.
 func WithKeyframeSplit(enabled bool) Option {
 	return func(h *hlsWriter) { h.keyframeSplit = enabled }
 }
 
-// hlsWriter is a struct representing an HLS (HTTP Live Streaming) writer.
+// hlsWriter fans media packets to one HLS muxer per source URL and publishes
+// a master playlist across all muxers. Each muxer rotates on segmentDuration
+// and retains segmentCount live segments; reads are served under mu so the
+// Step goroutine can safely rebuild muxerIDs when sources are added/removed.
 type hlsWriter struct {
 	lifecycle.AsyncManager[*hlsWriter]
 	log             logger.Logger
@@ -247,11 +247,6 @@ func (hlsw *hlsWriter) Write() {
 	_ = hlsw.Start(startFunc)
 }
 
-// Step performs a single step in the processing of media data.
-// It listens to the stopCh channel for termination signals.
-// If stopCh is closed, it returns a BreakError.
-// If a media packet is received on inpPktCh, it writes the packet to the associated HLS Muxer.
-// If a map of codec parameters is received on paramsChan, it updates the HLS parameters.
 func (hlsw *hlsWriter) Step(stopCh <-chan struct{}) (err error) {
 	select {
 	case <-stopCh:
@@ -295,14 +290,12 @@ func (hlsw *hlsWriter) Step(stopCh <-chan struct{}) (err error) {
 	return nil
 }
 
-// getMasterPlaylist returns the master playlist string stored in the innerHLS instance.
 func (hlsw *hlsWriter) GetMasterPlaylist() (string, error) {
 	hlsw.mu.RLock()
 	defer hlsw.mu.RUnlock()
 	return hlsw.master, nil
 }
 
-// GetIndexM3u8 retrieves the M3U8 playlist for a specific muxer UID.
 func (hlsw *hlsWriter) GetIndexM3u8(ctx context.Context, uid string, needMSN int64, needPart int8) (string, error) {
 	hlsw.mu.RLock()
 	defer hlsw.mu.RUnlock()
@@ -313,7 +306,6 @@ func (hlsw *hlsWriter) GetIndexM3u8(ctx context.Context, uid string, needMSN int
 	return mux.GetIndexM3u8(ctx, needMSN, needPart)
 }
 
-// GetInit retrieves the initialization segment for a specific muxer UID.
 func (hlsw *hlsWriter) GetInit(uid string) ([]byte, error) {
 	hlsw.mu.RLock()
 	defer hlsw.mu.RUnlock()
@@ -324,7 +316,6 @@ func (hlsw *hlsWriter) GetInit(uid string) ([]byte, error) {
 	return mux.GetInit()
 }
 
-// GetInitByVersion retrieves the initialization segment for a specific codec version.
 func (hlsw *hlsWriter) GetInitByVersion(uid string, version int) ([]byte, error) {
 	hlsw.mu.RLock()
 	defer hlsw.mu.RUnlock()
@@ -335,7 +326,6 @@ func (hlsw *hlsWriter) GetInitByVersion(uid string, version int) ([]byte, error)
 	return mux.GetInitByVersion(version)
 }
 
-// GetSegment retrieves the media segment for a specific muxer UID and segment index.
 func (hlsw *hlsWriter) GetSegment(ctx context.Context, uid string, segIndex uint64) ([]byte, error) {
 	hlsw.mu.RLock()
 	defer hlsw.mu.RUnlock()
@@ -356,12 +346,12 @@ func (hlsw *hlsWriter) GetFragment(ctx context.Context, uid string, segIndex uin
 	return mux.GetFragment(ctx, segIndex, fragIndex)
 }
 
-// Close closes the innerHLS instance by closing all associated HLS Muxers, inpPktCh, and paramsChan channels.
+// Release closes every per-source muxer and drains the input channel so any
+// in-flight packets release their ring-buffer slots before the channel is closed.
 func (hlsw *hlsWriter) Release() { //nolint: revive
 	for _, mux := range hlsw.muxerURLs {
 		mux.Close()
 	}
-	// Drain remaining packets from the channel to prevent leaks.
 	for {
 		select {
 		case pkt, ok := <-hlsw.inpPktCh:
@@ -382,7 +372,6 @@ func (hlsw *hlsWriter) String() string {
 	return fmt.Sprintf("HLS_WRITER id=%d mxrs=%d", hlsw.id, len(hlsw.muxerURLs))
 }
 
-// Packets returns the channel for sending media packets using the innerHLS instance of outerHLS.
 func (hlsw *hlsWriter) Packets() chan<- gomedia.Packet {
 	return hlsw.inpPktCh
 }

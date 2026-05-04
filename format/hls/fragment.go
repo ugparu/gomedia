@@ -10,59 +10,53 @@ import (
 	"github.com/ugparu/gomedia/utils/logger"
 )
 
-// fragment represents a fragment of an HLS video stream.
+// fragment is a sub-segment (LL-HLS "part") within a segment.
+// Lifetime: packets retain ring-buffer slots; slots are released only when the
+// enclosing segment is evicted.
 type fragment struct {
-	independent    bool          // Indicates if the fragment is independent.
-	id             uint8         // Identifier for the fragment.
-	segID          uint64        // Identifier for the segment to which the fragment belongs.
-	targetDuration time.Duration // Target duration for the fragment.
-	duration       time.Duration // Actual duration of the fragment.
-	finished       chan struct{} // Channel to signal completion of the fragment.
-	manifestEntry  string        // HLS manifest entry.
+	independent    bool
+	id             uint8
+	segID          uint64
+	targetDuration time.Duration
+	duration       time.Duration
+	finished       chan struct{}
+	manifestEntry  string
 	packets        []gomedia.Packet
-	codecPars      gomedia.CodecParametersPair // Codec parameters for the fragment.
-	cachedMp4      []byte                      // Lazily generated MP4 data; populated on first HTTP request.
-	mediaName      string                      // Base filename used in manifest URIs (e.g. "media").
+	codecPars      gomedia.CodecParametersPair
+	cachedMp4      []byte // lazily generated on first HTTP request
+	mediaName      string // base filename used in manifest URIs
 	log            logger.Logger
 }
 
-// newFragment creates a new fragment with the specified parameters.
 func newFragment(id uint8, segID uint64, targetDuration time.Duration, codecPars gomedia.CodecParametersPair, mediaName string, log logger.Logger) *fragment {
 	frag := &fragment{
 		id:             id,
 		segID:          segID,
 		targetDuration: targetDuration,
-		independent:    false,
-		duration:       0,
 		finished:       make(chan struct{}),
-		manifestEntry:  "",
 		packets:        make([]gomedia.Packet, 0),
 		codecPars:      codecPars,
-		cachedMp4:      nil,
 		mediaName:      mediaName,
 		log:            log,
 	}
-	// Initialize the manifest entry with a preload hint.
+	// Until the fragment closes, advertise it via a preload hint so LL-HLS clients can block-GET.
 	frag.manifestEntry = fmt.Sprintf("#EXT-X-PRELOAD-HINT:TYPE=PART,URI=\"fragment/%d/%d/%s.m4s\"\n", segID, id, mediaName)
 	return frag
 }
 
-// writePacket writes a multimedia packet to the fragment.
-// Clone(false) retains the ring-buffer slot so the backing memory stays valid
-// until segment.release() is called when the segment is evicted.
+// writePacket retains the packet's ring-buffer slot via Clone(false); the slot
+// is released when the enclosing segment is evicted.
 func (fr *fragment) writePacket(packet gomedia.Packet) error {
 	fr.log.Tracef(fr, "Writing packet %v", packet)
 
 	fr.packets = append(fr.packets, packet.Clone(false))
 
 	vPacket, casted := packet.(gomedia.VideoPacket)
-	// Check if the packet is a keyframe for video packets.
 	if casted {
 		if vPacket.IsKeyFrame() {
 			fr.independent = true
 		}
 		fr.duration += packet.Duration()
-		// Check if the fragment duration exceeds the target duration.
 		if fr.duration >= fr.targetDuration {
 			return fr.close()
 		}
@@ -71,13 +65,12 @@ func (fr *fragment) writePacket(packet gomedia.Packet) error {
 	return nil
 }
 
-// close finalizes the fragment metadata and signals completion.
-// MP4 data is NOT generated here — it is produced lazily on first HTTP request
-// via generateMp4(), called under the owning segment's mutex.
+// close finalizes the manifest entry and unblocks waitFragment.
+// MP4 bytes are NOT generated here — that happens lazily on first HTTP request
+// in generateMp4, under the owning segment's mutex.
 func (fr *fragment) close() error {
 	fr.log.Tracef(fr, "Finishing fragment")
 
-	// Update the manifest entry based on whether the fragment is independent.
 	if fr.independent {
 		fr.manifestEntry = fmt.Sprintf(
 			"#EXT-X-PART:DURATION=%.5f,INDEPENDENT=YES,URI=\"fragment/%d/%d/%s.m4s\"\n",
@@ -100,8 +93,9 @@ func (fr *fragment) close() error {
 	return nil
 }
 
-// generateMp4 lazily produces the MP4 data from retained ring-backed packets.
-// Must be called under the owning segment's mu while packets are still live.
+// generateMp4 encodes the retained packets into fragmented MP4 bytes.
+// Idempotent. Must be called under the owning segment's mutex while packets
+// are still live (i.e. before the segment is evicted and slots released).
 func (fr *fragment) generateMp4() {
 	if fr.cachedMp4 != nil || len(fr.packets) == 0 {
 		return
@@ -122,12 +116,10 @@ func (fr *fragment) generateMp4() {
 	}
 }
 
-// getMp4Buffer returns the cached MP4 data for this fragment.
 func (fr *fragment) getMp4Buffer() buffer.Buffer {
 	return &staticBuffer{fr.cachedMp4}
 }
 
-// String returns a string representation of the fragment.
 func (fr *fragment) String() string {
 	return fmt.Sprintf("FRAGMENT id=%d ind=%v", fr.id, fr.independent)
 }

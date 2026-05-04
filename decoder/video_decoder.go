@@ -23,22 +23,25 @@ type InnerVideoDecoder interface {
 	Close()
 }
 
-// videoDecoder represents the inner layer of the video decoder.
+// videoDecoder is the async wrapper around an InnerVideoDecoder. It applies
+// FPS throttling, waits for the first key frame before decoding, and swaps
+// out the inner decoder when the stream's codec parameters change.
 type videoDecoder struct {
 	lifecycle.AsyncManager[*videoDecoder]
 	InnerVideoDecoder
 	factory       map[gomedia.CodecType]func() InnerVideoDecoder
-	inpPktCh      chan gomedia.VideoPacket     // Channel for receiving multimedia packets.
-	outFrmCh      chan rgb.ReleasableImage      // Channel for sending decoded video frames.
-	codecPar      gomedia.VideoCodecParameters // Video codec parameters.
-	fpsChan       chan int                     // Channel for sending frames per second.
-	targetFPS     int                          // Target frames per second.
-	frameDuration time.Duration                // Duration between frames, computed from FPS.
-	lastFrameTime time.Time                    // Time of the last decoded frame.
-	running       bool                         // Flag indicating whether the decoder is running.
+	inpPktCh      chan gomedia.VideoPacket
+	outFrmCh      chan rgb.ReleasableImage
+	codecPar      gomedia.VideoCodecParameters
+	fpsChan       chan int
+	targetFPS     int
+	frameDuration time.Duration // 1/targetFPS; 0 disables throttling.
+	lastFrameTime time.Time
+	running       bool
 	hasKey        bool
 	name          string
 	log           logger.Logger
+	outBufSize    int
 }
 
 type VideoDecoderParam func(*videoDecoder)
@@ -51,32 +54,45 @@ func VideoWithLogger(l logger.Logger) VideoDecoderParam {
 	return func(dec *videoDecoder) { dec.log = l }
 }
 
+// VideoWithOutputBufferSize overrides the capacity of the decoder's output
+// frame channel. Decoded RGB frames are large (3*W*H bytes), so callers may
+// want a smaller output buffer than the input/fps buffers to bound memory
+// when a downstream consumer stalls. Defaults to chanSize when unset.
+func VideoWithOutputBufferSize(n int) VideoDecoderParam {
+	return func(dec *videoDecoder) { dec.outBufSize = n }
+}
+
 func NewVideo(chanSize int, fps int, factory map[gomedia.CodecType]func() InnerVideoDecoder, params ...VideoDecoderParam) gomedia.VideoDecoder {
 	dec := &videoDecoder{
 		AsyncManager:      nil,
 		InnerVideoDecoder: nil,
 		factory:           factory,
-		inpPktCh:          make(chan gomedia.VideoPacket, chanSize),
-		outFrmCh:          make(chan rgb.ReleasableImage, chanSize),
+		inpPktCh:          nil,
+		outFrmCh:          nil,
 		codecPar:          nil,
-		fpsChan:           make(chan int, chanSize),
+		fpsChan:           nil,
 		targetFPS:         fps,
 		frameDuration:     DurationFromFPS(fps),
 		running:           false,
 		hasKey:            false,
 		log:               logger.Default,
+		outBufSize:        chanSize,
 	}
 	for _, param := range params {
 		param(dec)
 	}
+	dec.inpPktCh = make(chan gomedia.VideoPacket, chanSize)
+	dec.outFrmCh = make(chan rgb.ReleasableImage, dec.outBufSize)
+	dec.fpsChan = make(chan int, chanSize)
 	dec.AsyncManager = lifecycle.NewFailSafeAsyncManager(dec, dec.log)
 	runtime.SetFinalizer(dec, func(dcd *videoDecoder) { dcd.Close() })
 	return dec
 }
 
-// processPacket processes the given multimedia packet.
-// It sends the packet for decoding, processes the resulting frames,
-// and sends the decoded frames to the output channel.
+// processPacket decodes one packet into a frame and forwards it downstream.
+// Codec-parameter changes trigger an inner-decoder restart. Packets before the
+// first key frame are fed (so the decoder can build reference state) but no
+// frame is emitted until the first key frame has been processed.
 func (dec *videoDecoder) processPacket(inpPkt gomedia.VideoPacket, stopCh <-chan struct{}) (err error) {
 	dec.log.Tracef(dec, "Processing packet %v", inpPkt)
 
@@ -126,9 +142,7 @@ func (dec *videoDecoder) processPacket(inpPkt gomedia.VideoPacket, stopCh <-chan
 	}
 }
 
-// processPacket processes the given multimedia packet.
-// It sends the packet for decoding, processes the resulting frames,
-// and sends the decoded frames to the output channel.
+// startDecoder spins up a fresh inner decoder for the current codec parameters.
 func (dec *videoDecoder) startDecoder() (err error) {
 	dec.log.Debugf(dec, "Starting decoder with codec parameters %v", dec.codecPar)
 	if dec.codecPar == nil {
@@ -161,7 +175,7 @@ func (dec *videoDecoder) stopDecoder() {
 	dec.InnerVideoDecoder = nil
 }
 
-// Decode initializes the inner decoder.
+// Decode launches the async Step loop.
 func (dec *videoDecoder) Decode() {
 	startFunc := func(dec *videoDecoder) error {
 		dec.frameDuration = DurationFromFPS(dec.targetFPS)
@@ -170,7 +184,9 @@ func (dec *videoDecoder) Decode() {
 	_ = dec.Start(startFunc)
 }
 
-// Step takes a step in the video decoding process based on signals received from channels.
+// Step services one of: close, FPS change (including pause via fps==0), or a
+// new incoming packet. A non-nil err is wrapped via startDecoder/stopDecoder
+// so the lifecycle manager can recover with a clean inner decoder state.
 func (dec *videoDecoder) Step(stopCh <-chan struct{}) (err error) {
 	select {
 	case <-stopCh:
@@ -224,10 +240,10 @@ func (dec *videoDecoder) Close() {
 	dec.AsyncManager.Close()
 }
 
-// Release stops the inner decoder and closes associated channels.
+// Release tears down the inner decoder and drains both channels so no ring
+// buffer slots or decoded frames leak after shutdown.
 func (dec *videoDecoder) Release() { //nolint:revive // required by lifecycle.AsyncInstance interface
 	dec.stopDecoder()
-	// Drain remaining packets from the channel to prevent leaks.
 	for {
 		select {
 		case pkt, ok := <-dec.inpPktCh:
@@ -241,7 +257,6 @@ func (dec *videoDecoder) Release() { //nolint:revive // required by lifecycle.As
 		}
 	}
 drained:
-	// Drain remaining output frames to prevent leaks.
 	for {
 		select {
 		case img, ok := <-dec.outFrmCh:
@@ -258,7 +273,6 @@ framesDrained:
 	close(dec.fpsChan)
 }
 
-// String returns a string representation of the inner video decoder.
 func (dec *videoDecoder) String() string {
 	return fmt.Sprintf("VDECODER %s", dec.name)
 }
