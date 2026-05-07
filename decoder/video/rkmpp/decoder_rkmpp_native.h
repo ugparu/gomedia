@@ -12,7 +12,7 @@
 
 #include <stdint.h>
 
-#include "rk_mpi.h"
+#include "rockchip/rk_mpi.h"
 #include <rga/im2d.h>
 
 #ifndef MAX_WIDTH
