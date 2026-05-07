@@ -14,7 +14,6 @@ import (
 	"github.com/ugparu/gomedia/decoder"
 	"github.com/ugparu/gomedia/decoder/video"
 	"github.com/ugparu/gomedia/frame/rgb"
-	"github.com/ugparu/gomedia/utils/buffer"
 	"github.com/ugparu/gomedia/utils/logger"
 )
 
@@ -172,20 +171,12 @@ func extractPacketData(pkt gomedia.VideoPacket) (data []byte, ptsMs int64, codec
 	case *h264.Packet:
 		codecID = 1
 		ptsMs = p.Timestamp().Milliseconds()
-		data = make([]byte, p.Len())
-
-		p.View(func(buf buffer.PooledBuffer) {
-			copy(data, buf.Data())
-		})
+		data = p.Data()
 		return
 	case *h265.Packet:
 		codecID = 2
 		ptsMs = p.Timestamp().Milliseconds()
-		data = make([]byte, p.Len())
-
-		p.View(func(buf buffer.PooledBuffer) {
-			copy(data, buf.Data())
-		})
+		data = p.Data()
 		return
 	default:
 		err = video.NewFFmpegError("unsupported packet type", -1)
