@@ -2,9 +2,7 @@
 
 package rkmpp
 
-//#cgo pkg-config: rockchip_mpp
-//#cgo CFLAGS: -I/usr/include/rockchip
-//#cgo LDFLAGS: -lrga
+//#cgo pkg-config: rockchip_mpp librga
 //#include "decoder_rkmpp_native.h"
 import "C"
 import (
