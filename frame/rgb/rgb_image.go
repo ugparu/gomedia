@@ -106,7 +106,8 @@ func (p *FramePool) Put(img *RGB) {
 	}
 }
 
-// RGB represents an RGB image.
+// RGB is an interleaved 24-bit RGB image with no per-pixel alpha. It implements
+// image.Image and can be returned to its FramePool via Release.
 type RGB struct {
 	Pix    []byte
 	Stride int
@@ -136,27 +137,24 @@ func NewRGB(r image.Rectangle) *RGB {
 	}
 }
 
-// ColorModel returns the RGBModel for the RGB image.
 func (*RGB) ColorModel() color.Model {
 	return Model{}
 }
 
-// Bounds returns the rectangle of the RGB image.
 func (rgb *RGB) Bounds() image.Rectangle {
 	return rgb.Rect
 }
 
-// PixOffset returns the index into the Pix slice for the given pixel coordinates (x, y).
+// PixOffset returns the byte offset of pixel (x, y) inside Pix.
 func (rgb *RGB) PixOffset(x, y int) int {
 	return (y-rgb.Rect.Min.Y)*rgb.Stride + (x-rgb.Rect.Min.X)*3
 }
 
-// Opaque reports whether the RGB image is opaque.
 func (*RGB) Opaque() bool {
 	return true
 }
 
-// RGBAt returns the RGB color at (x, y) without interface boxing.
+// RGBAt is At without the color.Color interface boxing.
 func (rgb *RGB) RGBAt(x, y int) Color {
 	if !(image.Point{x, y}.In(rgb.Rect)) {
 		return Color{}
@@ -166,7 +164,6 @@ func (rgb *RGB) RGBAt(x, y int) Color {
 	return Color{s[0], s[1], s[2]}
 }
 
-// At returns the color at the specified pixel coordinates (x, y).
 func (rgb *RGB) At(x, y int) color.Color {
 	if !(image.Point{x, y}.In(rgb.Rect)) {
 		return Color{
@@ -180,7 +177,6 @@ func (rgb *RGB) At(x, y int) color.Color {
 	return Color{s[0], s[1], s[2]}
 }
 
-// Set sets the color at the specified pixel coordinates (x, y).
 func (rgb *RGB) Set(x, y int, c color.Color) {
 	if !(image.Point{x, y}.In(rgb.Rect)) {
 		return
@@ -195,7 +191,8 @@ func (rgb *RGB) Set(x, y int, c color.Color) {
 	s[2] = c1.B
 }
 
-// SubImage returns a new image representing the portion of the RGB image specified by the rectangle r.
+// SubImage returns the slice of rgb covered by r. The returned image shares
+// the underlying buffer; modifying it modifies rgb.
 func (rgb *RGB) SubImage(r image.Rectangle) image.Image {
 	r = r.Intersect(rgb.Rect)
 	if r.Empty() {
@@ -213,7 +210,7 @@ func (rgb *RGB) SubImage(r image.Rectangle) image.Image {
 	}
 }
 
-// Clone returns a new RGB image that is a copy of the original RGB image.
+// Clone deep-copies the pixels into a fresh, heap-allocated RGB (no FramePool).
 func (rgb *RGB) Clone() *RGB {
 	w := rgb.Bounds().Dx()
 	h := rgb.Bounds().Dy()
@@ -246,57 +243,45 @@ type rgbJSON struct {
 	Data   string `json:"data"`
 }
 
-// MarshalJSON encodes an RGB image as JSON with base64-encoded pixel data.
+// MarshalJSON encodes rgb as JSON with base64-encoded pixel data.
 func (rgb *RGB) MarshalJSON() ([]byte, error) {
 	if rgb == nil {
 		return nil, errors.New("cannot marshal nil RGB image")
 	}
-
-	// Encode the pixel data using base64
-	encodedData := base64.StdEncoding.EncodeToString(rgb.Pix)
-
-	// Create JSON representation
-	data := rgbJSON{
+	return json.Marshal(rgbJSON{
 		MinX:   rgb.Rect.Min.X,
 		MinY:   rgb.Rect.Min.Y,
 		MaxX:   rgb.Rect.Max.X,
 		MaxY:   rgb.Rect.Max.Y,
 		Stride: rgb.Stride,
-		Data:   encodedData,
-	}
-
-	return json.Marshal(data)
+		Data:   base64.StdEncoding.EncodeToString(rgb.Pix),
+	})
 }
 
-// UnmarshalJSON decodes JSON data into an RGB image with base64-encoded pixel data.
+// UnmarshalJSON decodes JSON written by MarshalJSON into rgb in place.
 func (rgb *RGB) UnmarshalJSON(data []byte) error {
 	var jsonData rgbJSON
 	if err := json.Unmarshal(data, &jsonData); err != nil {
 		return err
 	}
 
-	// Decode the base64-encoded pixel data
 	pixData, err := base64.StdEncoding.DecodeString(jsonData.Data)
 	if err != nil {
 		return fmt.Errorf("failed to decode base64 image data: %w", err)
 	}
 
-	// Create rectangle
 	rect := image.Rectangle{
 		Min: image.Point{X: jsonData.MinX, Y: jsonData.MinY},
 		Max: image.Point{X: jsonData.MaxX, Y: jsonData.MaxY},
 	}
 
-	// Validate dimensions
 	expectedSize := bytesPerPix * rect.Dx() * rect.Dy()
 	if expectedSize > 0 && len(pixData) != expectedSize {
 		return fmt.Errorf("invalid pixel data size: got %d bytes, expected %d bytes", len(pixData), expectedSize)
 	}
 
-	// Set the RGB image fields
 	rgb.Pix = pixData
 	rgb.Stride = jsonData.Stride
 	rgb.Rect = rect
-
 	return nil
 }

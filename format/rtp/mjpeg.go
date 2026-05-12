@@ -48,9 +48,9 @@ type mjpegDemuxer struct {
 	quality         uint8
 	markerBit       bool
 	lastTimestamp   uint32
-	frameHeaders    []byte             // Reconstructed JPEG headers for current frame
-	restartInterval uint16             // DRI restart interval
-	qtablePrecision uint8              // Precision field from Q-table header
+	frameHeaders    []byte                 // Reconstructed JPEG headers for current frame
+	restartInterval uint16                 // DRI restart interval
+	qtablePrecision uint8                  // Precision field from Q-table header
 	cachedQTables   map[uint8]cachedQTable // Cached tables for Q 128-254
 }
 
@@ -195,7 +195,7 @@ func (d *mjpegDemuxer) parseMJPEGPacket() error {
 		d.qtablePrecision = qtablePrecision
 
 		if d.codec != nil {
-			actualWidth := uint(width) * 8  //nolint:mnd // width is in 8-pixel blocks
+			actualWidth := uint(width) * 8   //nolint:mnd // width is in 8-pixel blocks
 			actualHeight := uint(height) * 8 //nolint:mnd // height is in 8-pixel blocks
 			if actualWidth != d.codec.Width() || actualHeight != d.codec.Height() {
 				d.codec = mjpeg.NewCodecParameters(actualWidth, actualHeight, d.codec.FPS())
@@ -206,13 +206,10 @@ func (d *mjpegDemuxer) parseMJPEGPacket() error {
 		// Generate JPEG headers for this frame
 		d.frameHeaders = reconstructJPEGHeaders(mjpegType, width, height, quality,
 			d.restartInterval, qtablePrecision, qtableData)
-	} else {
-		// Continuation of existing frame
-		if d.lastTimestamp != d.baseDemuxer.timestamp {
-			// New frame with different timestamp but no start fragment - discard
-			d.fragments = d.fragments[:0]
-			return nil
-		}
+	} else if d.lastTimestamp != d.baseDemuxer.timestamp {
+		// Continuation with a different timestamp but no start fragment — drop.
+		d.fragments = d.fragments[:0]
+		return nil
 	}
 
 	payloadData := make([]byte, d.end-d.offset)
@@ -511,8 +508,8 @@ func createSOFSegment(mjpegType, width, height uint8) []byte {
 	segment[9] = 0x03 // Number of components (Y, Cb, Cr)
 
 	// Component 1 (Y) - sampling factors per RFC 2435 Type mapping
-	segment[10] = 0x01                    // Component ID
-	mjpegTypeBase := mjpegType & 0x3F     //nolint:mnd // lower 6 bits determine the base type
+	segment[10] = 0x01                // Component ID
+	mjpegTypeBase := mjpegType & 0x3F //nolint:mnd // lower 6 bits determine the base type
 	switch mjpegTypeBase {
 	case 0: // 4:2:2 subsampling
 		segment[11] = 0x21 // hsamp=2, vsamp=1
@@ -613,7 +610,7 @@ func createHuffmanTables() []byte {
 // Lh includes the 2-byte length field itself per JPEG spec.
 func createDHTSegment(codeLens, symbols []byte, tableID, tableClass uint8) []byte {
 	lh := 2 + 1 + len(codeLens) + len(symbols) // Lh includes itself (2) + TcTh (1) + data
-	segment := make([]byte, 2+lh)               // 2(marker) + Lh
+	segment := make([]byte, 2+lh)              // 2(marker) + Lh
 	segment[0] = 0xFF
 	segment[1] = 0xC4 // DHT
 	binary.BigEndian.PutUint16(segment[2:4], uint16(lh))

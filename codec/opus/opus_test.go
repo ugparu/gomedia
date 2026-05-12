@@ -14,12 +14,8 @@ func buildTOC(config, stereo, code uint8) byte {
 	return (config << configShift) | (stereo << 2) | (code & framesTocMask)
 }
 
-// ---------------------------------------------------------------------------
 // PacketDuration — Code 0 (single frame, RFC 6716 §3.2.1)
-// ---------------------------------------------------------------------------
 
-// TestPacketDuration_Code0_SingleFrame verifies that a normal Code 0 packet
-// returns exactly one frame duration.
 func TestPacketDuration_Code0_SingleFrame(t *testing.T) {
 	t.Parallel()
 	// config 3 = SILK NB 60 ms
@@ -30,8 +26,6 @@ func TestPacketDuration_Code0_SingleFrame(t *testing.T) {
 	require.Equal(t, 60*time.Millisecond, dur)
 }
 
-// TestPacketDuration_Code0_DTX verifies that a 1-byte DTX packet (TOC only)
-// is treated as one frame, not zero. RFC 6716 §3.2.1 allows a 0-byte frame body.
 func TestPacketDuration_Code0_DTX(t *testing.T) {
 	t.Parallel()
 	// config 1 = SILK NB 20 ms
@@ -75,11 +69,8 @@ func TestPacketDuration_Code0_AllConfigs(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // PacketDuration — Code 1 (two equal-sized frames, RFC 6716 §3.2.2)
-// ---------------------------------------------------------------------------
 
-// TestPacketDuration_Code1_TwoFrames verifies that a Code 1 packet returns 2x the single-frame duration.
 func TestPacketDuration_Code1_TwoFrames(t *testing.T) {
 	t.Parallel()
 	// config 0 = SILK NB 10 ms; two frames → 20 ms total
@@ -90,8 +81,6 @@ func TestPacketDuration_Code1_TwoFrames(t *testing.T) {
 	require.Equal(t, 20*time.Millisecond, dur)
 }
 
-// TestPacketDuration_Code1_DTX verifies that a 1-byte Code 1 packet (two 0-byte DTX frames)
-// returns 2x duration. RFC 6716 §3.2.2: N may be 1 for two empty frames.
 func TestPacketDuration_Code1_DTX(t *testing.T) {
 	t.Parallel()
 	// config 0 = SILK NB 10 ms
@@ -102,11 +91,8 @@ func TestPacketDuration_Code1_DTX(t *testing.T) {
 	require.Equal(t, 20*time.Millisecond, dur)
 }
 
-// ---------------------------------------------------------------------------
 // PacketDuration — Code 2 (two variable-sized frames, RFC 6716 §3.2.3)
-// ---------------------------------------------------------------------------
 
-// TestPacketDuration_Code2_TwoFrames verifies Code 2 returns 2x duration.
 func TestPacketDuration_Code2_TwoFrames(t *testing.T) {
 	t.Parallel()
 	// config 1 = SILK NB 20 ms; two frames → 40 ms
@@ -118,11 +104,8 @@ func TestPacketDuration_Code2_TwoFrames(t *testing.T) {
 	require.Equal(t, 40*time.Millisecond, dur)
 }
 
-// ---------------------------------------------------------------------------
 // PacketDuration — Code 3 (multiple frames, RFC 6716 §3.2.5)
-// ---------------------------------------------------------------------------
 
-// TestPacketDuration_Code3_MultipleFrames verifies Code 3 counts frames from byte 1.
 func TestPacketDuration_Code3_MultipleFrames(t *testing.T) {
 	t.Parallel()
 	// config 0 = SILK NB 10 ms; 3 frames → 30 ms
@@ -133,7 +116,6 @@ func TestPacketDuration_Code3_MultipleFrames(t *testing.T) {
 	require.Equal(t, 30*time.Millisecond, dur)
 }
 
-// TestPacketDuration_Code3_MaxFrames verifies M=48 (the maximum per RFC 6716 §3.2.5) is accepted.
 func TestPacketDuration_Code3_MaxFrames(t *testing.T) {
 	t.Parallel()
 	// config 16 = CELT NB 2.5 ms; 48 frames → 120 ms (maximum packet duration)
@@ -147,7 +129,6 @@ func TestPacketDuration_Code3_MaxFrames(t *testing.T) {
 	require.Equal(t, 48*2500*time.Microsecond, dur)
 }
 
-// TestPacketDuration_Code3_ZeroFrames verifies M=0 is rejected (RFC 6716 §3.2.5: M ∈ [1,48]).
 func TestPacketDuration_Code3_ZeroFrames(t *testing.T) {
 	t.Parallel()
 	toc := buildTOC(0, 0, 3)
@@ -156,7 +137,6 @@ func TestPacketDuration_Code3_ZeroFrames(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestPacketDuration_Code3_TooManyFrames verifies M=49 is rejected (RFC 6716 §3.2.5: M ≤ 48).
 func TestPacketDuration_Code3_TooManyFrames(t *testing.T) {
 	t.Parallel()
 	toc := buildTOC(0, 0, 3)
@@ -165,7 +145,6 @@ func TestPacketDuration_Code3_TooManyFrames(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestPacketDuration_Code3_TruncatedHeader verifies error when Code 3 packet is only 1 byte.
 func TestPacketDuration_Code3_TruncatedHeader(t *testing.T) {
 	t.Parallel()
 	toc := buildTOC(0, 0, 3)
@@ -174,14 +153,12 @@ func TestPacketDuration_Code3_TruncatedHeader(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestPacketDuration_EmptyPacket verifies that a zero-length packet returns an error.
 func TestPacketDuration_EmptyPacket(t *testing.T) {
 	t.Parallel()
 	_, err := PacketDuration([]byte{})
 	require.Error(t, err)
 }
 
-// TestPacketDuration_Stereo verifies that the stereo flag does not affect duration calculation.
 func TestPacketDuration_Stereo(t *testing.T) {
 	t.Parallel()
 	// config 0 = SILK NB 10 ms, stereo=1, code=0 (single frame)
@@ -192,11 +169,8 @@ func TestPacketDuration_Stereo(t *testing.T) {
 	require.Equal(t, 10*time.Millisecond, dur)
 }
 
-// ---------------------------------------------------------------------------
 // CodecParameters
-// ---------------------------------------------------------------------------
 
-// TestNewCodecParameters_Mono verifies mono parameters are stored correctly.
 func TestNewCodecParameters_Mono(t *testing.T) {
 	t.Parallel()
 	cp := NewCodecParameters(0, gomedia.ChMono, 48000)
@@ -208,7 +182,6 @@ func TestNewCodecParameters_Mono(t *testing.T) {
 	require.Equal(t, "opus", cp.Tag())
 }
 
-// TestNewCodecParameters_Stereo verifies stereo parameters are stored correctly.
 func TestNewCodecParameters_Stereo(t *testing.T) {
 	t.Parallel()
 	cp := NewCodecParameters(1, gomedia.ChStereo, 48000)
@@ -217,16 +190,12 @@ func TestNewCodecParameters_Stereo(t *testing.T) {
 	require.Equal(t, uint64(48000), cp.SampleRate())
 }
 
-// TestNewCodecParameters_StreamIndex verifies the stream index is set on the base parameters.
 func TestNewCodecParameters_StreamIndex(t *testing.T) {
 	t.Parallel()
 	cp := NewCodecParameters(7, gomedia.ChMono, 16000)
 	require.Equal(t, uint8(7), cp.StreamIndex())
 }
 
-// TestNewCodecParameters_RTPClockRate verifies 48000 Hz as per RFC 7587 §4.
-// RFC 7587 mandates the RTP timestamp clock rate is always 48000 Hz for Opus,
-// regardless of actual input sample rate.
 func TestNewCodecParameters_RTPClockRate(t *testing.T) {
 	t.Parallel()
 	cp := NewCodecParameters(0, gomedia.ChMono, 48000)
@@ -234,11 +203,8 @@ func TestNewCodecParameters_RTPClockRate(t *testing.T) {
 		"RFC 7587 §4: Opus RTP clock rate MUST be 48000 Hz")
 }
 
-// ---------------------------------------------------------------------------
 // Packet
-// ---------------------------------------------------------------------------
 
-// TestNewPacket verifies all fields are stored correctly.
 func TestNewPacket(t *testing.T) {
 	t.Parallel()
 	cp := NewCodecParameters(2, gomedia.ChStereo, 48000)
@@ -262,7 +228,6 @@ func TestNewPacket(t *testing.T) {
 	require.Equal(t, uint8(2), pkt.CodecParameters().Channels())
 }
 
-// TestPacket_Clone_CopyData verifies Clone(true) produces an independent deep copy.
 func TestPacket_Clone_CopyData(t *testing.T) {
 	t.Parallel()
 	cp := NewCodecParameters(0, gomedia.ChMono, 48000)
@@ -280,7 +245,6 @@ func TestPacket_Clone_CopyData(t *testing.T) {
 	require.Equal(t, byte(0xAA), pkt.Data()[0], "original must be unaffected by clone mutation")
 }
 
-// TestPacket_Clone_SharedData verifies Clone(false) shares the underlying buffer.
 func TestPacket_Clone_SharedData(t *testing.T) {
 	t.Parallel()
 	cp := NewCodecParameters(0, gomedia.ChMono, 48000)
@@ -295,7 +259,6 @@ func TestPacket_Clone_SharedData(t *testing.T) {
 	cloned.Release()
 }
 
-// TestPacket_Release verifies Release is safe for heap-backed packets.
 func TestPacket_Release(t *testing.T) {
 	t.Parallel()
 	cp := NewCodecParameters(0, gomedia.ChMono, 48000)
@@ -303,12 +266,8 @@ func TestPacket_Release(t *testing.T) {
 	require.NotPanics(t, pkt.Release)
 }
 
-// ---------------------------------------------------------------------------
 // PacketDuration round-trip: build a Code 0 packet and confirm duration
-// ---------------------------------------------------------------------------
 
-// TestPacketDuration_RTPTimestampIncrement verifies that frame durations match the
-// RTP timestamp increments defined in RFC 7587 §4 (at 48000 Hz clock).
 func TestPacketDuration_RTPTimestampIncrement(t *testing.T) {
 	t.Parallel()
 
@@ -318,14 +277,14 @@ func TestPacketDuration_RTPTimestampIncrement(t *testing.T) {
 		expected time.Duration
 		samples  int // expected RTP timestamp increment at 48000 Hz
 	}{
-		{16, 2500 * time.Microsecond, 120},  // 2.5 ms CELT NB
-		{17, 5 * time.Millisecond, 240},     // 5 ms CELT NB
-		{18, 10 * time.Millisecond, 480},    // 10 ms CELT NB
-		{19, 20 * time.Millisecond, 960},    // 20 ms CELT NB
-		{0, 10 * time.Millisecond, 480},     // 10 ms SILK NB
-		{1, 20 * time.Millisecond, 960},     // 20 ms SILK NB
-		{2, 40 * time.Millisecond, 1920},    // 40 ms SILK NB
-		{3, 60 * time.Millisecond, 2880},    // 60 ms SILK NB
+		{16, 2500 * time.Microsecond, 120}, // 2.5 ms CELT NB
+		{17, 5 * time.Millisecond, 240},    // 5 ms CELT NB
+		{18, 10 * time.Millisecond, 480},   // 10 ms CELT NB
+		{19, 20 * time.Millisecond, 960},   // 20 ms CELT NB
+		{0, 10 * time.Millisecond, 480},    // 10 ms SILK NB
+		{1, 20 * time.Millisecond, 960},    // 20 ms SILK NB
+		{2, 40 * time.Millisecond, 1920},   // 40 ms SILK NB
+		{3, 60 * time.Millisecond, 2880},   // 60 ms SILK NB
 	}
 
 	for _, tc := range cases {

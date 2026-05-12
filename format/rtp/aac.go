@@ -14,8 +14,8 @@ import (
 type aacDemuxer struct {
 	baseDemuxer
 	*aac.CodecParameters
-	packets  []*aac.Packet
-	initErr  error
+	packets []*aac.Packet
+	initErr error
 }
 
 func NewAACDemuxer(rdr io.Reader, sdp sdp.Media, index uint8, options ...DemuxerOption) gomedia.Demuxer {

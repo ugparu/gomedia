@@ -59,7 +59,7 @@ func (v *aacEncoder) Init(codecPar *pcm.CodecParameters) (err error) {
 	v.frameDuration = time.Duration(v.FrameSize()) * time.Second / time.Duration(codecPar.SampleRate())
 
 	sampleRate := codecPar.SampleRate()
-	const maxInt32 = 1<<31 - 1 // maximum value for int32
+	const maxInt32 = 1<<31 - 1
 	if sampleRate > uint64(maxInt32) {
 		sampleRate = uint64(maxInt32)
 	}
@@ -113,7 +113,7 @@ func (v *aacEncoder) Encode(pkt *pcm.Packet) (resp []gomedia.AudioPacket, err er
 
 		r := C.aacenc_encode(&v.m, pPcm, pPcmSize, pNbSamples, pAac, &pAacSize) //nolint:gocritic // CGO function call
 		if int(r) != 0 {
-			return nil, fmt.Errorf("Encode failed, code=%v", int(r))
+			return nil, fmt.Errorf("aac encoder encode failed, code=%v", int(r))
 		}
 
 		valid := int(pAacSize)
@@ -159,7 +159,7 @@ func (v *aacEncoder) flush(ts time.Duration, sourceID string, startTime time.Tim
 
 		r := C.aacenc_encode(&v.m, nil, 0, 0, pAac, &pAacSize) //nolint:gocritic // CGO function call
 		if int(r) != 0 {
-			return nil, fmt.Errorf("Flush failed, code=%v", int(r))
+			return nil, fmt.Errorf("aac encoder flush failed, code=%v", int(r))
 		}
 
 		valid := int(pAacSize)

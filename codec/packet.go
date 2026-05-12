@@ -13,7 +13,7 @@ type BasePacket[T gomedia.CodecParameters] struct {
 	RelativeTime time.Duration
 	Dur          time.Duration
 	InpSourceID  string
-	Buf          []byte // Returns the packet data.
+	Buf          []byte
 	AbsoluteTime time.Time
 	CodecPar     T
 	// Slot is non-nil for ring-backed packets. Shared across Clone(false) copies;
@@ -21,7 +21,7 @@ type BasePacket[T gomedia.CodecParameters] struct {
 	Slot *buffer.SlotHandle
 }
 
-// NewBasePacket creates a new heap-backed BasePacket (Slot is nil; Release is a no-op).
+// NewBasePacket returns a heap-backed BasePacket. Slot is nil; Release is a no-op.
 func NewBasePacket[T gomedia.CodecParameters](
 	idx uint8,
 	relativeTime time.Duration,

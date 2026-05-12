@@ -37,7 +37,6 @@ func NewCodecDataFromHEVCDecoderConfRecord(record []byte) (codecPar CodecParamet
 		return
 	}
 	codecPar.CodecType = gomedia.H265
-	// Calculate bitrate based on width, FPS and a constant factor
 	if fps := codecPar.FPS(); fps > 0 {
 		codecPar.BRate = uint(
 			float64(codecPar.Width()) *
@@ -75,7 +74,6 @@ func NewCodecDataFromVPSAndSPSAndPPS(vps, sps, pps []byte) (codecPar CodecParame
 	codecPar.RecordInfo = *recordinfo
 	codecPar.Record = buf
 	codecPar.CodecType = gomedia.H265
-	// Calculate bitrate based on width, FPS and a constant factor
 	if fps := codecPar.FPS(); fps > 0 {
 		codecPar.BRate = uint(
 			float64(codecPar.Width()) *
@@ -124,7 +122,7 @@ func (par *CodecParameters) FPS() uint {
 	return par.SPSInfo.FPS
 }
 
-// Tag returns a string tag representing the codec information.
+// Tag returns the codec's container tag (e.g. "hev1.1.6.L93.B0").
 func (par *CodecParameters) Tag() string {
 	return fmt.Sprintf("hev1.%01X.%01X.L%02X.90",
 		par.RecordInfo.AVCProfileIndication,

@@ -2,15 +2,14 @@ package gomedia
 
 import "fmt"
 
-// ChannelLayout represents the audio channel layout.
+// ChannelLayout is a bitmask of speaker positions; channel count is the number
+// of set bits (see Count). Combine with bitwise OR to build custom layouts.
 type ChannelLayout uint16
 
-// String returns the human-readable string representation of a ChannelLayout.
 func (ch ChannelLayout) String() string {
 	return fmt.Sprintf("%dch", ch.Count())
 }
 
-// Constants representing specific audio channel layouts.
 const (
 	ChFrontCenter = ChannelLayout(1 << iota)
 	ChFrontLeft
@@ -31,7 +30,7 @@ const (
 	Ch3P1      = (ChSurround | ChLowFreq)
 )
 
-// Count returns the number of channels in the ChannelLayout.
+// Count reports the number of set channel bits.
 func (ch ChannelLayout) Count() (n int) {
 	for ch != 0 {
 		n++

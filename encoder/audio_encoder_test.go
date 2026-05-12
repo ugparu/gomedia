@@ -228,7 +228,7 @@ func TestStep_CodecParameterChange(t *testing.T) {
 
 	codecPar1 := pcm.NewCodecParameters(0, gomedia.PCM, 1, 16000) //nolint:mnd // mono 16kHz
 	codecPar2 := pcm.NewCodecParameters(0, gomedia.PCM, 2, 48000) //nolint:mnd // stereo 48kHz
-	pktDuration := 20 * time.Millisecond                           //nolint:mnd
+	pktDuration := 20 * time.Millisecond                          //nolint:mnd
 
 	// Use separate mocks for each phase. The factory returns them in order:
 	// call 1 (constructor) → constructorInner
@@ -334,7 +334,7 @@ func TestStep_EncodeError(t *testing.T) {
 func TestStep_InitError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 
-	codecPar := pcm.NewCodecParameters(0, gomedia.PCM, 1, 16000) //nolint:mnd
+	codecPar := pcm.NewCodecParameters(0, gomedia.PCM, 1, 16000)  //nolint:mnd
 	codecPar2 := pcm.NewCodecParameters(0, gomedia.PCM, 2, 48000) //nolint:mnd // different params to trigger second init
 	initErr := fmt.Errorf("init failed")
 	pktDuration := 20 * time.Millisecond //nolint:mnd

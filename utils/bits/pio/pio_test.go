@@ -6,9 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// ---------------------------------------------------------------------------
 // Readers — big-endian
-// ---------------------------------------------------------------------------
 
 func TestU8(t *testing.T) {
 	assert.Equal(t, uint8(0xAB), U8([]byte{0xAB}))
@@ -110,9 +108,7 @@ func TestI64BE(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Writers — big-endian
-// ---------------------------------------------------------------------------
 
 func TestPutU8(t *testing.T) {
 	b := make([]byte, 1)
@@ -186,9 +182,7 @@ func TestPutI64BE(t *testing.T) {
 	assert.Equal(t, []byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}, b)
 }
 
-// ---------------------------------------------------------------------------
 // Round-trip: Put → Read
-// ---------------------------------------------------------------------------
 
 func TestRoundTrip_U16BE(t *testing.T) {
 	b := make([]byte, 2)
@@ -214,9 +208,7 @@ func TestRoundTrip_U32LE(t *testing.T) {
 	assert.Equal(t, uint32(0x12345678), U32LE(b))
 }
 
-// ---------------------------------------------------------------------------
 // Vec functions
-// ---------------------------------------------------------------------------
 
 func TestVecLen(t *testing.T) {
 	vec := [][]byte{{1, 2, 3}, {4, 5}, {6}}

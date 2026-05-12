@@ -15,9 +15,7 @@ import (
 
 const testDataDir = "../../tests/data/aac/"
 
-// ---------------------------------------------------------------------------
 // Test data helpers
-// ---------------------------------------------------------------------------
 
 type testParametersJSON struct {
 	Codec       string `json:"codec"`
@@ -74,9 +72,7 @@ func loadPacketFrames(t *testing.T) [][]byte {
 	return frames
 }
 
-// ---------------------------------------------------------------------------
 // Constructor
-// ---------------------------------------------------------------------------
 
 func TestNewAacDecoder(t *testing.T) {
 	t.Parallel()
@@ -84,9 +80,7 @@ func TestNewAacDecoder(t *testing.T) {
 	require.NotNil(t, d)
 }
 
-// ---------------------------------------------------------------------------
 // Init — error paths
-// ---------------------------------------------------------------------------
 
 func TestInit_NilParam(t *testing.T) {
 	t.Parallel()
@@ -108,9 +102,7 @@ func TestInit_EmptyConfigBytes(t *testing.T) {
 	require.Contains(t, err.Error(), "empty AudioSpecificConfig")
 }
 
-// ---------------------------------------------------------------------------
 // Init — success paths
-// ---------------------------------------------------------------------------
 
 func TestInit_ValidConfig(t *testing.T) {
 	t.Parallel()
@@ -150,9 +142,7 @@ func TestInit_ReinitWithDifferentConfig(t *testing.T) {
 	d.Close()
 }
 
-// ---------------------------------------------------------------------------
 // Close
-// ---------------------------------------------------------------------------
 
 func TestClose_WithoutInit(t *testing.T) {
 	t.Parallel()
@@ -179,13 +169,11 @@ func TestClose_Double(t *testing.T) {
 	require.NotPanics(t, d.Close)
 }
 
-// ---------------------------------------------------------------------------
-// Decode — empty / nil input (guards added in this session)
-// ---------------------------------------------------------------------------
+// Decode — empty / nil input
 
 func TestDecode_NilInput(t *testing.T) {
 	t.Parallel()
-	// len(nil) == 0 triggers the early return added for Bug 2.
+	// nil input must short-circuit before the allocator and the inner decoder.
 	cp := loadCodecParameters(t)
 	d := decaac.NewAacDecoder()
 	require.NoError(t, d.Init(cp))
@@ -208,8 +196,6 @@ func TestDecode_EmptyInput(t *testing.T) {
 	require.Nil(t, pcm)
 }
 
-// TestDecode_EmptyInputBeforeInit verifies the nil guard fires before any CGO
-// call, so there is no NULL-decoder dereference.
 func TestDecode_EmptyInputBeforeInit(t *testing.T) {
 	t.Parallel()
 	d := decaac.NewAacDecoder()
@@ -220,9 +206,7 @@ func TestDecode_EmptyInputBeforeInit(t *testing.T) {
 	require.Nil(t, pcm)
 }
 
-// ---------------------------------------------------------------------------
 // Decode — actual AAC frames from test data
-// ---------------------------------------------------------------------------
 
 // TestDecode_FirstFrame feeds the first real AAC AU and expects either valid
 // PCM or a "not enough bits" silent skip (both are correct outcomes).
@@ -266,9 +250,6 @@ func TestDecode_ProducesPCM(t *testing.T) {
 	require.True(t, gotPCM, "expected at least one frame to produce PCM output")
 }
 
-// TestDecode_PCMSize verifies that every non-empty PCM output has the correct
-// byte count for the stream's parameters.
-// Test data: AAC-LC, 16 kHz, mono → 1024 samples × 1 ch × 2 bytes = 2048 bytes.
 func TestDecode_PCMSize(t *testing.T) {
 	t.Parallel()
 	cp := loadCodecParameters(t)
@@ -280,7 +261,7 @@ func TestDecode_PCMSize(t *testing.T) {
 
 	const (
 		samplesPerFrame = 1024 // AAC-LC
-		bytesPerSample  = 2   // FDK-AAC always outputs 16-bit PCM
+		bytesPerSample  = 2    // FDK-AAC always outputs 16-bit PCM
 	)
 	channels := int(cp.Channels()) // 1 (mono)
 	expectedPCMBytes := samplesPerFrame * channels * bytesPerSample
@@ -338,9 +319,7 @@ func TestDecode_TruncatedFrame(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Decode — ring allocator path
-// ---------------------------------------------------------------------------
 
 // TestDecode_WithRingAlloc decodes several real AAC frames using a GrowingRingAlloc
 // and verifies that when PCM is returned the ring slot is non-nil and data is

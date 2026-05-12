@@ -13,8 +13,8 @@ type AVCDecoderConfRecord struct {
 	PPS                  [][]byte
 }
 
-// Unmarshal decodes the binary representation of AVCDecoderConfRecord from the given byte slice.
-// It returns the number of bytes read and any decoding error encountered.
+// Unmarshal decodes b into avc and returns the number of bytes consumed.
+// Returns ErrDecconfInvalid if b is truncated or malformed.
 func (avc *AVCDecoderConfRecord) Unmarshal(b []byte) (n int, err error) {
 	const minLength = 7
 	if len(b) < minLength {
@@ -71,8 +71,7 @@ func (avc *AVCDecoderConfRecord) Unmarshal(b []byte) (n int, err error) {
 	return
 }
 
-// Len calculates and returns the length of the binary representation of AVCDecoderConfRecord.
-// It includes the length of the fixed-size fields and the lengths of SPS and PPS data.
+// Len reports the size in bytes of the serialized form.
 func (avc *AVCDecoderConfRecord) Len() (n int) {
 	n = 7
 	for _, sps := range avc.SPS {
@@ -84,8 +83,8 @@ func (avc *AVCDecoderConfRecord) Len() (n int) {
 	return
 }
 
-// Marshal serializes the AVCDecoderConfRecord to a binary representation.
-// It writes the serialized data to the provided byte slice and returns the number of bytes written.
+// Marshal writes the serialized form into b (which must be at least Len() bytes)
+// and returns the number of bytes written.
 func (avc *AVCDecoderConfRecord) Marshal(b []byte) (n int) {
 	b[0] = 1
 	b[1] = avc.AVCProfileIndication

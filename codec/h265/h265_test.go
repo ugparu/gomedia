@@ -78,9 +78,7 @@ func loadTestVPSSPSPPS(t *testing.T) (vps, sps, pps []byte) {
 	return
 }
 
-// ---------------------------------------------------------------------------
 // HEVCDecoderConfRecord — Unmarshal
-// ---------------------------------------------------------------------------
 
 func TestHEVCDecoderConfRecord_Unmarshal_Valid(t *testing.T) {
 	t.Parallel()
@@ -151,9 +149,7 @@ func TestHEVCDecoderConfRecord_Unmarshal_TruncatedVPSLength(t *testing.T) {
 	require.ErrorIs(t, err, ErrDecconfInvalid)
 }
 
-// ---------------------------------------------------------------------------
 // HEVCDecoderConfRecord — Marshal / Len
-// ---------------------------------------------------------------------------
 
 func TestHEVCDecoderConfRecord_Len(t *testing.T) {
 	t.Parallel()
@@ -209,9 +205,7 @@ func TestHEVCDecoderConfRecord_MarshalUnmarshal_RoundTrip(t *testing.T) {
 	require.Equal(t, rec.VPS, rec2.VPS)
 }
 
-// ---------------------------------------------------------------------------
 // NewCodecDataFromAVCDecoderConfRecord
-// ---------------------------------------------------------------------------
 
 func TestNewCodecDataFromAVCDecoderConfRecord_Valid(t *testing.T) {
 	t.Parallel()
@@ -247,9 +241,7 @@ func TestNewCodecDataFromAVCDecoderConfRecord_EmptyRecord(t *testing.T) {
 	require.Error(t, err, "must reject record with no VPS/SPS/PPS")
 }
 
-// ---------------------------------------------------------------------------
 // NewCodecDataFromVPSAndSPSAndPPS
-// ---------------------------------------------------------------------------
 
 func TestNewCodecDataFromVPSAndSPSAndPPS_Valid(t *testing.T) {
 	t.Parallel()
@@ -305,9 +297,7 @@ func TestNewCodecDataFromVPSAndSPSAndPPS_PartialNil(t *testing.T) {
 	require.Equal(t, uint(0), cp.Width())
 }
 
-// ---------------------------------------------------------------------------
 // CodecParameters accessors — nil safety
-// ---------------------------------------------------------------------------
 
 func TestCodecParameters_NilSafety(t *testing.T) {
 	t.Parallel()
@@ -352,9 +342,7 @@ func TestCodecParameters_ConsistencyBetweenConstructors(t *testing.T) {
 	require.Equal(t, cp1.VPS(), cp2.VPS())
 }
 
-// ---------------------------------------------------------------------------
 // IsDataNALU — RFC 7798 §1.1.4
-// ---------------------------------------------------------------------------
 
 func TestIsDataNALU(t *testing.T) {
 	t.Parallel()
@@ -383,9 +371,7 @@ func TestIsDataNALU(t *testing.T) {
 	require.False(t, IsDataNALU([]byte{0x02}), "1-byte must return false (need 2-byte header)")
 }
 
-// ---------------------------------------------------------------------------
 // IsKey — BLA/IDR/CRA detection
-// ---------------------------------------------------------------------------
 
 func TestIsKey(t *testing.T) {
 	t.Parallel()
@@ -422,9 +408,7 @@ func TestIsKey(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // nal2rbsp — emulation prevention byte removal
-// ---------------------------------------------------------------------------
 
 func TestNal2Rbsp(t *testing.T) {
 	t.Parallel()
@@ -494,9 +478,7 @@ func TestNal2Rbsp(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // ParseSliceHeaderComplete
-// ---------------------------------------------------------------------------
 
 func TestParseSliceHeaderComplete_TooShort(t *testing.T) {
 	t.Parallel()
@@ -569,15 +551,8 @@ func TestParseSliceHeaderComplete_ValidSlices(t *testing.T) {
 func TestParseSliceHeaderComplete_InvalidSliceType(t *testing.T) {
 	t.Parallel()
 
-	// Per H.265 spec, only slice_type 0-2 are valid.
-	// Encode slice_type=10 via exp-Golomb: 10 → "00001011" (leading zeros + value)
-	// SliceAddr=0("1"), slice_type=10("00001011")
-	// 1_0000_101_1 → but we need this as bytes starting from bit position
-	// Actually: "1" then "00001011" = 1_00001011 = 9 bits
-	// In a byte: 0b1_0000_101 = 0x85, next byte starts with 1...
-	// Simpler: 0x8b = 10001011
-	// "1" (addr=0), "0001011" → exp-golomb for 10: code is 0b00001011, but exp-golomb(10) =
-	// 10+1=11=0b1011, width=4, so 000_1011. Total: 1_000_1011 = 0b10001011 = 0x8b
+	// Per H.265 spec, slice_type ∈ {0, 1, 2}. Encode slice_type=10 with
+	// SliceAddr=0: exp-Golomb(0) = "1", exp-Golomb(10) = "0001011" → 0b10001011 = 0x8b.
 	packet := []byte{0x02, 0x01, 0x8b}
 	_, err := ParseSliceHeaderComplete(packet)
 	require.Error(t, err)
@@ -595,9 +570,7 @@ func TestParseSliceHeaderFromNALU_Valid(t *testing.T) {
 	require.Equal(t, SliceType(SliceI), sliceType)
 }
 
-// ---------------------------------------------------------------------------
 // PPSValidator
-// ---------------------------------------------------------------------------
 
 func TestPPSValidator_FirstSlice(t *testing.T) {
 	t.Parallel()
@@ -653,9 +626,7 @@ func TestPPSValidator_Uninitialized(t *testing.T) {
 	require.Contains(t, err.Error(), "not properly initialized")
 }
 
-// ---------------------------------------------------------------------------
 // Packet
-// ---------------------------------------------------------------------------
 
 func TestNewPacket(t *testing.T) {
 	t.Parallel()
@@ -721,9 +692,7 @@ func TestPacket_Release(t *testing.T) {
 	require.NotPanics(t, pkt.Release)
 }
 
-// ---------------------------------------------------------------------------
 // Load test data — real packets
-// ---------------------------------------------------------------------------
 
 func TestLoadPacketsFromFile(t *testing.T) {
 	t.Parallel()
@@ -796,9 +765,7 @@ func TestLoadPackets_CloneRoundtrip(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // ParseSPS — using real test data
-// ---------------------------------------------------------------------------
 
 func TestParseSPS_RealData(t *testing.T) {
 	t.Parallel()
@@ -824,14 +791,10 @@ func TestParseSPS_TooShort(t *testing.T) {
 	require.Error(t, err)
 }
 
-// ---------------------------------------------------------------------------
 // SliceType.String()
-// ---------------------------------------------------------------------------
 // (Skipped per project convention: "Do not write tests for String() methods.")
 
-// ---------------------------------------------------------------------------
 // NAL type constants — verify ranges
-// ---------------------------------------------------------------------------
 
 func TestNALTypeConstants(t *testing.T) {
 	t.Parallel()

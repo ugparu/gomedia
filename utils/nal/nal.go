@@ -4,14 +4,13 @@ import (
 	"github.com/ugparu/gomedia/utils/bits/pio"
 )
 
-// Constants for different NALU (Network Abstraction Layer Unit) formats.
 const (
-	naluRaw    = iota // Raw NALU format.
-	naluAVCC          // AVCC NALU format.
-	naluANNEXB        // ANNEXB NALU format.
+	naluRaw    = iota // packed NAL with no framing
+	naluAVCC          // length-prefixed (ISO/IEC 14496-15)
+	naluANNEXB        // start-code framed (ITU-T H.264 Annex B)
 )
 
-// MinNaluSize is the minimum size of a Network Abstraction Layer Unit (NALU).
+// MinNaluSize is the smallest NALU we accept (1-byte NAL header + 3-byte body).
 const MinNaluSize = 4
 
 // isStartCode checks if there's a NALU start code (0x000001 or 0x00000001) at the given position

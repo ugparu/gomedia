@@ -1,3 +1,5 @@
+//go:build cuda
+
 package cuda
 
 //#cgo LDFLAGS: -L/usr/local/cuda/lib64 -lnppc -lnppial -lnppicc -lnppidei -lnppif -lnppig -lnppim -lnppist -lnppisu -lnppitc -lnpps -lcudart

@@ -25,9 +25,7 @@ import (
 	"github.com/ugparu/gomedia/utils/sdp"
 )
 
-// ---------------------------------------------------------------------------
 // helpers
-// ---------------------------------------------------------------------------
 
 // fakeConn implements net.Conn backed by a bytes.Buffer for reads and writes.
 type rtspFakeConn struct {
@@ -42,12 +40,12 @@ func newRTSPFakeConn(response string) *rtspFakeConn {
 	}
 }
 
-func (f *rtspFakeConn) Read(p []byte) (int, error)  { return f.readBuf.Read(p) }
-func (f *rtspFakeConn) Write(p []byte) (int, error)  { return f.writeBuf.Write(p) }
-func (f *rtspFakeConn) Close() error                  { return nil }
-func (f *rtspFakeConn) LocalAddr() net.Addr            { return nil }
-func (f *rtspFakeConn) RemoteAddr() net.Addr           { return nil }
-func (f *rtspFakeConn) SetDeadline(time.Time) error    { return nil }
+func (f *rtspFakeConn) Read(p []byte) (int, error)       { return f.readBuf.Read(p) }
+func (f *rtspFakeConn) Write(p []byte) (int, error)      { return f.writeBuf.Write(p) }
+func (f *rtspFakeConn) Close() error                     { return nil }
+func (f *rtspFakeConn) LocalAddr() net.Addr              { return nil }
+func (f *rtspFakeConn) RemoteAddr() net.Addr             { return nil }
+func (f *rtspFakeConn) SetDeadline(time.Time) error      { return nil }
 func (f *rtspFakeConn) SetReadDeadline(time.Time) error  { return nil }
 func (f *rtspFakeConn) SetWriteDeadline(time.Time) error { return nil }
 

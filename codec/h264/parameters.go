@@ -40,7 +40,6 @@ func NewCodecDataFromSPSAndPPS(sps, pps []byte) (codecPar CodecParameters, err e
 	if codecPar.SPSInfo, err = parseSPS(sps); err != nil {
 		return
 	}
-	// Calculate bitrate based on width, scale factor, and frame rate; skip if FPS is unknown.
 	if fps := codecPar.FPS(); fps > 0 {
 		widthFactor := float64(codecPar.Width())
 		fpsRatio := bitrateFrameRate / float64(fps)
@@ -69,7 +68,6 @@ func NewCodecDataFromAVCDecoderConfRecord(record []byte) (codecPar CodecParamete
 	}
 
 	codecPar.CodecType = gomedia.H264
-	// Calculate bitrate based on width, scale factor, and frame rate; skip if FPS is unknown.
 	if fps := codecPar.FPS(); fps > 0 {
 		widthFactor := float64(codecPar.Width())
 		fpsRatio := bitrateFrameRate / float64(fps)

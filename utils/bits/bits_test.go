@@ -9,9 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ---------------------------------------------------------------------------
 // Reader — ReadBits64
-// ---------------------------------------------------------------------------
 
 func TestReader_ReadBits64_SingleByte(t *testing.T) {
 	r := &Reader{R: bytes.NewReader([]byte{0b10110100})}
@@ -67,9 +65,7 @@ func TestReader_ReadBits(t *testing.T) {
 	assert.Equal(t, uint(0b1100), bits)
 }
 
-// ---------------------------------------------------------------------------
 // Reader — Read (io.Reader)
-// ---------------------------------------------------------------------------
 
 func TestReader_Read_AlignedBytes(t *testing.T) {
 	input := []byte{0xDE, 0xAD, 0xBE, 0xEF}
@@ -100,9 +96,7 @@ func TestReader_Read_AfterBitReads(t *testing.T) {
 	assert.Equal(t, byte(0xBC), buf[0])
 }
 
-// ---------------------------------------------------------------------------
 // Writer — WriteBits64
-// ---------------------------------------------------------------------------
 
 func TestWriter_WriteBits64_SingleValue(t *testing.T) {
 	var buf bytes.Buffer
@@ -193,9 +187,7 @@ func TestWriter_WriteBits(t *testing.T) {
 	assert.Equal(t, []byte{0xAB}, buf.Bytes())
 }
 
-// ---------------------------------------------------------------------------
 // Writer — Write (io.Writer)
-// ---------------------------------------------------------------------------
 
 func TestWriter_Write_Bytes(t *testing.T) {
 	var buf bytes.Buffer
@@ -211,9 +203,7 @@ func TestWriter_Write_Bytes(t *testing.T) {
 	assert.Equal(t, data, buf.Bytes())
 }
 
-// ---------------------------------------------------------------------------
 // Writer — FlushBits
-// ---------------------------------------------------------------------------
 
 func TestWriter_FlushBits_NothingBuffered(t *testing.T) {
 	var buf bytes.Buffer
@@ -224,9 +214,7 @@ func TestWriter_FlushBits_NothingBuffered(t *testing.T) {
 	assert.Empty(t, buf.Bytes())
 }
 
-// ---------------------------------------------------------------------------
 // Round-trip: Writer → Reader
-// ---------------------------------------------------------------------------
 
 func TestBits_RoundTrip(t *testing.T) {
 	var buf bytes.Buffer
@@ -253,9 +241,7 @@ func TestBits_RoundTrip(t *testing.T) {
 	assert.Equal(t, uint64(0xCAFE), v3)
 }
 
-// ---------------------------------------------------------------------------
 // GolombBitReader
-// ---------------------------------------------------------------------------
 
 func TestGolombBitReader_ReadBit(t *testing.T) {
 	// 0b10110000
@@ -318,16 +304,16 @@ func TestGolombBitReader_ReadExponentialGolombCode(t *testing.T) {
 		input []byte
 		want  uint
 	}{
-		{"value_0", []byte{0b10000000}, 0},         // 1 + padding
-		{"value_1", []byte{0b01000000}, 1},         // 010 + padding
-		{"value_2", []byte{0b01100000}, 2},         // 011 + padding
-		{"value_3", []byte{0b00100000}, 3},         // 00100 + padding
-		{"value_4", []byte{0b00101000}, 4},         // 00101 + padding
-		{"value_5", []byte{0b00110000}, 5},         // 00110 + padding
-		{"value_6", []byte{0b00111000}, 6},         // 00111 + padding
-		{"value_7", []byte{0b00010000}, 7},         // 0001000 + padding
-		{"value_8", []byte{0b00010010}, 8},         // 0001001 + padding
-		{"value_14", []byte{0b00011110}, 14},       // 0001111 + padding
+		{"value_0", []byte{0b10000000}, 0},   // 1 + padding
+		{"value_1", []byte{0b01000000}, 1},   // 010 + padding
+		{"value_2", []byte{0b01100000}, 2},   // 011 + padding
+		{"value_3", []byte{0b00100000}, 3},   // 00100 + padding
+		{"value_4", []byte{0b00101000}, 4},   // 00101 + padding
+		{"value_5", []byte{0b00110000}, 5},   // 00110 + padding
+		{"value_6", []byte{0b00111000}, 6},   // 00111 + padding
+		{"value_7", []byte{0b00010000}, 7},   // 0001000 + padding
+		{"value_8", []byte{0b00010010}, 8},   // 0001001 + padding
+		{"value_14", []byte{0b00011110}, 14}, // 0001111 + padding
 	}
 
 	for _, tt := range tests {

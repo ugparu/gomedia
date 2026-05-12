@@ -19,9 +19,7 @@ import (
 
 const testDataDir = "../../tests/data/h264_aac/"
 
-// ---------------------------------------------------------------------------
 // Test data helpers
-// ---------------------------------------------------------------------------
 
 func loadTestCodecPair(t *testing.T, sourceID string) (gomedia.CodecParametersPair, *h264.CodecParameters, *aac.CodecParameters) {
 	t.Helper()
@@ -111,9 +109,7 @@ func newBuffer(targetDuration time.Duration) *Buffer {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Buffer tests
-// ---------------------------------------------------------------------------
 
 func TestBuffer_AddPacket_DropsBeforeKeyframe(t *testing.T) {
 	_, videoCp, audioCp := loadTestCodecPair(t, "rtsp://test")

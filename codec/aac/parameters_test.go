@@ -73,7 +73,7 @@ func TestNewCodecDataFromMPEG4AudioConfig(t *testing.T) {
 			if tt.channelConfig > 0 {
 				require.Equal(t, tt.channelConfig, cod.Config.ChannelConfig)
 			}
-			// Bitrate may be 0 if channel layout lookup fails (e.g., with_channel_layout case)
+			// Bitrate is 0 when ChannelConfig == 0 (layout-only path).
 			if cod.Config.ChannelConfig > 0 {
 				require.Greater(t, cod.BRate, uint(0))
 			}
@@ -92,9 +92,9 @@ func TestNewCodecDataFromMPEG4AudioConfig_InvalidConfig(t *testing.T) {
 			ChannelConfig:   2,
 		}
 
+		// WriteMPEG4AudioConfig doesn't validate, so writing may succeed;
+		// ParseMPEG4AudioConfigBytes is what catches an invalid ObjectType.
 		_, err := NewCodecDataFromMPEG4AudioConfig(config)
-		// WriteMPEG4AudioConfig doesn't validate, so this might succeed
-		// but ParseMPEG4AudioConfigBytes will fail
 		if err != nil {
 			require.Contains(t, err.Error(), "parse MPEG4AudioConfig failed")
 		}
@@ -127,7 +127,7 @@ func TestNewCodecDataFromMPEG4AudioConfigBytes(t *testing.T) {
 
 	t.Run("invalid_bytes", func(t *testing.T) {
 		t.Parallel()
-		invalidBytes := []byte{0x01} // Too short
+		invalidBytes := []byte{0x01}
 
 		_, err := NewCodecDataFromMPEG4AudioConfigBytes(invalidBytes)
 		require.Error(t, err)
@@ -361,7 +361,6 @@ func TestCodecParameters_BitrateCalculation(t *testing.T) {
 		})
 	}
 
-	// Verify bitrate calculation formula: SampleRate * Channels * BytesPerSample * 8
 	t.Run("bitrate_formula_verification", func(t *testing.T) {
 		t.Parallel()
 		config := MPEG4AudioConfig{
@@ -391,7 +390,6 @@ func TestCodecParameters_StreamIndex(t *testing.T) {
 	cod, err := NewCodecDataFromMPEG4AudioConfig(config)
 	require.NoError(t, err)
 
-	// Test setting and getting stream index
 	cod.SetStreamIndex(5)
 	require.Equal(t, uint8(5), cod.StreamIndex())
 
@@ -433,16 +431,15 @@ func TestCodecParameters_SetBitrate(t *testing.T) {
 	originalBRate := cod.Bitrate()
 	require.Greater(t, originalBRate, uint(0))
 
-	// Set custom bitrate
 	cod.SetBitrate(128000)
 	require.Equal(t, uint(128000), cod.Bitrate())
 
-	// Set back to original
 	cod.SetBitrate(originalBRate)
 	require.Equal(t, originalBRate, cod.Bitrate())
 }
 
-// Test edge case: channel config 0 (defined in AOT-specific config)
+// ChannelConfig == 0 means "defined in AOT-specific config" (ISO 14496-3 §1.6.3);
+// the call must not panic even though the resulting layout is empty.
 func TestCodecParameters_ChannelConfigZero(t *testing.T) {
 	t.Parallel()
 
@@ -453,8 +450,6 @@ func TestCodecParameters_ChannelConfigZero(t *testing.T) {
 	}
 	config.Complete()
 
-	// Channel config 0 is valid in MPEG4AudioConfig but may cause issues
-	// Test that it doesn't panic
 	cod, err := NewCodecDataFromMPEG4AudioConfig(config)
 	if err == nil {
 		layout := cod.ChannelLayout()
@@ -464,7 +459,6 @@ func TestCodecParameters_ChannelConfigZero(t *testing.T) {
 	}
 }
 
-// Test that ConfigBytes preserves the exact bytes written
 func TestCodecParameters_ConfigBytesPreservation(t *testing.T) {
 	t.Parallel()
 
@@ -486,7 +480,6 @@ func TestCodecParameters_ConfigBytesPreservation(t *testing.T) {
 	configBytes := cod.MPEG4AudioConfigBytes()
 	require.Equal(t, originalBytes, configBytes)
 
-	// Verify we can parse it again
 	parsedConfig, err := ParseMPEG4AudioConfigBytes(configBytes)
 	require.NoError(t, err)
 	require.Equal(t, config.ObjectType, parsedConfig.ObjectType)
@@ -494,7 +487,7 @@ func TestCodecParameters_ConfigBytesPreservation(t *testing.T) {
 	require.Equal(t, config.ChannelConfig, parsedConfig.ChannelConfig)
 }
 
-// Test round-trip: Config -> CodecParameters -> ConfigBytes -> Parse -> Config
+// Round-trip: Config → CodecParameters → ConfigBytes → Parse → Config.
 func TestCodecParameters_RoundTrip(t *testing.T) {
 	t.Parallel()
 
@@ -505,18 +498,14 @@ func TestCodecParameters_RoundTrip(t *testing.T) {
 	}
 	originalConfig.Complete()
 
-	// Create codec parameters
 	cod, err := NewCodecDataFromMPEG4AudioConfig(originalConfig)
 	require.NoError(t, err)
 
-	// Get config bytes
 	configBytes := cod.MPEG4AudioConfigBytes()
 
-	// Parse config bytes
 	parsedConfig, err := ParseMPEG4AudioConfigBytes(configBytes)
 	require.NoError(t, err)
 
-	// Verify all fields match
 	require.Equal(t, originalConfig.ObjectType, parsedConfig.ObjectType)
 	require.Equal(t, originalConfig.SampleRateIndex, parsedConfig.SampleRateIndex)
 	require.Equal(t, originalConfig.ChannelConfig, parsedConfig.ChannelConfig)

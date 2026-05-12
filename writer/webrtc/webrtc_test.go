@@ -11,9 +11,7 @@ import (
 	"github.com/ugparu/gomedia/utils/logger"
 )
 
-// ---------------------------------------------------------------------------
 // Constructor tests
-// ---------------------------------------------------------------------------
 
 func TestNew_ReturnsNonNil(t *testing.T) {
 	w := New(64, 5*time.Second)
@@ -36,9 +34,7 @@ func TestNew_ChannelsAreAccessible(t *testing.T) {
 	assert.NotNil(t, w.RemoveSource())
 }
 
-// ---------------------------------------------------------------------------
 // Lifecycle tests
-// ---------------------------------------------------------------------------
 
 func TestWriter_WriteAndClose(t *testing.T) {
 	w := New(64, 5*time.Second)
@@ -73,9 +69,7 @@ func TestWriter_CloseWithoutWriteDoesNotPanic(t *testing.T) {
 	<-w.Done()
 }
 
-// ---------------------------------------------------------------------------
 // SortedResolutions tests
-// ---------------------------------------------------------------------------
 
 func TestWriter_SortedResolutions_EmptyInitially(t *testing.T) {
 	w := New(64, 5*time.Second)
@@ -88,9 +82,7 @@ func TestWriter_SortedResolutions_EmptyInitially(t *testing.T) {
 	assert.False(t, codec.HasAudio)
 }
 
-// ---------------------------------------------------------------------------
 // Source management tests
-// ---------------------------------------------------------------------------
 
 func newTestWriter(t *testing.T) gomedia.WebRTCStreamer {
 	t.Helper()
@@ -191,9 +183,7 @@ func TestWriter_PacketsFromUnregisteredSourceIgnored(t *testing.T) {
 	assert.Len(t, w.SortedResolutions().Resolutions, 0)
 }
 
-// ---------------------------------------------------------------------------
 // Peer connection tests (without real WebRTC - testing error paths)
-// ---------------------------------------------------------------------------
 
 func TestWriter_PeerWithEmptyTargetURL(t *testing.T) {
 	w := newTestWriter(t)
@@ -233,9 +223,7 @@ func TestWriter_PeerWithNonexistentStream(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // extractFmtpLineFromSDP tests
-// ---------------------------------------------------------------------------
 
 func TestExtractFmtpLineFromSDP_H264(t *testing.T) {
 	sdp := `v=0
@@ -285,9 +273,7 @@ func TestExtractFmtpLineFromSDP_UnsupportedCodec(t *testing.T) {
 	assert.Empty(t, result)
 }
 
-// ---------------------------------------------------------------------------
 // Packet flow with real test data
-// ---------------------------------------------------------------------------
 
 func TestWriter_RealDataFlow(t *testing.T) {
 	w := newTestWriter(t)

@@ -84,8 +84,7 @@ func (self *SampleSize) Unmarshal(b []byte, offset int) (n int, err error) {
 	if self.SampleSize != 0 {
 		return
 	}
-	var _len_Entries uint32
-	_len_Entries = pio.U32BE(b[n:])
+	var _len_Entries uint32 = pio.U32BE(b[n:])
 	n += 4
 	self.Entries = make([]uint32, _len_Entries)
 	if len(b) < n+4*len(self.Entries) {

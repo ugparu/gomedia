@@ -15,17 +15,11 @@ type opusDecoder struct {
 }
 
 func NewOpusDecoder() decoder.InnerAudioDecoder {
-	return &opusDecoder{
-		Decoder:  nil,
-		codecPar: nil,
-	}
+	return &opusDecoder{}
 }
 
 func (d *opusDecoder) Init(params gomedia.AudioCodecParameters) (err error) {
-	// Sample rates in audio are typically well below MaxInt32, so this is a safe conversion
-	// We add the nolint directive because this is audio code where these values are known to be reasonable
-	//nolint:gosec // Audio sample rates are typically well below MaxInt32
-	d.Decoder, err = opus.NewDecoder(int(params.SampleRate()), int(params.Channels()))
+	d.Decoder, err = opus.NewDecoder(int(params.SampleRate()), int(params.Channels())) //nolint:gosec // sample rate fits in int
 	d.codecPar = params
 	return
 }

@@ -104,7 +104,11 @@ func (element *webRTCWriter) Step(stopCh <-chan struct{}) (err error) {
 		}
 
 		codecType := targetStream.codecPar.VideoCodecParameters.Type()
-		go element.addConnection(peer, peer.TargetURL, codecType)
+		go func() {
+			if err := element.addConnection(peer, peer.TargetURL, codecType); err != nil {
+				element.log.Errorf(element, "addConnection: %v", err)
+			}
+		}()
 	case peerURL := <-element.changePeersChan:
 		if !element.streams.Exists(peerURL.URL) {
 			respBytes, marshalErr := element.signaling.BuildErrorResponse(peerURL.Token)

@@ -6,7 +6,34 @@ on:
   pull_request:
     branches: [master]
 
+permissions:
+  contents: read
+
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libfdk-aac-dev libopus-dev libopusfile-dev \
+            libavcodec-dev libavutil-dev libswscale-dev libavformat-dev libswresample-dev
+
+      - name: go vet
+        run: go vet ./...
+
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -19,10 +46,12 @@ jobs:
       - name: Install native dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libfdk-aac-dev libopus-dev libavcodec-dev libavutil-dev libswscale-dev libavformat-dev libswresample-dev libopusfile-dev
+          sudo apt-get install -y \
+            libfdk-aac-dev libopus-dev libopusfile-dev \
+            libavcodec-dev libavutil-dev libswscale-dev libavformat-dev libswresample-dev
 
       - name: Run tests with coverage
-        run: go test -coverprofile=coverage.out ./... || true
+        run: go test -coverprofile=coverage.out ./...
 
       - name: Extract coverage percentage
         if: hashFiles('coverage.out') != ''
@@ -31,7 +60,6 @@ jobs:
           COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | tr -d '%')
           echo "percentage=$COVERAGE" >> "$GITHUB_OUTPUT"
 
-          # Determine badge color
           if (( $(echo "$COVERAGE >= 60" | bc -l) )); then
             COLOR=brightgreen
           elif (( $(echo "$COVERAGE >= 30" | bc -l) )); then

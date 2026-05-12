@@ -9,7 +9,7 @@ import (
 	"github.com/ugparu/gomedia"
 )
 
-// Helper function to create a valid ADTS header
+// createADTSHeader builds a 7- or 9-byte ADTS header with the given fields.
 func createADTSHeader(objectType uint, sampleRateIndex uint, channelConfig uint, frameLength int, samples int, protected bool) []byte {
 	header := make([]byte, 9)
 	header[0] = 0xff
@@ -115,7 +115,6 @@ func TestParseADTSHeader_ValidCases(t *testing.T) {
 		})
 	}
 
-	// Test all sample rates
 	t.Run("all_sample_rates", func(t *testing.T) {
 		t.Parallel()
 		for i := uint(0); i < uint(len(sampleRateTable)); i++ {
@@ -127,7 +126,6 @@ func TestParseADTSHeader_ValidCases(t *testing.T) {
 		}
 	})
 
-	// Test all channel configs
 	t.Run("all_channel_configs", func(t *testing.T) {
 		t.Parallel()
 		for i := uint(1); i < uint(len(chanConfigTable)); i++ {
@@ -485,7 +483,6 @@ func TestFillADTSHeader_ValidCases(t *testing.T) {
 		})
 	}
 
-	// Test all sample rates
 	t.Run("all_sample_rates", func(t *testing.T) {
 		t.Parallel()
 		for i := uint(0); i < uint(len(sampleRateTable)); i++ {
@@ -506,7 +503,6 @@ func TestFillADTSHeader_ValidCases(t *testing.T) {
 		}
 	})
 
-	// Test all channel configs
 	t.Run("all_channel_configs", func(t *testing.T) {
 		t.Parallel()
 		for i := uint(1); i < uint(len(chanConfigTable)); i++ {
@@ -830,7 +826,6 @@ func TestParseMPEG4AudioConfigBytes_ValidCases(t *testing.T) {
 		})
 	}
 
-	// Test all standard object types
 	t.Run("all_standard_object_types", func(t *testing.T) {
 		t.Parallel()
 		objectTypes := []uint{AotAacMain, AotAacLc, AotAacSsr, AotAacLtp, AotSbr}
@@ -851,7 +846,6 @@ func TestParseMPEG4AudioConfigBytes_ValidCases(t *testing.T) {
 		}
 	})
 
-	// Test all channel configs
 	t.Run("all_channel_configs", func(t *testing.T) {
 		t.Parallel()
 		for i := uint(0); i < uint(len(chanConfigTable)); i++ {
@@ -898,16 +892,16 @@ func TestParseMPEG4AudioConfigBytes_InvalidData(t *testing.T) {
 		{
 			name: "truncated_sample_rate",
 			data: []byte{0x02, 0x00}, // Object type OK (5 bits = 0x02), but sample rate needs 4 more bits
-			// BUG: bits.Reader doesn't return error if it can read partial data from buffer
-			// The implementation should validate data completeness before parsing
-			expectError: false, // Currently doesn't error - this is a bug in implementation
+			// TODO: bits.Reader truncates silently on short reads; ParseMPEG4AudioConfig
+			// should fail here once we tighten that contract.
+			expectError: false,
 		},
 		{
 			name: "truncated_channel_config",
 			data: []byte{0x02, 0x40}, // Object type OK, sample rate OK (4 bits), but channel config needs 4 more bits
-			// BUG: bits.Reader doesn't return error if it can read partial data from buffer
-			// The implementation should validate data completeness before parsing
-			expectError: false, // Currently doesn't error - this is a bug in implementation
+			// TODO: bits.Reader truncates silently on short reads; ParseMPEG4AudioConfig
+			// should fail here once we tighten that contract.
+			expectError: false,
 		},
 		{
 			name:        "truncated_extended_object_type",
@@ -917,9 +911,9 @@ func TestParseMPEG4AudioConfigBytes_InvalidData(t *testing.T) {
 		{
 			name: "truncated_extended_sample_rate",
 			data: []byte{0x02, 0xf0}, // Extended sample rate (0xf) but needs 24 more bits (3 bytes)
-			// BUG: bits.Reader doesn't return error if it can read partial data from buffer
-			// The implementation should validate data completeness before parsing
-			expectError: false, // Currently doesn't error - this is a bug in implementation
+			// TODO: bits.Reader truncates silently on short reads; ParseMPEG4AudioConfig
+			// should fail here once we tighten that contract.
+			expectError: false,
 		},
 	}
 
@@ -1003,7 +997,6 @@ func TestWriteMPEG4AudioConfig_InvalidCases(t *testing.T) {
 			ChannelConfig:   2,
 		}
 
-		// WriteMPEG4AudioConfig now checks for nil writer and returns error
 		err := WriteMPEG4AudioConfig(nil, config)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "writer is nil")
@@ -1019,8 +1012,8 @@ func TestWriteMPEG4AudioConfig_InvalidCases(t *testing.T) {
 
 		var buf bytes.Buffer
 		err := WriteMPEG4AudioConfig(&buf, config)
-		// Note: WriteMPEG4AudioConfig doesn't validate ObjectType, it will write it
-		// This is a potential issue but we test what the code actually does
+		// WriteMPEG4AudioConfig doesn't validate ObjectType; this test pins
+		// current behavior — the write succeeds but Parse later rejects it.
 		require.NoError(t, err)
 	})
 
@@ -1034,7 +1027,6 @@ func TestWriteMPEG4AudioConfig_InvalidCases(t *testing.T) {
 
 		var buf bytes.Buffer
 		err := WriteMPEG4AudioConfig(&buf, config)
-		// The function will write with SampleRateIndex = 0 if not found
 		require.NoError(t, err)
 	})
 
@@ -1048,7 +1040,6 @@ func TestWriteMPEG4AudioConfig_InvalidCases(t *testing.T) {
 
 		var buf bytes.Buffer
 		err := WriteMPEG4AudioConfig(&buf, config)
-		// The function will write with ChannelConfig = 0 if not found
 		require.NoError(t, err)
 	})
 }
@@ -1125,7 +1116,6 @@ func TestRoundTrip_ADTSHeader(t *testing.T) {
 		})
 	}
 
-	// Exhaustive test: all sample rates and channel configs
 	t.Run("exhaustive_roundtrip", func(t *testing.T) {
 		t.Parallel()
 		for srIdx := uint(0); srIdx < uint(len(sampleRateTable)); srIdx++ {
@@ -1277,17 +1267,16 @@ func TestMPEG4AudioConfig_Complete(t *testing.T) {
 			ChannelConfig:   10,
 		}
 		config.Complete()
-		// Should not panic, but values remain zero
+		// Must not panic; uninitialized fields stay zero.
 		require.Equal(t, 0, config.SampleRate)
 		require.Equal(t, gomedia.ChannelLayout(0), config.ChannelLayout)
 	})
 }
 
-// Test for potential integer overflow in frame length calculation
+// frame_length is a 13-bit field; verify the parser doesn't sign-extend or wrap.
 func TestParseADTSHeader_FrameLengthOverflow(t *testing.T) {
 	t.Parallel()
 
-	// Create a header with maximum valid frame length (13 bits = 8191)
 	header := createADTSHeader(AotAacLc, 4, 2, 8191, 1024, false)
 	header = header[:7]
 
@@ -1295,7 +1284,6 @@ func TestParseADTSHeader_FrameLengthOverflow(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 8191, framelen)
 
-	// Test with frame length that would overflow if not properly masked
 	header = createADTSHeader(AotAacLc, 4, 2, 8190, 1024, false)
 	header = header[:7]
 
@@ -1304,12 +1292,10 @@ func TestParseADTSHeader_FrameLengthOverflow(t *testing.T) {
 	require.Equal(t, 8190, framelen)
 }
 
-// Test for potential issues with channel config bit manipulation
+// channel_configuration is split across bytes 2 and 3; exercise both halves.
 func TestParseADTSHeader_ChannelConfigBitManipulation(t *testing.T) {
 	t.Parallel()
 
-	// Channel config is stored across bytes 2 and 3
-	// Test various configurations to ensure bit manipulation is correct
 	for chCfg := uint(1); chCfg < uint(len(chanConfigTable)); chCfg++ {
 		header := createADTSHeader(AotAacLc, 4, chCfg, 100, 1024, false)
 		header = header[:7]
@@ -1320,7 +1306,7 @@ func TestParseADTSHeader_ChannelConfigBitManipulation(t *testing.T) {
 	}
 }
 
-// Test for edge case in FillADTSHeader where payloadLength + header length equals max
+// FillADTSHeader: payloadLength + header == max representable (8191).
 func TestFillADTSHeader_MaxFrameLength(t *testing.T) {
 	t.Parallel()
 
@@ -1331,7 +1317,6 @@ func TestFillADTSHeader_MaxFrameLength(t *testing.T) {
 	}
 	config.Complete()
 
-	// Maximum valid payload: 8191 - 7 = 8184
 	header := make([]byte, ADTSHeaderLength)
 	err := FillADTSHeader(header, config, 1024, 8184)
 	require.NoError(t, err)
@@ -1341,7 +1326,7 @@ func TestFillADTSHeader_MaxFrameLength(t *testing.T) {
 	require.Equal(t, 8191, framelen)
 }
 
-// Test that WriteMPEG4AudioConfig handles extended object types correctly
+// Extended object types (>=32) write 5b escape + 6b value (ISO 14496-3 §1.6.2.1).
 func TestWriteMPEG4AudioConfig_ExtendedObjectTypes(t *testing.T) {
 	t.Parallel()
 
@@ -1363,11 +1348,10 @@ func TestWriteMPEG4AudioConfig_ExtendedObjectTypes(t *testing.T) {
 	}
 }
 
-// Test that WriteMPEG4AudioConfig handles extended sample rates correctly
+// Extended sample rate writes 4b escape (0xf) + 24b Hz value.
 func TestWriteMPEG4AudioConfig_ExtendedSampleRates(t *testing.T) {
 	t.Parallel()
 
-	// Extended sample rate uses index 0xF followed by 24-bit value
 	config := MPEG4AudioConfig{
 		ObjectType:      AotAacLc,
 		SampleRateIndex: 0xf,
@@ -1384,7 +1368,6 @@ func TestWriteMPEG4AudioConfig_ExtendedSampleRates(t *testing.T) {
 	require.Equal(t, uint(0xf), parsedConfig.SampleRateIndex)
 }
 
-// Test error handling when writer fails
 func TestWriteMPEG4AudioConfig_WriterError(t *testing.T) {
 	t.Parallel()
 
@@ -1394,7 +1377,6 @@ func TestWriteMPEG4AudioConfig_WriterError(t *testing.T) {
 		ChannelConfig:   2,
 	}
 
-	// Create a writer that will fail
 	failingWriter := &failingWriter{}
 	err := WriteMPEG4AudioConfig(failingWriter, config)
 	require.Error(t, err)

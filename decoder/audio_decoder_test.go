@@ -48,9 +48,7 @@ func loadFixtureFrames(t *testing.T, path string) [][]byte {
 	return frames
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 func makeFactory(codecType gomedia.CodecType, inner decoder.InnerAudioDecoder) map[gomedia.CodecType]func() decoder.InnerAudioDecoder {
 	return map[gomedia.CodecType]func() decoder.InnerAudioDecoder{
@@ -106,9 +104,7 @@ func lawFactory(ct gomedia.CodecType, newInner func() decoder.InnerAudioDecoder)
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Constructor
-// ---------------------------------------------------------------------------
 
 func TestNewAudioDecoder_NotNil(t *testing.T) {
 	t.Parallel()
@@ -124,9 +120,7 @@ func TestNewAudioDecoder_ChannelsNotNil(t *testing.T) {
 	require.NotNil(t, d.Done())
 }
 
-// ---------------------------------------------------------------------------
 // Lifecycle: Close without Decode
-// ---------------------------------------------------------------------------
 
 func TestClose_WithoutDecode(t *testing.T) {
 	t.Parallel()
@@ -141,9 +135,7 @@ func TestClose_WithoutDecode_SamplesClosedAfterClose(t *testing.T) {
 	require.Empty(t, drainSamples(d))
 }
 
-// ---------------------------------------------------------------------------
 // Lifecycle: Close after Decode
-// ---------------------------------------------------------------------------
 
 func TestClose_AfterDecode(t *testing.T) {
 	t.Parallel()
@@ -172,9 +164,7 @@ func TestDone_ClosedAfterClose(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Step — happy path: produce PCM
-// ---------------------------------------------------------------------------
 
 func TestStep_ProducePCM(t *testing.T) {
 	t.Parallel()
@@ -207,9 +197,7 @@ func TestStep_ProducePCM(t *testing.T) {
 	d.Close()
 }
 
-// ---------------------------------------------------------------------------
 // Timestamp, SourceID, Duration propagation
-// ---------------------------------------------------------------------------
 
 func TestStep_PropagatesTimestamp(t *testing.T) {
 	t.Parallel()
@@ -254,9 +242,7 @@ func TestStep_PropagatesTimestamp(t *testing.T) {
 	d.Close()
 }
 
-// ---------------------------------------------------------------------------
 // Output PCM codec parameters
-// ---------------------------------------------------------------------------
 
 func TestStep_OutputHasPCMCodecType(t *testing.T) {
 	t.Parallel()
@@ -296,9 +282,7 @@ func TestStep_OutputHasPCMCodecType(t *testing.T) {
 	d.Close()
 }
 
-// ---------------------------------------------------------------------------
 // Unsupported codec
-// ---------------------------------------------------------------------------
 
 func TestStep_UnsupportedCodec(t *testing.T) {
 	t.Parallel()
@@ -323,9 +307,7 @@ func TestStep_UnsupportedCodec(t *testing.T) {
 	require.Empty(t, drainSamples(d))
 }
 
-// ---------------------------------------------------------------------------
 // Empty decode result
-// ---------------------------------------------------------------------------
 
 func TestStep_EmptyDecode(t *testing.T) {
 	t.Parallel()
@@ -355,9 +337,7 @@ func TestStep_EmptyDecode(t *testing.T) {
 	require.Empty(t, drainSamples(d))
 }
 
-// ---------------------------------------------------------------------------
 // Decode error
-// ---------------------------------------------------------------------------
 
 func TestStep_DecodeError(t *testing.T) {
 	t.Parallel()
@@ -387,9 +367,7 @@ func TestStep_DecodeError(t *testing.T) {
 	require.Empty(t, drainSamples(d))
 }
 
-// ---------------------------------------------------------------------------
 // Init error
-// ---------------------------------------------------------------------------
 
 func TestStep_InitError(t *testing.T) {
 	t.Parallel()
@@ -412,9 +390,7 @@ func TestStep_InitError(t *testing.T) {
 	require.Empty(t, drainSamples(d))
 }
 
-// ---------------------------------------------------------------------------
 // Ring buffer propagation
-// ---------------------------------------------------------------------------
 
 func TestAudioWithRingBuffer_PropagatedToDecode(t *testing.T) {
 	t.Parallel()
@@ -448,9 +424,7 @@ func TestAudioWithRingBuffer_PropagatedToDecode(t *testing.T) {
 	d.Close()
 }
 
-// ---------------------------------------------------------------------------
 // Options smoke test
-// ---------------------------------------------------------------------------
 
 func TestAudioWithName(t *testing.T) {
 	t.Parallel()
@@ -459,9 +433,7 @@ func TestAudioWithName(t *testing.T) {
 	d.Close()
 }
 
-// ---------------------------------------------------------------------------
 // Multiple packets: Init called once, Decode called N times
-// ---------------------------------------------------------------------------
 
 func TestStep_MultiplePackets_SameCodec(t *testing.T) {
 	t.Parallel()
@@ -500,9 +472,7 @@ func TestStep_MultiplePackets_SameCodec(t *testing.T) {
 	d.Close()
 }
 
-// ---------------------------------------------------------------------------
 // Codec switch: new codec params → new inner decoder created
-// ---------------------------------------------------------------------------
 
 func TestStep_CodecSwitch_ReinitInner(t *testing.T) {
 	t.Parallel()
@@ -557,9 +527,7 @@ func TestStep_CodecSwitch_ReinitInner(t *testing.T) {
 	d.Close()
 }
 
-// ---------------------------------------------------------------------------
 // Integration tests — real data, real inner decoders (no CGO)
-// ---------------------------------------------------------------------------
 
 func runLawIntegration(t *testing.T, ct gomedia.CodecType, newInner func() decoder.InnerAudioDecoder, dataPath string) {
 	t.Helper()

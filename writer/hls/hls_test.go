@@ -26,9 +26,7 @@ var segmentPathRe = regexp.MustCompile(`segment/(\d+)/`)
 
 const testDataDir = "../../tests/data/h264_aac/"
 
-// ---------------------------------------------------------------------------
 // Test data helpers
-// ---------------------------------------------------------------------------
 
 type parametersJSON struct {
 	URL   string          `json:"url"`
@@ -209,9 +207,7 @@ func waitForSegment(t *testing.T, w gomedia.HLSStreamer, uid string, timeout tim
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Constructor and options
-// ---------------------------------------------------------------------------
 
 func TestNew_ReturnsNonNil(t *testing.T) {
 	w := New(1, 3, 2*time.Second, 64, 1.5)
@@ -243,9 +239,7 @@ func TestNew_DefaultValues(t *testing.T) {
 	assert.Equal(t, 2.0, w.partHoldBack)
 }
 
-// ---------------------------------------------------------------------------
 // Channel accessors
-// ---------------------------------------------------------------------------
 
 func TestPackets_ReturnsNonNilChannel(t *testing.T) {
 	w := New(1, 3, 2*time.Second, 64, 1.5)
@@ -262,9 +256,7 @@ func TestRemoveSource_ReturnsNonNilChannel(t *testing.T) {
 	assert.NotNil(t, w.RemoveSource())
 }
 
-// ---------------------------------------------------------------------------
 // Lifecycle: Write / Close / Done
-// ---------------------------------------------------------------------------
 
 func TestWrite_Close_Done(t *testing.T) {
 	w := New(1, 3, 2*time.Second, 64, 1.5)
@@ -283,9 +275,7 @@ func TestClose_WithoutWrite(t *testing.T) {
 	w.Close()
 }
 
-// ---------------------------------------------------------------------------
 // Single source: packet processing
-// ---------------------------------------------------------------------------
 
 func TestSingleSource_MasterPlaylistGenerated(t *testing.T) {
 	w := newWriter(t, 100, 3, 2*time.Second)
@@ -411,9 +401,7 @@ func TestSingleSource_GetFragmentAfterCompletion(t *testing.T) {
 	assert.NotEmpty(t, frag)
 }
 
-// ---------------------------------------------------------------------------
 // Invalid index lookups
-// ---------------------------------------------------------------------------
 
 func TestGetIndexM3u8_InvalidUID(t *testing.T) {
 	w := newWriter(t, 1, 3, 2*time.Second)
@@ -450,9 +438,7 @@ func TestGetFragment_InvalidUID(t *testing.T) {
 	assert.Contains(t, err.Error(), "not found")
 }
 
-// ---------------------------------------------------------------------------
 // Empty state
-// ---------------------------------------------------------------------------
 
 func TestGetMasterPlaylist_EmptyBeforePackets(t *testing.T) {
 	w := newWriter(t, 1, 3, 2*time.Second)
@@ -461,9 +447,7 @@ func TestGetMasterPlaylist_EmptyBeforePackets(t *testing.T) {
 	assert.Empty(t, master)
 }
 
-// ---------------------------------------------------------------------------
 // Source removal
-// ---------------------------------------------------------------------------
 
 func TestRemoveSource_RemovesMuxer(t *testing.T) {
 	w := newWriter(t, 1, 3, 2*time.Second)
@@ -506,9 +490,7 @@ func TestRemoveSource_NonexistentSource(t *testing.T) {
 	assert.NotContains(t, master, "#EXT-X-STREAM-INF:")
 }
 
-// ---------------------------------------------------------------------------
 // AddSource channel
-// ---------------------------------------------------------------------------
 
 func TestAddSource_DoesNotBlock(t *testing.T) {
 	w := newWriter(t, 1, 3, 2*time.Second)
@@ -527,9 +509,7 @@ func TestAddSource_DoesNotBlock(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Multi-source
-// ---------------------------------------------------------------------------
 
 func TestMultiSource_MasterPlaylistContainsAllSources(t *testing.T) {
 	w := newWriter(t, 200, 3, 2*time.Second)
@@ -613,9 +593,7 @@ func TestMultiSource_RemoveOneKeepsOther(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(master, "#EXT-X-STREAM-INF:"))
 }
 
-// ---------------------------------------------------------------------------
 // Audio-only source (no muxer created until video arrives)
-// ---------------------------------------------------------------------------
 
 func TestAudioOnly_NoMasterPlaylistEntry(t *testing.T) {
 	w := newWriter(t, 1, 3, 2*time.Second)
@@ -640,9 +618,7 @@ func TestAudioOnly_NoMasterPlaylistEntry(t *testing.T) {
 	assert.NotContains(t, master, "#EXT-X-STREAM-INF:")
 }
 
-// ---------------------------------------------------------------------------
 // GetSegment with context cancellation
-// ---------------------------------------------------------------------------
 
 func TestGetSegment_ContextCancelled(t *testing.T) {
 	w := newWriter(t, 1, 3, 2*time.Second)
@@ -662,9 +638,7 @@ func TestGetSegment_ContextCancelled(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// ---------------------------------------------------------------------------
 // Concurrent access
-// ---------------------------------------------------------------------------
 
 func TestConcurrentAccess(t *testing.T) {
 	w := newWriter(t, 1, 3, 2*time.Second)
@@ -704,9 +678,7 @@ func TestConcurrentAccess(t *testing.T) {
 	wg.Wait()
 }
 
-// ---------------------------------------------------------------------------
 // End-to-end pipeline
-// ---------------------------------------------------------------------------
 
 func TestEndToEnd_FullPipeline(t *testing.T) {
 	w := newWriter(t, 42, 3, 2*time.Second, WithMediaName("custom"))
@@ -744,9 +716,7 @@ func TestEndToEnd_FullPipeline(t *testing.T) {
 	assert.NotEmpty(t, frag)
 }
 
-// ---------------------------------------------------------------------------
 // Parallel multi-instance: 4 independent HLS streams with concurrent readers
-// ---------------------------------------------------------------------------
 
 // TestParallelInstances_FourStreamsWithConcurrentReaders emulates a real
 // deployment: 4 independent HLS writer instances (4 camera streams), each
@@ -755,10 +725,10 @@ func TestEndToEnd_FullPipeline(t *testing.T) {
 // when browsers connect to separate HLS streams.
 func TestParallelInstances_FourStreamsWithConcurrentReaders(t *testing.T) {
 	const (
-		numStreams     = 4
+		numStreams       = 4
 		readersPerStream = 3
-		pktLimit       = 500
-		readIterations = 30
+		pktLimit         = 500
+		readIterations   = 30
 	)
 
 	_, vCp, aCp := loadTestCodecPair(t, "cam1")

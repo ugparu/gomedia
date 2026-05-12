@@ -59,7 +59,6 @@ func loadTestParameters(t *testing.T) (*CodecParameters, uint8) {
 	return &cp, params.Video.StreamIndex
 }
 
-// TestNewCodecDataFromSPSAndPPS_ShortSPS verifies that short SPS input returns an error instead of panicking.
 func TestNewCodecDataFromSPSAndPPS_ShortSPS(t *testing.T) {
 	t.Parallel()
 
@@ -70,7 +69,6 @@ func TestNewCodecDataFromSPSAndPPS_ShortSPS(t *testing.T) {
 	require.Error(t, err, "expected error for nil SPS")
 }
 
-// TestNewCodecDataFromSPSAndPPS_Valid builds codec params from real SPS/PPS bytes.
 func TestNewCodecDataFromSPSAndPPS_Valid(t *testing.T) {
 	t.Parallel()
 
@@ -95,8 +93,6 @@ func TestNewCodecDataFromSPSAndPPS_Valid(t *testing.T) {
 	require.Greater(t, cp.Height(), uint(0))
 }
 
-// TestNewCodecDataFromHevcDecoderConfRecord_Valid loads the real AVCDecoderConfRecord
-// from test data and validates decoded fields.
 func TestNewCodecDataFromHevcDecoderConfRecord_Valid(t *testing.T) {
 	t.Parallel()
 
@@ -122,8 +118,6 @@ func TestNewCodecDataFromHevcDecoderConfRecord_Valid(t *testing.T) {
 	require.Contains(t, cp.Tag(), "avc1.")
 }
 
-// TestCodecParameters_SPS_PPS_EmptySlices verifies SPS() and PPS() return nil
-// when the underlying slices are empty, without panicking.
 func TestCodecParameters_SPS_PPS_EmptySlices(t *testing.T) {
 	t.Parallel()
 
@@ -132,7 +126,6 @@ func TestCodecParameters_SPS_PPS_EmptySlices(t *testing.T) {
 	require.Nil(t, cp.PPS(), "PPS() on empty RecordInfo must return nil")
 }
 
-// TestAVCDecoderConfRecord_MarshalUnmarshal verifies round-trip marshal/unmarshal.
 func TestAVCDecoderConfRecord_MarshalUnmarshal(t *testing.T) {
 	t.Parallel()
 
@@ -150,13 +143,11 @@ func TestAVCDecoderConfRecord_MarshalUnmarshal(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, len(recordBytes), n)
 
-	// Re-marshal and compare bytes.
 	out := make([]byte, rec.Len())
 	rec.Marshal(out)
 	require.Equal(t, recordBytes, out)
 }
 
-// TestAVCDecoderConfRecord_Unmarshal_TooShort verifies that short input returns an error.
 func TestAVCDecoderConfRecord_Unmarshal_TooShort(t *testing.T) {
 	t.Parallel()
 
@@ -165,7 +156,6 @@ func TestAVCDecoderConfRecord_Unmarshal_TooShort(t *testing.T) {
 	require.ErrorIs(t, err, ErrDecconfInvalid)
 }
 
-// TestNewPacket verifies that NewPacket stores all fields correctly.
 func TestNewPacket(t *testing.T) {
 	t.Parallel()
 
@@ -188,7 +178,6 @@ func TestNewPacket(t *testing.T) {
 	require.Equal(t, gomedia.H264, pkt.CodecParameters().Type())
 }
 
-// TestPacket_Clone_CopyData verifies Clone(true) produces an independent copy.
 func TestPacket_Clone_CopyData(t *testing.T) {
 	t.Parallel()
 
@@ -209,7 +198,6 @@ func TestPacket_Clone_CopyData(t *testing.T) {
 	require.Equal(t, byte(0x00), pkt.Data()[0], "original buffer must be unaffected")
 }
 
-// TestPacket_Clone_SharedData verifies Clone(false) shares the underlying buffer.
 func TestPacket_Clone_SharedData(t *testing.T) {
 	t.Parallel()
 
@@ -226,7 +214,6 @@ func TestPacket_Clone_SharedData(t *testing.T) {
 	cloned.Release()
 }
 
-// TestPacket_Release verifies Release is safe for heap-backed packets.
 func TestPacket_Release(t *testing.T) {
 	t.Parallel()
 
@@ -235,7 +222,6 @@ func TestPacket_Release(t *testing.T) {
 	require.NotPanics(t, pkt.Release)
 }
 
-// TestLoadPacketsFromFile loads real packets and wraps each in an h264.Packet.
 func TestLoadPacketsFromFile(t *testing.T) {
 	t.Parallel()
 
@@ -266,7 +252,6 @@ func TestLoadPacketsFromFile(t *testing.T) {
 	}
 }
 
-// TestLoadPackets_CloneRoundtrip verifies Clone on real packet data.
 func TestLoadPackets_CloneRoundtrip(t *testing.T) {
 	t.Parallel()
 
@@ -302,7 +287,6 @@ func TestLoadPackets_CloneRoundtrip(t *testing.T) {
 	}
 }
 
-// TestRemoveH264EmulationBytes verifies removal of H.264 emulation prevention bytes (0x00 0x00 0x03).
 func TestRemoveH264EmulationBytes(t *testing.T) {
 	t.Parallel()
 
@@ -346,7 +330,6 @@ func TestRemoveH264EmulationBytes(t *testing.T) {
 	}
 }
 
-// TestAVCDecoderConfRecord_Len verifies Len() returns the correct serialized size.
 func TestAVCDecoderConfRecord_Len(t *testing.T) {
 	t.Parallel()
 
@@ -367,8 +350,6 @@ func TestAVCDecoderConfRecord_Len(t *testing.T) {
 	})
 }
 
-// TestAVCDecoderConfRecord_MultiSPSPPS verifies marshal/unmarshal round-trip
-// for records containing more than one SPS and PPS entry.
 func TestAVCDecoderConfRecord_MultiSPSPPS(t *testing.T) {
 	t.Parallel()
 
@@ -404,8 +385,6 @@ func TestAVCDecoderConfRecord_MultiSPSPPS(t *testing.T) {
 	require.Equal(t, orig.PPS[1], decoded.PPS[1])
 }
 
-// TestAVCDecoderConfRecord_Unmarshal_TruncatedMidSPS verifies that a record
-// truncated before SPS length can be read returns ErrDecconfInvalid.
 func TestAVCDecoderConfRecord_Unmarshal_TruncatedMidSPS(t *testing.T) {
 	t.Parallel()
 
@@ -416,8 +395,6 @@ func TestAVCDecoderConfRecord_Unmarshal_TruncatedMidSPS(t *testing.T) {
 	require.ErrorIs(t, err, ErrDecconfInvalid)
 }
 
-// TestAVCDecoderConfRecord_Unmarshal_TruncatedAtPPS verifies that a record
-// truncated before PPS data returns ErrDecconfInvalid.
 func TestAVCDecoderConfRecord_Unmarshal_TruncatedAtPPS(t *testing.T) {
 	t.Parallel()
 
@@ -428,12 +405,10 @@ func TestAVCDecoderConfRecord_Unmarshal_TruncatedAtPPS(t *testing.T) {
 	require.ErrorIs(t, err, ErrDecconfInvalid)
 }
 
-// TestTag verifies the Tag format for known SPS data.
 func TestTag(t *testing.T) {
 	t.Parallel()
 
 	cp, _ := loadTestParameters(t)
-	tag := cp.Tag()
-	// Tag must be "avc1.PPCCLL" where PP=profile, CC=compat, LL=level (all uppercase hex)
-	require.Regexp(t, `^avc1\.[0-9A-F]{6}$`, tag)
+	// "avc1.PPCCLL" where PP=profile, CC=compat, LL=level (uppercase hex).
+	require.Regexp(t, `^avc1\.[0-9A-F]{6}$`, cp.Tag())
 }

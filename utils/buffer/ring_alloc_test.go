@@ -10,9 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ---------------------------------------------------------------------------
 // RingAlloc — basic allocation
-// ---------------------------------------------------------------------------
 
 func TestRingAlloc_BasicAlloc(t *testing.T) {
 	r := NewRingAlloc(1024)
@@ -72,9 +70,7 @@ func TestRingAlloc_AllocOverCapacity(t *testing.T) {
 	assert.Nil(t, h)
 }
 
-// ---------------------------------------------------------------------------
 // RingAlloc — sequential alloc / release
-// ---------------------------------------------------------------------------
 
 func TestRingAlloc_SequentialFillAndDrain(t *testing.T) {
 	r := NewRingAlloc(100)
@@ -123,9 +119,7 @@ func TestRingAlloc_ReleaseFreesSpaceForNewAlloc(t *testing.T) {
 	h3.Release()
 }
 
-// ---------------------------------------------------------------------------
 // RingAlloc — wrap-around
-// ---------------------------------------------------------------------------
 
 func TestRingAlloc_WrapAround(t *testing.T) {
 	r := NewRingAlloc(100)
@@ -158,9 +152,7 @@ func TestRingAlloc_WrapAroundBlockedByLiveSlot(t *testing.T) {
 	h1.Release()
 }
 
-// ---------------------------------------------------------------------------
 // RingAlloc — slot table exhaustion
-// ---------------------------------------------------------------------------
 
 func TestRingAlloc_SlotTableExhaustion(t *testing.T) {
 	// Use a huge slab so byte space isn't the bottleneck.
@@ -185,9 +177,7 @@ func TestRingAlloc_SlotTableExhaustion(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // SlotHandle — Retain / Release ref counting
-// ---------------------------------------------------------------------------
 
 func TestSlotHandle_NilRetainRelease(t *testing.T) {
 	var h *SlotHandle
@@ -229,9 +219,7 @@ func TestSlotHandle_DoubleReleasePanics(t *testing.T) {
 	assert.Panics(t, func() { h.Release() }, "double release should panic (refs < 0)")
 }
 
-// ---------------------------------------------------------------------------
 // RingAlloc — head advancement past consecutive done slots
-// ---------------------------------------------------------------------------
 
 func TestRingAlloc_HeadAdvancesPastConsecutiveDone(t *testing.T) {
 	r := NewRingAlloc(256)
@@ -276,9 +264,7 @@ func TestRingAlloc_HeadBlockedByLiveMiddleSlot(t *testing.T) {
 	assert.Equal(t, uint64(3), head)
 }
 
-// ---------------------------------------------------------------------------
 // RingAlloc — Extend
-// ---------------------------------------------------------------------------
 
 func TestRingAlloc_ExtendBasic(t *testing.T) {
 	r := NewRingAlloc(256)
@@ -359,9 +345,7 @@ func TestRingAlloc_ExtendMultipleTimes(t *testing.T) {
 	h.Release()
 }
 
-// ---------------------------------------------------------------------------
 // RingAlloc — regionFree
-// ---------------------------------------------------------------------------
 
 func TestRingAlloc_RegionFreeWriteAheadOfRead(t *testing.T) {
 	r := NewRingAlloc(100)
@@ -384,9 +368,7 @@ func TestRingAlloc_RegionFreeWriteBehindRead(t *testing.T) {
 	assert.False(t, r.regionFree(70, 90, 80), "[70,90) overlaps live [80,100)")
 }
 
-// ---------------------------------------------------------------------------
 // GrowingRingAlloc — basic
-// ---------------------------------------------------------------------------
 
 func TestGrowingRingAlloc_BasicAlloc(t *testing.T) {
 	g := NewGrowingRingAlloc(256)
@@ -448,9 +430,7 @@ func TestGrowingRingAlloc_OldRingBecomesGCEligible(t *testing.T) {
 	h2.Release()
 }
 
-// ---------------------------------------------------------------------------
 // GrowingRingAlloc — Extend
-// ---------------------------------------------------------------------------
 
 func TestGrowingRingAlloc_ExtendOnCurrentRing(t *testing.T) {
 	g := NewGrowingRingAlloc(256)
@@ -490,9 +470,7 @@ func TestGrowingRingAlloc_ExtendNilHandle(t *testing.T) {
 	assert.False(t, ok)
 }
 
-// ---------------------------------------------------------------------------
 // GrowingRingAlloc — multiple growth cycles
-// ---------------------------------------------------------------------------
 
 func TestGrowingRingAlloc_MultipleGrowths(t *testing.T) {
 	g := NewGrowingRingAlloc(32)
@@ -509,9 +487,7 @@ func TestGrowingRingAlloc_MultipleGrowths(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Concurrency — concurrent Release from multiple consumers
-// ---------------------------------------------------------------------------
 
 func TestRingAlloc_ConcurrentRelease(t *testing.T) {
 	r := NewRingAlloc(1024 * 1024) // 1 MB
@@ -617,9 +593,7 @@ func TestRingAlloc_ConcurrentRetainRelease(t *testing.T) {
 	assert.Equal(t, r.head.Load(), r.tail.Load(), "all slots should be freed")
 }
 
-// ---------------------------------------------------------------------------
 // RingAlloc — stress test: many alloc/release cycles
-// ---------------------------------------------------------------------------
 
 func TestRingAlloc_StressCycles(t *testing.T) {
 	r := NewRingAlloc(4096)
@@ -634,9 +608,7 @@ func TestRingAlloc_StressCycles(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Benchmarks
-// ---------------------------------------------------------------------------
 
 func BenchmarkRingAlloc_AllocRelease(b *testing.B) {
 	r := NewRingAlloc(1024 * 1024)

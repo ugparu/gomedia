@@ -438,7 +438,7 @@ func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer
 
 	if len(hosts) > 0 {
 		logger.Default.Infof("WEBRTC", "Setting host candidates to %v", hosts)
-		s.SetNAT1To1IPs(hosts, webrtc.ICECandidateTypeHost)
+		s.SetNAT1To1IPs(hosts, webrtc.ICECandidateTypeHost) //nolint:staticcheck // pion v4 still supports this; migration to SetICEAddressRewriteRules pending
 	}
 
 	api = webrtc.NewAPI(webrtc.WithMediaEngine(m), webrtc.WithInterceptorRegistry(i), webrtc.WithSettingEngine(s))

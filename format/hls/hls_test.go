@@ -21,9 +21,7 @@ import (
 
 const testDataDir = "../../tests/data/h264_aac/"
 
-// ---------------------------------------------------------------------------
 // Test data helpers
-// ---------------------------------------------------------------------------
 
 type parametersJSON struct {
 	URL   string          `json:"url"`
@@ -148,9 +146,7 @@ func writePacketsUntilSegment(t *testing.T, mxr gomedia.HLSMuxer, packets []gome
 	return 0
 }
 
-// ---------------------------------------------------------------------------
 // Mux / initialization tests
-// ---------------------------------------------------------------------------
 
 func TestMux_Success(t *testing.T) {
 	pair, _, _ := loadTestCodecPair(t)
@@ -173,9 +169,7 @@ func TestMux_VideoOnly(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// ---------------------------------------------------------------------------
 // WritePacket tests
-// ---------------------------------------------------------------------------
 
 func TestWritePacket_NilPacket(t *testing.T) {
 	mxr, _, _, _ := initMuxer(t, 2*time.Second, 3)
@@ -230,9 +224,7 @@ func TestWritePacket_SegmentCompletes(t *testing.T) {
 	assert.Contains(t, m, "segment/0/media.m4s")
 }
 
-// ---------------------------------------------------------------------------
 // Manifest structure tests
-// ---------------------------------------------------------------------------
 
 func TestManifest_Header(t *testing.T) {
 	mxr, _, vCp, aCp := initMuxer(t, 2*time.Second, 3)
@@ -321,9 +313,7 @@ func TestManifest_IndependentFragments(t *testing.T) {
 	assert.Contains(t, m, "INDEPENDENT=YES")
 }
 
-// ---------------------------------------------------------------------------
 // GetInit tests
-// ---------------------------------------------------------------------------
 
 func TestGetInit_ReturnsValidData(t *testing.T) {
 	mxr, _, _, _ := initMuxer(t, 2*time.Second, 3)
@@ -356,9 +346,7 @@ func TestGetInitByVersion_InvalidVersion(t *testing.T) {
 	assert.Contains(t, err.Error(), "not found")
 }
 
-// ---------------------------------------------------------------------------
 // GetSegment tests
-// ---------------------------------------------------------------------------
 
 func TestGetSegment_AfterCompletion(t *testing.T) {
 	mxr, _, vCp, aCp := initMuxer(t, 2*time.Second, 3)
@@ -391,9 +379,7 @@ func TestGetSegment_ContextCancelled(t *testing.T) {
 	require.Error(t, err)
 }
 
-// ---------------------------------------------------------------------------
 // GetFragment tests
-// ---------------------------------------------------------------------------
 
 func TestGetFragment_AfterCompletion(t *testing.T) {
 	mxr, _, vCp, aCp := initMuxer(t, 2*time.Second, 3)
@@ -416,9 +402,7 @@ func TestGetFragment_SegmentNotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "not found")
 }
 
-// ---------------------------------------------------------------------------
 // GetIndexM3u8 tests
-// ---------------------------------------------------------------------------
 
 func TestGetIndexM3u8_ImmediateReturn(t *testing.T) {
 	mxr, _, vCp, aCp := initMuxer(t, 2*time.Second, 3)
@@ -443,9 +427,7 @@ func TestGetIndexM3u8_BlockingTimeout(t *testing.T) {
 	require.Error(t, err)
 }
 
-// ---------------------------------------------------------------------------
 // GetMasterEntry tests
-// ---------------------------------------------------------------------------
 
 func TestGetMasterEntry_WithVideoAndAudio(t *testing.T) {
 	mxr, _, _, _ := initMuxer(t, 2*time.Second, 3)
@@ -487,9 +469,7 @@ func TestGetMasterEntry_AudioOnly_ReturnsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "no video codec")
 }
 
-// ---------------------------------------------------------------------------
 // UpdateCodecParameters tests
-// ---------------------------------------------------------------------------
 
 func TestUpdateCodecParameters_NilCodecs(t *testing.T) {
 	mxr, _, _, _ := initMuxer(t, 2*time.Second, 3)
@@ -538,9 +518,7 @@ func TestUpdateCodecParameters_NewInitVersion(t *testing.T) {
 	assert.Contains(t, m, "init.mp4?v=1")
 }
 
-// ---------------------------------------------------------------------------
 // Segment eviction tests
-// ---------------------------------------------------------------------------
 
 func TestSegmentEviction(t *testing.T) {
 	// segmentCount=2: with keyframe-aligned segments (~8.7s each from 3 keyframes
@@ -566,13 +544,8 @@ func TestSegmentEviction(t *testing.T) {
 	assert.Error(t, err, "segment 0 should have been evicted")
 }
 
-// ---------------------------------------------------------------------------
 // Target duration bounds (strict time-based splitting)
-// ---------------------------------------------------------------------------
 
-// TestTimeBasedSplit_RespectsTargetDuration verifies that with the default
-// (time-based) splitting strategy, no emitted #EXTINF exceeds the configured
-// target duration — the RFC 8216 §4.3.3.1 invariant for EXT-X-TARGETDURATION.
 func TestTimeBasedSplit_RespectsTargetDuration(t *testing.T) {
 	targetDur := 2 * time.Second
 	mxr, _, vCp, aCp := initMuxer(t, targetDur, 255)
@@ -601,9 +574,7 @@ func TestTimeBasedSplit_RespectsTargetDuration(t *testing.T) {
 	assert.Greater(t, extinfCount, 1, "expected multiple completed segments")
 }
 
-// ---------------------------------------------------------------------------
 // WithMediaName option tests
-// ---------------------------------------------------------------------------
 
 func TestWithMediaName(t *testing.T) {
 	mxr, _, vCp, aCp := initMuxer(t, 2*time.Second, 3, WithMediaName("custom"))
@@ -617,9 +588,7 @@ func TestWithMediaName(t *testing.T) {
 	assert.NotContains(t, m, "media.m4s")
 }
 
-// ---------------------------------------------------------------------------
 // Release tests
-// ---------------------------------------------------------------------------
 
 func TestRelease_CleansUp(t *testing.T) {
 	mxr, _, vCp, aCp := initMuxer(t, 2*time.Second, 3)
@@ -640,9 +609,7 @@ func TestRelease_DoubleRelease(t *testing.T) {
 	mxr.Release()
 }
 
-// ---------------------------------------------------------------------------
 // Segment/fragment MP4 content validation
-// ---------------------------------------------------------------------------
 
 func TestSegmentMP4_ContainsFmp4Boxes(t *testing.T) {
 	mxr, _, vCp, aCp := initMuxer(t, 2*time.Second, 3)
@@ -668,9 +635,7 @@ func TestFragmentMP4_ContainsFmp4Boxes(t *testing.T) {
 	assert.Equal(t, "styp", string(data[4:8]))
 }
 
-// ---------------------------------------------------------------------------
 // Segment lazy generation caching
-// ---------------------------------------------------------------------------
 
 func TestSegmentMP4_Cached(t *testing.T) {
 	mxr, _, vCp, aCp := initMuxer(t, 2*time.Second, 3)
@@ -685,9 +650,7 @@ func TestSegmentMP4_Cached(t *testing.T) {
 	assert.Equal(t, data1, data2)
 }
 
-// ---------------------------------------------------------------------------
 // End-to-end: full pipeline test
-// ---------------------------------------------------------------------------
 
 func TestEndToEnd_FullPipeline(t *testing.T) {
 	mxr, _, vCp, aCp := initMuxer(t, 2*time.Second, 3)
@@ -731,9 +694,7 @@ func TestEndToEnd_FullPipeline(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Discontinuity sequence tracking
-// ---------------------------------------------------------------------------
 
 func TestDiscontinuitySequence_AfterEviction(t *testing.T) {
 	mxr, pair, vCp, aCp := initMuxer(t, 1*time.Second, 3)
@@ -759,9 +720,7 @@ func TestDiscontinuitySequence_AfterEviction(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Concurrent access test
-// ---------------------------------------------------------------------------
 
 func TestConcurrentAccess(t *testing.T) {
 	mxr, _, vCp, aCp := initMuxer(t, 2*time.Second, 3)

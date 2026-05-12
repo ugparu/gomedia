@@ -12,9 +12,7 @@ import (
 	"github.com/ugparu/gomedia/utils/buffer"
 )
 
-// ---------------------------------------------------------------------------
 // Helper
-// ---------------------------------------------------------------------------
 
 const (
 	frameSamples = 960 // 20ms at 48kHz
@@ -36,9 +34,7 @@ func buildOpusPacket(t *testing.T, sampleRate, channels int) []byte {
 	return buf[:n]
 }
 
-// ---------------------------------------------------------------------------
 // Constructor
-// ---------------------------------------------------------------------------
 
 func TestNewOpusDecoder(t *testing.T) {
 	t.Parallel()
@@ -46,9 +42,7 @@ func TestNewOpusDecoder(t *testing.T) {
 	require.NotNil(t, d)
 }
 
-// ---------------------------------------------------------------------------
 // Init
-// ---------------------------------------------------------------------------
 
 func TestInit_ValidMono(t *testing.T) {
 	t.Parallel()
@@ -73,9 +67,7 @@ func TestInit_InvalidSampleRate(t *testing.T) {
 	require.Error(t, err)
 }
 
-// ---------------------------------------------------------------------------
 // Close
-// ---------------------------------------------------------------------------
 
 func TestClose_WithoutInit(t *testing.T) {
 	t.Parallel()
@@ -91,9 +83,7 @@ func TestClose_AfterInit(t *testing.T) {
 	require.NotPanics(t, d.Close)
 }
 
-// ---------------------------------------------------------------------------
 // Decode — mono, nil ring
-// ---------------------------------------------------------------------------
 
 func TestDecode_Mono_NilRing(t *testing.T) {
 	t.Parallel()
@@ -113,9 +103,7 @@ func TestDecode_Mono_NilRing(t *testing.T) {
 		"mono: expected %d bytes (960 samples × 1ch × 2 bytes)", expectedLen)
 }
 
-// ---------------------------------------------------------------------------
 // Decode — stereo, nil ring
-// ---------------------------------------------------------------------------
 
 func TestDecode_Stereo_NilRing(t *testing.T) {
 	t.Parallel()
@@ -135,9 +123,7 @@ func TestDecode_Stereo_NilRing(t *testing.T) {
 		"stereo: expected %d bytes (960 samples × 2ch × 2 bytes)", expectedLen)
 }
 
-// ---------------------------------------------------------------------------
 // Decode — with ring allocator
-// ---------------------------------------------------------------------------
 
 func TestDecode_WithRingAlloc(t *testing.T) {
 	t.Parallel()
@@ -158,9 +144,7 @@ func TestDecode_WithRingAlloc(t *testing.T) {
 	slot.Release()
 }
 
-// ---------------------------------------------------------------------------
 // Decode — ring vs heap must produce identical output
-// ---------------------------------------------------------------------------
 
 func TestDecode_RingMatchesHeap(t *testing.T) {
 	t.Parallel()
@@ -188,9 +172,7 @@ func TestDecode_RingMatchesHeap(t *testing.T) {
 	slot.Release()
 }
 
-// ---------------------------------------------------------------------------
 // Decode — tiny ring: GrowingRingAlloc grows, slot must be non-nil
-// ---------------------------------------------------------------------------
 
 func TestDecode_WithSmallRing(t *testing.T) {
 	t.Parallel()
@@ -209,9 +191,7 @@ func TestDecode_WithSmallRing(t *testing.T) {
 	slot.Release()
 }
 
-// ---------------------------------------------------------------------------
 // Decode — silence input produces all-zero PCM
-// ---------------------------------------------------------------------------
 
 func TestDecode_SilenceProducesZeroPCM(t *testing.T) {
 	t.Parallel()

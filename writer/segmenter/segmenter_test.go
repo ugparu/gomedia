@@ -17,9 +17,7 @@ import (
 	"github.com/ugparu/gomedia/utils/logger"
 )
 
-// ---------------------------------------------------------------------------
 // Test data helpers (mirrors writer/hls pattern)
-// ---------------------------------------------------------------------------
 
 const testDataDir = "../../tests/data/h264_aac/"
 
@@ -196,9 +194,7 @@ func drainFiles(s gomedia.Segmenter) []gomedia.FileInfo {
 	return result
 }
 
-// ---------------------------------------------------------------------------
 // Constructor tests
-// ---------------------------------------------------------------------------
 
 func TestNew_ReturnsNonNil(t *testing.T) {
 	s := New("/tmp/test", 5*time.Second, gomedia.Always, 64)
@@ -244,9 +240,7 @@ func TestNew_ChannelDirections(t *testing.T) {
 	assert.NotNil(t, s.RemoveSource())
 }
 
-// ---------------------------------------------------------------------------
 // Always mode — basic recording
-// ---------------------------------------------------------------------------
 
 func TestAlwaysMode_ProducesFileOnClose(t *testing.T) {
 	dest := t.TempDir()
@@ -373,9 +367,7 @@ func TestAlwaysMode_SkipsUnregisteredSource(t *testing.T) {
 	expectNoFile(t, s)
 }
 
-// ---------------------------------------------------------------------------
 // Always mode — multi-stream
-// ---------------------------------------------------------------------------
 
 func TestAlwaysMode_MultiStream(t *testing.T) {
 	dest := t.TempDir()
@@ -409,9 +401,7 @@ func TestAlwaysMode_MultiStream(t *testing.T) {
 	assert.Contains(t, files, src2)
 }
 
-// ---------------------------------------------------------------------------
 // Source management
-// ---------------------------------------------------------------------------
 
 func TestAddSource_Duplicate(t *testing.T) {
 	dest := t.TempDir()
@@ -460,9 +450,7 @@ func TestRemoveSource_NonExistent(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 }
 
-// ---------------------------------------------------------------------------
 // Record mode switching
-// ---------------------------------------------------------------------------
 
 func TestSwitchMode_AlwaysToNever(t *testing.T) {
 	dest := t.TempDir()
@@ -520,9 +508,7 @@ func TestSwitchMode_SameMode_NoOp(t *testing.T) {
 	assert.Len(t, files, 1, "same-mode switch should not cause extra segment flush")
 }
 
-// ---------------------------------------------------------------------------
 // Event mode
-// ---------------------------------------------------------------------------
 
 func TestEventMode_NoEventNoRecording(t *testing.T) {
 	dest := t.TempDir()
@@ -645,9 +631,7 @@ func TestEventMode_PreBufferIncludesDataBeforeEvent(t *testing.T) {
 	assert.Equal(t, sourceID, info.URL)
 }
 
-// ---------------------------------------------------------------------------
 // Event mode — multi-stream independence
-// ---------------------------------------------------------------------------
 
 func TestEventMode_MultiStream_BothRecord(t *testing.T) {
 	dest := t.TempDir()
@@ -695,9 +679,7 @@ func TestEventMode_MultiStream_BothRecord(t *testing.T) {
 	assert.Contains(t, files, src2, "cam2 should have recorded")
 }
 
-// ---------------------------------------------------------------------------
 // Path generation
-// ---------------------------------------------------------------------------
 
 func TestDefaultPathFunc(t *testing.T) {
 	dest := t.TempDir()
@@ -755,9 +737,7 @@ func TestCustomPathFunc(t *testing.T) {
 	require.NoError(t, err, "file should exist at custom path")
 }
 
-// ---------------------------------------------------------------------------
 // FileInfo correctness
-// ---------------------------------------------------------------------------
 
 func TestFileInfo_Fields(t *testing.T) {
 	dest := t.TempDir()
@@ -792,9 +772,7 @@ func TestFileInfo_Fields(t *testing.T) {
 	assert.Regexp(t, `^\d+x\d+$`, info.Resolution)
 }
 
-// ---------------------------------------------------------------------------
 // Directory creation
-// ---------------------------------------------------------------------------
 
 func TestCreateFile_CreatesParentDirs(t *testing.T) {
 	dest := t.TempDir()
@@ -851,9 +829,7 @@ func TestDirPermissions(t *testing.T) {
 	assert.True(t, stat.IsDir())
 }
 
-// ---------------------------------------------------------------------------
 // Edge cases
-// ---------------------------------------------------------------------------
 
 func TestClose_WithNoPackets(t *testing.T) {
 	dest := t.TempDir()
@@ -900,9 +876,7 @@ func TestNeverMode_RejectsPackets(t *testing.T) {
 	expectNoFile(t, s)
 }
 
-// ---------------------------------------------------------------------------
 // Segment duration accuracy
-// ---------------------------------------------------------------------------
 
 func TestAlwaysMode_SegmentDurationRespected(t *testing.T) {
 	dest := t.TempDir()
@@ -926,9 +900,7 @@ func TestAlwaysMode_SegmentDurationRespected(t *testing.T) {
 		"segment should be at least targetDuration")
 }
 
-// ---------------------------------------------------------------------------
 // Segment rotation with large target duration
-// ---------------------------------------------------------------------------
 
 func TestAlwaysMode_NoRotationWhenUnderDuration(t *testing.T) {
 	dest := t.TempDir()
@@ -960,9 +932,7 @@ func TestAlwaysMode_NoRotationWhenUnderDuration(t *testing.T) {
 	assert.Greater(t, files[0].Size, 0)
 }
 
-// ---------------------------------------------------------------------------
 // Written MP4 integrity
-// ---------------------------------------------------------------------------
 
 func TestAlwaysMode_WrittenFileIsValidMP4(t *testing.T) {
 	dest := t.TempDir()
@@ -996,9 +966,7 @@ func TestAlwaysMode_WrittenFileIsValidMP4(t *testing.T) {
 	assert.Contains(t, string(data[:32]), "ftyp", "file should start with ftyp box")
 }
 
-// ---------------------------------------------------------------------------
 // Event mode — max event duration
-// ---------------------------------------------------------------------------
 
 func TestEventMode_MaxDurationEnforcedOnClose(t *testing.T) {
 	dest := t.TempDir()

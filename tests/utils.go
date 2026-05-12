@@ -2,9 +2,7 @@
 // JSON files produced by the rtsp-to-json example tool.
 package tests
 
-// ---------------------------------------------------------------------------
 // JSON schema (mirrors examples/rtsp-to-json output)
-// ---------------------------------------------------------------------------
 
 // ParametersJSON is the top-level parameters file structure.
 type ParametersJSON struct {

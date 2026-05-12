@@ -39,22 +39,19 @@ func (e *opusEncoder) Init(params *pcm.CodecParameters) error {
 		return err
 	}
 
-	// Convert sample rate to int32 to prevent overflow
+	// Clamp sample rate so the int32 cast for the resampler is safe.
 	sampleRate := params.SampleRate()
-	const maxInt32 = 1<<31 - 1 // maximum value for int32
+	const maxInt32 = 1<<31 - 1
 	if sampleRate > uint64(maxInt32) {
 		sampleRate = uint64(maxInt32)
 	}
 
 	e.frameSize = int(params.Channels()) * 40 * opusSampleRate / 1000
-
-	safeRate := uint32(sampleRate)
-	// Frame duration is always relative to 48kHz (the Opus internal rate)
+	// Opus encodes at 48 kHz internally; one frame is 40 ms.
 	e.frameDuration = time.Duration(40*opusSampleRate/1000) * time.Second / time.Duration(opusSampleRate)
 
 	channels := int(params.Channels())
-	// Using a safer type to convert to int
-	e.r, err = utils.NewPcmS16leResampler(channels, int(safeRate), opusSampleRate)
+	e.r, err = utils.NewPcmS16leResampler(channels, int(uint32(sampleRate)), opusSampleRate)
 	if err != nil {
 		return err
 	}

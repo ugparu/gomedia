@@ -23,9 +23,7 @@ import (
 
 const testDataDir = "../../tests/data/"
 
-// ---------------------------------------------------------------------------
 // RTP packet builder helpers
-// ---------------------------------------------------------------------------
 
 // buildRTSPInterleavedRTP builds a minimal RTSP-interleaved RTP frame:
 //

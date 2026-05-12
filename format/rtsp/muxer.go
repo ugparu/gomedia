@@ -153,7 +153,6 @@ func codecParamsToSDPMedias(streams gomedia.CodecParametersPair) ([]sdp.Media, e
 			return nil, err
 		}
 		medias = append(medias, m)
-		trackID++
 	}
 
 	sort.SliceStable(medias, func(i, j int) bool {

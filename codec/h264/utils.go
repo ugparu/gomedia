@@ -1,19 +1,12 @@
 package h264
 
-// minAVCRecordSize is the minimum size of an AVC (Advanced Video Coding) record.
-const minAVCRecordSize = 3
+// NAL unit types per ISO/IEC 14496-10 §7.4.1.
+const (
+	NaluCodedIDR = 5 // IDR (Instantaneous Decoding Refresh) slice
+	NaluSPS      = 7 // Sequence Parameter Set
+	NaluPPS      = 8 // Picture Parameter Set
+)
 
-// NaluCodedIDR represents the Network Abstraction Layer Unit (NALU) type for
-// Coded IDR (Instantaneous Decoding Refresh).
-const NaluCodedIDR = 5
-
-// NaluSPS represents the Network Abstraction Layer Unit (NALU) type for Sequence Parameter Set.
-const NaluSPS = 7
-
-// NaluPPS represents the Network Abstraction Layer Unit (NALU) type for Picture Parameter Set.
-const NaluPPS = 8
-
-// byteSize is the number of bits in a byte.
 const byteSize = 8
 
 // Common magic numbers used in the package
@@ -66,22 +59,24 @@ const (
 	lengthFieldSize = 2
 )
 
-// SPSInfo represents information extracted from Sequence Parameter Sets (SPS) in a video stream.
+// SPSInfo holds the fields parsed from an H.264 Sequence Parameter Set
+// (ISO/IEC 14496-10 §7.3.2.1). Width/Height/FPS are derived values, not
+// raw fields — they fold in cropping and frame-rate clock info.
 type SPSInfo struct {
-	ID                uint // Identifier for the SPS.
-	ProfileIDC        uint // Profile identifier for the SPS.
-	LevelIDC          uint // Level identifier for the SPS.
-	ConstraintSetFlag uint // Constraint set flag for the SPS.
+	ID                uint
+	ProfileIDC        uint
+	LevelIDC          uint
+	ConstraintSetFlag uint
 
-	MbWidth  uint // Width of macroblocks in the SPS.
-	MbHeight uint // Height of macroblocks in the SPS.
+	MbWidth  uint
+	MbHeight uint
 
-	CropLeft   uint // Left cropping value for the SPS.
-	CropRight  uint // Right cropping value for the SPS.
-	CropTop    uint // Top cropping value for the SPS.
-	CropBottom uint // Bottom cropping value for the SPS.
+	CropLeft   uint
+	CropRight  uint
+	CropTop    uint
+	CropBottom uint
 
-	Width  uint // Width of the video frame.
-	Height uint // Height of the video frame.
-	FPS    uint // Frames per second (FPS) for the video stream.
+	Width  uint
+	Height uint
+	FPS    uint
 }

@@ -16,9 +16,7 @@ import (
 	"github.com/ugparu/gomedia/mocks"
 )
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 func makeVideoFactory(inner decoder.InnerVideoDecoder) map[gomedia.CodecType]func() decoder.InnerVideoDecoder {
 	fn := func() decoder.InnerVideoDecoder { return inner }
@@ -58,9 +56,7 @@ func drainImages(d gomedia.VideoDecoder) []rgb.ReleasableImage {
 	return out
 }
 
-// ---------------------------------------------------------------------------
 // Constructor
-// ---------------------------------------------------------------------------
 
 func TestNewVideo_NotNil(t *testing.T) {
 	t.Parallel()
@@ -77,9 +73,7 @@ func TestNewVideo_ChannelsNotNil(t *testing.T) {
 	require.NotNil(t, d.Done())
 }
 
-// ---------------------------------------------------------------------------
 // Lifecycle
-// ---------------------------------------------------------------------------
 
 func TestVideoClose_WithoutDecode(t *testing.T) {
 	t.Parallel()
@@ -121,9 +115,7 @@ func TestVideoDone_ClosedAfterClose(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // DurationFromFPS
-// ---------------------------------------------------------------------------
 
 func TestDurationFromFPS_Zero(t *testing.T) {
 	t.Parallel()
@@ -161,9 +153,7 @@ func TestDurationFromFPS_Negative(t *testing.T) {
 	require.Equal(t, time.Duration(0), decoder.DurationFromFPS(-1))
 }
 
-// ---------------------------------------------------------------------------
 // Options
-// ---------------------------------------------------------------------------
 
 func TestVideoWithName(t *testing.T) {
 	t.Parallel()
@@ -172,9 +162,7 @@ func TestVideoWithName(t *testing.T) {
 	d.Close()
 }
 
-// ---------------------------------------------------------------------------
 // Step — keyframe produces image
-// ---------------------------------------------------------------------------
 
 func TestStep_Video_KeyFrame_ProducesImage(t *testing.T) {
 	t.Parallel()
@@ -206,9 +194,7 @@ func TestStep_Video_KeyFrame_ProducesImage(t *testing.T) {
 	d.Close()
 }
 
-// ---------------------------------------------------------------------------
 // Step — non-keyframe before first keyframe is skipped
-// ---------------------------------------------------------------------------
 
 func TestStep_Video_NonKeyFrame_BeforeKey_Skipped(t *testing.T) {
 	t.Parallel()
@@ -235,9 +221,7 @@ func TestStep_Video_NonKeyFrame_BeforeKey_Skipped(t *testing.T) {
 	require.Empty(t, drainImages(d))
 }
 
-// ---------------------------------------------------------------------------
 // Step — ErrNeedMoreData: no image, error is suppressed
-// ---------------------------------------------------------------------------
 
 func TestStep_Video_ErrNeedMoreData_NoImage(t *testing.T) {
 	t.Parallel()
@@ -265,9 +249,7 @@ func TestStep_Video_ErrNeedMoreData_NoImage(t *testing.T) {
 	require.Empty(t, drainImages(d))
 }
 
-// ---------------------------------------------------------------------------
 // Step — decode error: inner decoder is restarted (Init called twice)
-// ---------------------------------------------------------------------------
 
 func TestStep_Video_DecodeError_DecoderRestarted(t *testing.T) {
 	t.Parallel()
@@ -297,9 +279,7 @@ func TestStep_Video_DecodeError_DecoderRestarted(t *testing.T) {
 	require.Empty(t, drainImages(d))
 }
 
-// ---------------------------------------------------------------------------
 // Step — Init error: no image forwarded
-// ---------------------------------------------------------------------------
 
 func TestStep_Video_InitError_NoImage(t *testing.T) {
 	t.Parallel()
@@ -320,9 +300,7 @@ func TestStep_Video_InitError_NoImage(t *testing.T) {
 	require.Empty(t, drainImages(d))
 }
 
-// ---------------------------------------------------------------------------
 // Step — unknown codec type: no image, handled gracefully
-// ---------------------------------------------------------------------------
 
 func TestStep_Video_UnknownCodecType_NoImage(t *testing.T) {
 	t.Parallel()
@@ -345,9 +323,7 @@ func TestStep_Video_UnknownCodecType_NoImage(t *testing.T) {
 	require.Empty(t, drainImages(d))
 }
 
-// ---------------------------------------------------------------------------
 // Step — FPS throttle: Feed called instead of Decode within rate window
-// ---------------------------------------------------------------------------
 
 func TestStep_Video_FPSThrottle_FeedCalled(t *testing.T) {
 	t.Parallel()
@@ -391,9 +367,7 @@ func TestStep_Video_FPSThrottle_FeedCalled(t *testing.T) {
 	require.Empty(t, drainImages(d))
 }
 
-// ---------------------------------------------------------------------------
 // FPS channel: same value is no-op
-// ---------------------------------------------------------------------------
 
 func TestStep_Video_FPS_SameValue_NoOp(t *testing.T) {
 	t.Parallel()
@@ -412,9 +386,7 @@ func TestStep_Video_FPS_SameValue_NoOp(t *testing.T) {
 	require.Empty(t, drainImages(d))
 }
 
-// ---------------------------------------------------------------------------
 // FPS=0 stops decoder
-// ---------------------------------------------------------------------------
 
 func TestStep_Video_FPS_ZeroStopsDecoder(t *testing.T) {
 	t.Parallel()
@@ -446,9 +418,7 @@ func TestStep_Video_FPS_ZeroStopsDecoder(t *testing.T) {
 	d.Close()
 }
 
-// ---------------------------------------------------------------------------
 // Multiple keyframes: all produce images (when within FPS budget)
-// ---------------------------------------------------------------------------
 
 func TestStep_Video_MultipleKeyframes(t *testing.T) {
 	t.Parallel()

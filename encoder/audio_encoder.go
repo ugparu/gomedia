@@ -31,14 +31,10 @@ type audioEncoder struct {
 
 func NewAudioEncoder(chanSize int, newEncoderFn func() InnerAudioEncoder) gomedia.AudioEncoder {
 	e := &audioEncoder{
-		AsyncManager:      nil,
 		InnerAudioEncoder: newEncoderFn(),
 		newEncoderFn:      newEncoderFn,
-		ts:                0,
 		inpSamples:        make(chan gomedia.AudioPacket, chanSize),
 		outSamples:        make(chan gomedia.Packet, chanSize),
-		inpCodecPar:       nil,
-		codecPar:          nil,
 	}
 	e.AsyncManager = lifecycle.NewFailSafeAsyncManager(e, logger.Default)
 
@@ -46,10 +42,8 @@ func NewAudioEncoder(chanSize int, newEncoderFn func() InnerAudioEncoder) gomedi
 }
 
 func (e *audioEncoder) Encode() {
-	startFunc := func(_ *audioEncoder) error {
-		return nil
-	}
-	_ = e.Start(startFunc)
+	// FailSafeAsyncManager.Start never returns an error.
+	_ = e.Start(func(_ *audioEncoder) error { return nil })
 }
 
 func (e *audioEncoder) Step(doneCh <-chan struct{}) error {

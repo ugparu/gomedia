@@ -1,0 +1,46 @@
+name: Bug report
+description: Report a defect in gomedia.
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do and what did you observe?
+      placeholder: |
+        Steps to reproduce, expected vs. actual.
+    validations:
+      required: true
+  - type: textarea
+    id: reproducer
+    attributes:
+      label: Minimal reproducer
+      description: A short Go snippet, command, or fixture that triggers the bug.
+      render: go
+  - type: input
+    id: version
+    attributes:
+      label: gomedia version / commit
+      placeholder: e.g. master @ 27ce140
+    validations:
+      required: true
+  - type: input
+    id: go-version
+    attributes:
+      label: Go version
+      placeholder: e.g. go1.25.0
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS / arch
+      placeholder: e.g. linux/amd64, linux/arm64 (rk3588)
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant logs, panic traces, or `dmesg` output.
+      render: shell

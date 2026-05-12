@@ -184,7 +184,7 @@ func parseAttribute(media *Media, fields []string) {
 	}
 }
 
-// Parse parses an SDP payload and returns the session and every "m=" media block.
+// Parse splits an SDP payload into the session-level block and one Media per "m=" section.
 func Parse(content string) (sess Session, medias []Media) {
 	var media *Media
 

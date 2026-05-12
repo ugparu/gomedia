@@ -65,8 +65,7 @@ func (self *SyncSample) Unmarshal(b []byte, offset int) (n int, err error) {
 	}
 	self.Flags = pio.U24BE(b[n:])
 	n += 3
-	var _len_Entries uint32
-	_len_Entries = pio.U32BE(b[n:])
+	var _len_Entries uint32 = pio.U32BE(b[n:])
 	n += 4
 	self.Entries = make([]uint32, _len_Entries)
 	if len(b) < n+4*len(self.Entries) {

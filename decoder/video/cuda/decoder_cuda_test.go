@@ -1,3 +1,5 @@
+//go:build cuda
+
 package cuda_test
 
 import (
@@ -25,9 +27,7 @@ const (
 	cudaMaxMats = 4 //nolint:mnd // enough slots for parallel tests
 )
 
-// ---------------------------------------------------------------------------
 // TestMain — initialize CUDA once for the entire test binary
-// ---------------------------------------------------------------------------
 
 func TestMain(m *testing.M) {
 	if !cuda.CheckCuda() {
@@ -38,9 +38,7 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// ---------------------------------------------------------------------------
 // JSON fixtures (shared structure with cpu tests)
-// ---------------------------------------------------------------------------
 
 type videoParamsJSON struct {
 	Video struct {
@@ -64,9 +62,7 @@ type packetsFileJSON struct {
 	Packets []packetJSON `json:"packets"`
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 func decodeBase64(t *testing.T, s string) []byte {
 	t.Helper()
@@ -130,9 +126,7 @@ func makeH265Packet(t *testing.T, p packetJSON, par *codech265.CodecParameters) 
 	return codech265.NewPacket(p.IsKeyframe, time.Duration(p.TimestampNs), time.Time{}, data, "test", par)
 }
 
-// ---------------------------------------------------------------------------
 // Constructor
-// ---------------------------------------------------------------------------
 
 func TestNewFFmpegCUDADecoder_NotNil(t *testing.T) {
 	t.Parallel()
@@ -140,13 +134,8 @@ func TestNewFFmpegCUDADecoder_NotNil(t *testing.T) {
 	require.NotNil(t, d)
 }
 
-// ---------------------------------------------------------------------------
 // Close
-// ---------------------------------------------------------------------------
 
-// TestCUDA_Close_Double verifies that calling Close twice is safe.
-// The Go wrapper sets dcd.dcd = nil after the first Close, so the second call
-// is a no-op regardless of CUDA availability.
 func TestCUDA_Close_Double(t *testing.T) {
 	t.Parallel()
 
@@ -157,9 +146,7 @@ func TestCUDA_Close_Double(t *testing.T) {
 	require.NotPanics(t, d.Close)
 }
 
-// ---------------------------------------------------------------------------
 // Init
-// ---------------------------------------------------------------------------
 
 func TestCUDA_Init_H264_Valid(t *testing.T) {
 	t.Parallel()
@@ -204,9 +191,7 @@ func TestCUDA_Init_Reinit_H264(t *testing.T) {
 	require.NoError(t, d.Init(par))
 }
 
-// ---------------------------------------------------------------------------
 // Decode — H264
-// ---------------------------------------------------------------------------
 
 // TestCUDA_Decode_H264_ProducesImage feeds H264 packets (first video packet is
 // IDR in the h264_aac dataset) and asserts at least one image is returned.
@@ -267,9 +252,7 @@ func TestCUDA_Decode_H264_ErrNeedMoreData(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Feed — H264
-// ---------------------------------------------------------------------------
 
 func TestCUDA_Feed_H264_KeyFrame(t *testing.T) {
 	t.Parallel()
@@ -291,9 +274,7 @@ func TestCUDA_Feed_H264_KeyFrame(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Decode — H265
-// ---------------------------------------------------------------------------
 
 // TestCUDA_Decode_H265_ProducesImage feeds H265 packets (first packet is IDR)
 // and asserts at least one image is returned.
@@ -327,9 +308,7 @@ func TestCUDA_Decode_H265_ProducesImage(t *testing.T) {
 	require.True(t, got.Bounds().Dx() > 0 && got.Bounds().Dy() > 0)
 }
 
-// ---------------------------------------------------------------------------
 // Feed — H265
-// ---------------------------------------------------------------------------
 
 func TestCUDA_Feed_H265_KeyFrame(t *testing.T) {
 	t.Parallel()

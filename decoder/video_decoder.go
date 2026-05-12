@@ -177,11 +177,11 @@ func (dec *videoDecoder) stopDecoder() {
 
 // Decode launches the async Step loop.
 func (dec *videoDecoder) Decode() {
-	startFunc := func(dec *videoDecoder) error {
+	// FailSafeAsyncManager.Start never returns an error.
+	_ = dec.Start(func(dec *videoDecoder) error {
 		dec.frameDuration = DurationFromFPS(dec.targetFPS)
 		return nil
-	}
-	_ = dec.Start(startFunc)
+	})
 }
 
 // Step services one of: close, FPS change (including pause via fps==0), or a

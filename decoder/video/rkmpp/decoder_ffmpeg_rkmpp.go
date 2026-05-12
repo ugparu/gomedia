@@ -130,18 +130,13 @@ func (dcd *ffmpegRKMPPDecoder) sendCodecHeaders(vpar gomedia.VideoCodecParameter
 	return nil
 }
 
-// splitLengthPrefixedToNALUnits splits length-prefixed packet into individual NAL units
-// Each NAL unit will have Annex-B start code (00 00 00 01) prepended
+// splitLengthPrefixedToNALUnits splits 4-byte-length-prefixed NAL data into
+// individual Annex-B framed NALs (each prepended with 00 00 00 01).
 func splitLengthPrefixedToNALUnits(data []byte) [][]byte {
 	var nalUnits [][]byte
 	offset := 0
 
-	for offset < len(data) {
-		if offset+4 > len(data) {
-			break
-		}
-
-		// Read 4-byte big-endian length prefix
+	for offset+4 <= len(data) {
 		nalLength := int(data[offset])<<24 |
 			int(data[offset+1])<<16 |
 			int(data[offset+2])<<8 |
@@ -151,12 +146,8 @@ func splitLengthPrefixedToNALUnits(data []byte) [][]byte {
 			break
 		}
 
-		// Create new NAL unit with Annex-B start code
 		nalUnit := make([]byte, 4+nalLength)
-		nalUnit[0] = 0x00
-		nalUnit[1] = 0x00
-		nalUnit[2] = 0x00
-		nalUnit[3] = 0x01
+		nalUnit[0], nalUnit[1], nalUnit[2], nalUnit[3] = 0x00, 0x00, 0x00, 0x01
 		copy(nalUnit[4:], data[offset+4:offset+4+nalLength])
 
 		nalUnits = append(nalUnits, nalUnit)
@@ -199,11 +190,7 @@ func (dcd *ffmpegRKMPPDecoder) Feed(pkt gomedia.VideoPacket) (err error) {
 		return nil
 	}
 
-	// Split length-prefixed packet into individual NAL units
-	nalUnits := splitLengthPrefixedToNALUnits(data)
-
-	// Feed each NAL unit separately to RKMPP
-	for _, nalUnit := range nalUnits {
+	for _, nalUnit := range splitLengthPrefixedToNALUnits(data) {
 		ret := C.feed_rkmpp_packet_native(
 			dcd.dcd,
 			(*C.uint8_t)(unsafe.Pointer(&nalUnit[0])),
@@ -232,11 +219,7 @@ func (dcd *ffmpegRKMPPDecoder) Decode(pkt gomedia.VideoPacket) (rgb.ReleasableIm
 	dcd.log.Debugf(dcd, "Decoding packet with data length %d, ptsMs %d", len(data), ptsMs)
 
 	if len(data) != 0 {
-		// Split length-prefixed packet into individual NAL units
-		nalUnits := splitLengthPrefixedToNALUnits(data)
-
-		// Feed each NAL unit separately to RKMPP
-		for _, nalUnit := range nalUnits {
+		for _, nalUnit := range splitLengthPrefixedToNALUnits(data) {
 			retFeed := C.feed_rkmpp_packet_native(
 				dcd.dcd,
 				(*C.uint8_t)(unsafe.Pointer(&nalUnit[0])),

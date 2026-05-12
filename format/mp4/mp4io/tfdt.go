@@ -42,7 +42,6 @@ func (self TrackFragDecodeTime) Len() (n int) {
 	if self.Version != 0 {
 		n += 8
 	} else {
-
 		n += 4
 	}
 	return

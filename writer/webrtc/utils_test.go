@@ -9,9 +9,7 @@ import (
 	"github.com/ugparu/gomedia/codec/h264"
 )
 
-// ---------------------------------------------------------------------------
 // codecParametersSize tests
-// ---------------------------------------------------------------------------
 
 func TestCodecParametersSize_H264(t *testing.T) {
 	_, videoCp, _ := loadTestCodecPair(t, "rtsp://test")
@@ -28,9 +26,7 @@ func TestCodecParametersSize_UnknownCodec(t *testing.T) {
 	assert.Equal(t, 0, size)
 }
 
-// ---------------------------------------------------------------------------
 // writeCodecParameters tests
-// ---------------------------------------------------------------------------
 
 func TestWriteCodecParameters_H264(t *testing.T) {
 	_, videoCp, _ := loadTestCodecPair(t, "rtsp://test")
@@ -75,9 +71,7 @@ func TestWriteCodecParameters_H264_RealData(t *testing.T) {
 	assert.Equal(t, size, 4+len(videoCp.SPS())+4+len(videoCp.PPS()))
 }
 
-// ---------------------------------------------------------------------------
 // peerTrack construction helpers
-// ---------------------------------------------------------------------------
 
 func TestCodecParametersSize_ConsistentWithWritten(t *testing.T) {
 	_, videoCp, _ := loadTestCodecPair(t, "rtsp://test")
@@ -89,9 +83,7 @@ func TestCodecParametersSize_ConsistentWithWritten(t *testing.T) {
 	assert.Equal(t, size, written, "written bytes should match predicted size")
 }
 
-// ---------------------------------------------------------------------------
 // NAL start code writing in writeVideoPacketsToPeer
-// ---------------------------------------------------------------------------
 
 func TestStartCodeWriting(t *testing.T) {
 	// Verify that NAL units are correctly prefixed with start codes

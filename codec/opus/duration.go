@@ -23,7 +23,6 @@ func PacketDuration(pkt []byte) (time.Duration, error) {
 	}
 	toc := pkt[0]
 	config := toc >> configShift
-	// stereo := (toc & stereoMask) != 0
 	code := toc & framesTocMask
 	numFr := 0
 	switch code {

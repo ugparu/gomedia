@@ -18,10 +18,9 @@ import (
 	"github.com/ugparu/gomedia/utils/logger"
 )
 
-// Constants defining fragment and part parameters.
 const (
 	fragmentDuration = time.Millisecond * 495
-	maxTS            = time.Hour // default max timestamp before wrap-around
+	maxTS            = time.Hour // wrap-around bound for relative timestamps
 )
 
 type segments struct {

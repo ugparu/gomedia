@@ -1,4 +1,7 @@
-//nolint:mnd // This package has many constants that are unavoidable magic numbers related to fmp4 format standard
+// Package fmp4 muxes fMP4 fragments (styp + moof + mdat) per ISO/IEC 14496-12,
+// suitable for DASH and Low-Latency HLS delivery.
+//
+//nolint:mnd // structural constants come from the fMP4 specification
 package fmp4
 
 import (
@@ -21,8 +24,7 @@ const (
 // safeInt32Conversion clamps val to the int32 range, logging an error when saturation happens.
 func safeInt32Conversion(log logger.Logger, src any, val int64, name string) int32 {
 	if val >= minInt32Value && val <= maxInt32Value {
-		//nolint:gosec // This is a safe int32 conversion
-		return int32(val)
+		return int32(val) //nolint:gosec // range-checked above
 	}
 	if val < minInt32Value {
 		log.Errorf(src, "%s value %d is too small for int32, capping at %d", name, val, minInt32Value)
@@ -50,7 +52,7 @@ func NewMuxer(log logger.Logger) *Muxer {
 	}
 }
 
-// safeUint32Conversion clamps val to the uint32 range, logging when out-of-range inputs are replaced with 0.
+// safeUint32Conversion clamps val to uint32 range; on overflow logs and returns 0.
 func (m *Muxer) safeUint32Conversion(val int, name string) uint32 {
 	if val < 0 || val > int(^uint32(0)) {
 		m.log.Errorf(m, "%s value %d is outside uint32 range, using 0", name, val)
@@ -412,8 +414,7 @@ func (m *Muxer) GetMP4Fragment(idx int) buffer.Buffer {
 	moof.Header = &mp4io.MovieFragHeader{
 		Version: 0,
 		Flags:   0,
-		// Safe conversion with validation
-		Seqnum: m.safeUint32Conversion(idx, "sequence number"),
+		Seqnum:  m.safeUint32Conversion(idx, "sequence number"),
 		AtomPos: mp4io.AtomPos{
 			Offset: 0,
 			Size:   0,

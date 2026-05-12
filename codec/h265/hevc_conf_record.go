@@ -11,7 +11,7 @@ func IsDataNALU(b []byte) bool {
 		return false
 	}
 	typ := (b[0] >> 1) & 0x3f //nolint:mnd // RFC 7798 §1.1.4: nal_unit_type = (byte0 >> 1) & 0x3F
-	return typ < 32            //nolint:mnd // RFC 7798 §1.1.4: types 0-31 are VCL (data) NAL units
+	return typ < 32           //nolint:mnd // RFC 7798 §1.1.4: types 0-31 are VCL (data) NAL units
 }
 
 // StartCodeBytes is the 3-byte Annex-B NAL unit start prefix (ISO/IEC 14496-10 Annex B).
@@ -67,7 +67,7 @@ func (avc *HEVCDecoderConfRecord) Unmarshal(b []byte) (n int, err error) {
 		return
 	}
 
-	n++                              // skip array_completeness|NAL_unit_type byte
+	n++                               // skip array_completeness|NAL_unit_type byte
 	spscount := int(pio.U16BE(b[n:])) // numNalus is uint16 BE per ISO 14496-15
 	n += 2
 
@@ -92,7 +92,7 @@ func (avc *HEVCDecoderConfRecord) Unmarshal(b []byte) (n int, err error) {
 		return
 	}
 
-	n++                              // skip array_completeness|NAL_unit_type byte
+	n++                               // skip array_completeness|NAL_unit_type byte
 	ppscount := int(pio.U16BE(b[n:])) // numNalus is uint16 BE per ISO 14496-15
 	n += 2
 
@@ -144,12 +144,8 @@ func (avc *HEVCDecoderConfRecord) Marshal(b []byte) (n int) {
 		b[n] = byte(len(avc.VPS))
 		n++
 		for _, vps := range avc.VPS {
-			// Use a safe length value to avoid overflow
-			vpsLen := len(vps)
-			if vpsLen > 65535 { //nolint:mnd // 65535 is the maximum value for uint16
-				vpsLen = 65535
-			}
-			pio.PutU16BE(b[n:], uint16(vpsLen)) //nolint:gosec // We've already checked that vpsLen <= 65535
+			vpsLen := min(len(vps), 65535)      //nolint:mnd // VPS length is a uint16
+			pio.PutU16BE(b[n:], uint16(vpsLen)) //nolint:gosec // clamped above
 			n += 2
 			copy(b[n:], vps)
 			n += len(vps)
@@ -164,12 +160,8 @@ func (avc *HEVCDecoderConfRecord) Marshal(b []byte) (n int) {
 	b[n] = byte(len(avc.SPS))
 	n++
 	for _, sps := range avc.SPS {
-		// Use a safe length value to avoid overflow
-		spsLen := len(sps)
-		if spsLen > 65535 { //nolint:mnd // 65535 is the maximum value for uint16
-			spsLen = 65535
-		}
-		pio.PutU16BE(b[n:], uint16(spsLen)) //nolint:gosec // We've already checked that spsLen <= 65535
+		spsLen := min(len(sps), 65535)      //nolint:mnd // SPS length is a uint16
+		pio.PutU16BE(b[n:], uint16(spsLen)) //nolint:gosec // clamped above
 		n += 2
 		copy(b[n:], sps)
 		n += len(sps)
@@ -183,9 +175,8 @@ func (avc *HEVCDecoderConfRecord) Marshal(b []byte) (n int) {
 	b[n] = byte(len(avc.PPS))
 	n++
 	for _, pps := range avc.PPS {
-		// Use a safe length value to avoid overflow
-		ppsLen := min(len(pps), 65535)      //nolint:mnd // 65535 is the maximum value for uint16
-		pio.PutU16BE(b[n:], uint16(ppsLen)) //nolint:gosec // We've already checked that ppsLen <= 65535
+		ppsLen := min(len(pps), 65535)      //nolint:mnd // PPS length is a uint16
+		pio.PutU16BE(b[n:], uint16(ppsLen)) //nolint:gosec // clamped above
 		n += 2
 		copy(b[n:], pps)
 		n += len(pps)

@@ -9,9 +9,7 @@ import (
 	"github.com/ugparu/gomedia"
 )
 
-// ---------------------------------------------------------------------------
 // Parse — real-world SDP examples
-// ---------------------------------------------------------------------------
 
 func TestParse_FullRTSPSessionH264AAC(t *testing.T) {
 	sdpContent := strings.Join([]string{
@@ -85,9 +83,7 @@ func TestParse_H265WithSpropVPSSPSPPS(t *testing.T) {
 	assert.NotEmpty(t, m.SpropPPS)
 }
 
-// ---------------------------------------------------------------------------
 // Parse — codec type detection via rtpmap
-// ---------------------------------------------------------------------------
 
 func TestParse_CodecTypeDetection(t *testing.T) {
 	tests := []struct {
@@ -121,9 +117,7 @@ func TestParse_CodecTypeDetection(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Parse — static payload types (no rtpmap needed)
-// ---------------------------------------------------------------------------
 
 func TestParse_StaticPayloadType_PCMU(t *testing.T) {
 	sdpContent := "v=0\r\nm=audio 0 RTP/AVP 0\r\n"
@@ -141,9 +135,7 @@ func TestParse_StaticPayloadType_PCMA(t *testing.T) {
 	assert.Equal(t, 8, medias[0].PayloadType)
 }
 
-// ---------------------------------------------------------------------------
 // Parse — OPUS channel count
-// ---------------------------------------------------------------------------
 
 func TestParse_OPUS_ChannelCount(t *testing.T) {
 	sdpContent := "v=0\r\nm=audio 0 RTP/AVP 111\r\na=rtpmap:111 OPUS/48000/2\r\n"
@@ -161,9 +153,7 @@ func TestParse_OPUS_MonoChannel(t *testing.T) {
 	assert.Equal(t, 1, medias[0].ChannelCount)
 }
 
-// ---------------------------------------------------------------------------
 // Parse — fmtp attributes
-// ---------------------------------------------------------------------------
 
 func TestParse_Fmtp_AACConfig(t *testing.T) {
 	sdpContent := strings.Join([]string{
@@ -200,9 +190,7 @@ func TestParse_Fmtp_SpropParameterSets(t *testing.T) {
 	assert.NotEmpty(t, m.SpropParameterSets[1])
 }
 
-// ---------------------------------------------------------------------------
 // Parse — x-framerate and x-dimensions
-// ---------------------------------------------------------------------------
 
 func TestParse_XFramerate(t *testing.T) {
 	sdpContent := "v=0\r\nm=video 0 RTP/AVP 96\r\na=x-framerate:25\r\n"
@@ -227,9 +215,7 @@ func TestParse_XDimensions(t *testing.T) {
 	assert.Equal(t, 2160, medias[0].Height)
 }
 
-// ---------------------------------------------------------------------------
 // Parse — control attribute
-// ---------------------------------------------------------------------------
 
 func TestParse_Control(t *testing.T) {
 	sdpContent := "v=0\r\nm=video 0 RTP/AVP 96\r\na=control:rtsp://host/track1\r\n"
@@ -238,9 +224,7 @@ func TestParse_Control(t *testing.T) {
 	assert.Equal(t, "rtsp://host/track1", medias[0].Control)
 }
 
-// ---------------------------------------------------------------------------
 // Parse — edge cases
-// ---------------------------------------------------------------------------
 
 func TestParse_EmptyInput(t *testing.T) {
 	sess, medias := Parse("")
@@ -296,9 +280,7 @@ func TestParse_LFLineEndings(t *testing.T) {
 	assert.Equal(t, "track1", medias[0].Control)
 }
 
-// ---------------------------------------------------------------------------
 // Parse — session URI
-// ---------------------------------------------------------------------------
 
 func TestParse_SessionURI(t *testing.T) {
 	sdpContent := "v=0\r\nu=rtsp://cam.local/stream1\r\nm=video 0 RTP/AVP 96\r\n"

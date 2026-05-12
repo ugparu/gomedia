@@ -26,7 +26,7 @@ type Reference struct {
 type SegmentIndex struct {
 	Version     byte  // 0 or 1; 1 signals time is 64-bit
 	Flags       int32 // 3 bytes
-	ReferenceID  int32 // ID of the reference (track) that points to the segment
+	ReferenceID int32 // ID of the reference (track) that points to the segment
 	Timescale   int32
 	EarliestPT  int64
 	FirstOffset int64

@@ -1,5 +1,10 @@
 .vscode
+.cursor
+.idea/
 *.mp4
 *.jpg
-.cursor
+*.out
+*.test
+coverage.out
+dist/
 CLAUDE.md

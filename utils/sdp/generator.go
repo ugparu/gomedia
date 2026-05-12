@@ -47,9 +47,7 @@ func Generate(sess Session, medias []Media) string {
 	})
 
 	for _, m := range mediasCopy {
-		for _, l := range marshalMedia(m) {
-			lines = append(lines, l)
-		}
+		lines = append(lines, marshalMedia(m)...)
 	}
 
 	// RTSP bodies conventionally use CRLF.

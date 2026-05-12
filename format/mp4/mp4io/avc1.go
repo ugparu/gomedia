@@ -18,7 +18,7 @@ type AVC1Desc struct {
 	Width                int16
 	Height               int16
 	HorizontalResolution float64
-	VerticalResolution float64
+	VerticalResolution   float64
 	FrameCount           int16
 	CompressorName       [32]byte
 	Depth                int16

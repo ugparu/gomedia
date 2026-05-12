@@ -2,10 +2,9 @@ package rtsp
 
 import "time"
 
-// rtspMethod represents the RTSP methods used in the protocol.
+// rtspMethod is an RTSP request method (RFC 2326 §10).
 type rtspMethod string
 
-// Constants representing RTSP methods.
 const (
 	video = "video"
 	audio = "audio"

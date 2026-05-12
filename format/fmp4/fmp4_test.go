@@ -19,9 +19,7 @@ import (
 
 const testDataDir = "../../tests/data/h264_aac/"
 
-// ---------------------------------------------------------------------------
 // Test data helpers
-// ---------------------------------------------------------------------------
 
 type parametersJSON struct {
 	URL   string          `json:"url"`
@@ -185,9 +183,7 @@ func makeVideoPacket(videoCp *h264.CodecParameters, keyframe bool, ts, dur time.
 	return pkt
 }
 
-// ---------------------------------------------------------------------------
 // Init segment tests — parse output back and validate against ISO 14496-12
-// ---------------------------------------------------------------------------
 
 func TestGetInit_ParsedFtyp(t *testing.T) {
 	t.Parallel()
@@ -315,9 +311,7 @@ func TestGetInit_ParsedMoov_VideoAndAudio(t *testing.T) {
 	require.Len(t, moov.MovieExtend.Tracks, 2)
 }
 
-// ---------------------------------------------------------------------------
 // Fragment tests — parse moof back and validate structural correctness
-// ---------------------------------------------------------------------------
 
 func TestGetMP4Fragment_ParsedMoof_SequenceNumber(t *testing.T) {
 	t.Parallel()
@@ -490,9 +484,7 @@ func TestGetMP4Fragment_MultiStream_DataOffsets(t *testing.T) {
 	require.Equal(t, videoOffset+len(videoPayload), audioOffset, "audio must follow video immediately")
 }
 
-// ---------------------------------------------------------------------------
 // Sample flags tests — validate against ISO 14496-12 §8.8.3 sample_flags
-// ---------------------------------------------------------------------------
 
 func TestSampleFlags_VideoKeyframeThenNonKeyframe(t *testing.T) {
 	t.Parallel()
@@ -581,9 +573,7 @@ func TestSampleFlags_MixedKeyframes_TRUNSampleFlagsSet(t *testing.T) {
 		"per-sample flags must be set when non-first samples differ from default")
 }
 
-// ---------------------------------------------------------------------------
 // TRUN entry correctness
-// ---------------------------------------------------------------------------
 
 func TestTrunEntries_SizeAndDuration(t *testing.T) {
 	t.Parallel()
@@ -611,9 +601,7 @@ func TestTrunEntries_SizeAndDuration(t *testing.T) {
 	require.Equal(t, uint32(len(data2)), trun.Entries[1].Size)
 }
 
-// ---------------------------------------------------------------------------
 // Fragment lifecycle: reset after GetMP4Fragment
-// ---------------------------------------------------------------------------
 
 func TestGetMP4Fragment_ResetsStreams(t *testing.T) {
 	t.Parallel()
@@ -657,9 +645,7 @@ func TestMultipleFragments_IndependentPayloads(t *testing.T) {
 	require.Equal(t, payload2, mdat2, "fragment 2 mdat must contain only payload2")
 }
 
-// ---------------------------------------------------------------------------
 // timeToTS — validated mathematically, not fitted to output
-// ---------------------------------------------------------------------------
 
 func TestTimeToTS_ExactConversions(t *testing.T) {
 	t.Parallel()
@@ -685,9 +671,7 @@ func TestTimeToTS_ExactConversions(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // safeInt32Conversion — boundary tests
-// ---------------------------------------------------------------------------
 
 func TestSafeInt32Conversion(t *testing.T) {
 	t.Parallel()
@@ -712,9 +696,7 @@ func TestSafeInt32Conversion(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Integration: real test data roundtrip
-// ---------------------------------------------------------------------------
 
 func TestFullRoundtrip_RealData(t *testing.T) {
 	t.Parallel()

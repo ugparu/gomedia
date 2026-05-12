@@ -23,9 +23,7 @@ const (
 	h264AACDataDir = "../../../tests/data/h264_aac/"
 )
 
-// ---------------------------------------------------------------------------
 // JSON fixtures
-// ---------------------------------------------------------------------------
 
 type videoParamsJSON struct {
 	Video struct {
@@ -50,9 +48,7 @@ type packetsFileJSON struct {
 	Packets []packetJSON `json:"packets"`
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 func decodeBase64(t *testing.T, s string) []byte {
 	t.Helper()
@@ -130,9 +126,7 @@ func decodeUntilImage(
 	t.Helper()
 }
 
-// ---------------------------------------------------------------------------
 // Constructor
-// ---------------------------------------------------------------------------
 
 func TestNewFFmpegCPUDecoder_NotNil(t *testing.T) {
 	t.Parallel()
@@ -140,9 +134,7 @@ func TestNewFFmpegCPUDecoder_NotNil(t *testing.T) {
 	require.NotNil(t, d)
 }
 
-// ---------------------------------------------------------------------------
 // Close
-// ---------------------------------------------------------------------------
 
 func TestCPU_Close_WithoutInit(t *testing.T) {
 	t.Parallel()
@@ -167,9 +159,7 @@ func TestCPU_Close_Double(t *testing.T) {
 	require.NotPanics(t, d.Close)
 }
 
-// ---------------------------------------------------------------------------
 // Init
-// ---------------------------------------------------------------------------
 
 func TestCPU_Init_H264_Valid(t *testing.T) {
 	t.Parallel()
@@ -222,9 +212,7 @@ func TestCPU_Init_ReinitWithDifferentCodec(t *testing.T) {
 	require.NoError(t, d.Init(h265Par))
 }
 
-// ---------------------------------------------------------------------------
 // Decode — H264
-// ---------------------------------------------------------------------------
 
 // TestCPU_Decode_H264_ProducesImage feeds packets from h264_aac (first video
 // packet is an IDR) and asserts that at least one non-nil image is returned.
@@ -323,12 +311,8 @@ func TestCPU_Decode_H264_AllPackets(t *testing.T) {
 	require.GreaterOrEqual(t, keyFramesSeen, 1, "expected at least one keyframe")
 }
 
-// ---------------------------------------------------------------------------
 // Feed — H264
-// ---------------------------------------------------------------------------
 
-// TestCPU_Feed_H264_KeyFrame verifies that Feed on an IDR packet does not
-// return an error.
 func TestCPU_Feed_H264_KeyFrame(t *testing.T) {
 	t.Parallel()
 	par := loadH264Params(t, h264AACDataDir)
@@ -395,9 +379,7 @@ func TestCPU_Feed_H264_AfterDecode(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Decode — H265
-// ---------------------------------------------------------------------------
 
 // TestCPU_Decode_H265_ProducesImage feeds H265 packets (first is IDR) and
 // asserts that at least one non-nil image is returned.
@@ -432,8 +414,6 @@ func TestCPU_Decode_H265_ProducesImage(t *testing.T) {
 		"decoded image must have non-zero dimensions")
 }
 
-// TestCPU_Decode_H265_ImageDimensions verifies the decoded image dimensions
-// match those advertised by the codec parameters.
 func TestCPU_Decode_H265_ImageDimensions(t *testing.T) {
 	t.Parallel()
 	par := loadH265Params(t)
@@ -465,9 +445,7 @@ func TestCPU_Decode_H265_ImageDimensions(t *testing.T) {
 	t.Fatal("no image produced within first maxFrames packets")
 }
 
-// ---------------------------------------------------------------------------
 // Feed — H265
-// ---------------------------------------------------------------------------
 
 func TestCPU_Feed_H265_KeyFrame(t *testing.T) {
 	t.Parallel()

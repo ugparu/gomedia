@@ -26,11 +26,11 @@ func (sf SampleFormat) BytesPerSample() int {
 	case U8, U8P:
 		return 1
 	case S16, S16P:
-		return 2 //nolint:mnd
+		return 2 //nolint:mnd // S16 = 16-bit signed
 	case FLT, FLTP, S32, S32P, U32:
-		return 4 //nolint:mnd
+		return 4 //nolint:mnd // 32-bit
 	case DBL, DBLP:
-		return 8 //nolint:mnd
+		return 8 //nolint:mnd // 64-bit double
 	default:
 		return 0
 	}

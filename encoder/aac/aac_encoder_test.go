@@ -58,10 +58,10 @@ func loadFixturePackets(t *testing.T, path string) []fixturePacket {
 // newPCMCodecParams returns PCM codec parameters matching the test data (mono 16kHz).
 func newPCMCodecParams() *pcm.CodecParameters {
 	return pcm.NewCodecParameters(
-		1,          // stream index
+		1, // stream index
 		gomedia.PCM,
-		1,          // mono
-		16000,      // 16 kHz
+		1,     // mono
+		16000, // 16 kHz
 	)
 }
 
@@ -93,7 +93,6 @@ func TestInit_MonoSixteenKHz(t *testing.T) {
 	// NbBytesPerFrame = 2 * channels * FrameSize = 2 * 1 * 1024 = 2048
 	assert.Equal(t, 2048, inner.NbBytesPerFrame()) //nolint:mnd // expected bytes per frame
 
-	// Codec parameters should be set
 	require.NotNil(t, inner.param)
 	assert.Equal(t, uint64(16000), inner.param.SampleRate()) //nolint:mnd // test sample rate
 	assert.Equal(t, uint8(1), inner.param.Channels())
@@ -109,8 +108,8 @@ func TestInit_Stereo(t *testing.T) {
 	require.NoError(t, err)
 
 	inner := enc.(*aacEncoder)
-	assert.Equal(t, 2, inner.Channels()) //nolint:mnd // stereo
-	assert.Equal(t, uint8(2), inner.param.Channels()) //nolint:mnd // stereo
+	assert.Equal(t, 2, inner.Channels())                     //nolint:mnd // stereo
+	assert.Equal(t, uint8(2), inner.param.Channels())        //nolint:mnd // stereo
 	assert.Equal(t, uint64(44100), inner.param.SampleRate()) //nolint:mnd // 44.1kHz
 }
 
@@ -137,7 +136,6 @@ func TestInit_SampleRates(t *testing.T) {
 func TestCloseWithoutInit(t *testing.T) {
 	t.Parallel()
 	enc := NewAacEncoder()
-	// Should not panic
 	enc.Close()
 }
 
@@ -146,7 +144,6 @@ func TestCloseAfterInit(t *testing.T) {
 	enc := NewAacEncoder()
 	par := newPCMCodecParams()
 	require.NoError(t, enc.Init(par))
-	// Should not panic
 	enc.Close()
 }
 
@@ -161,15 +158,14 @@ func TestEncode_SingleFrame(t *testing.T) {
 	inner := enc.(*aacEncoder)
 	frameBytes := inner.NbBytesPerFrame()
 
-	// Create a silent PCM frame
 	data := make([]byte, frameBytes)
 	pkt := pcm.NewPacket(data, 0, "test", time.Now(), par, time.Duration(inner.FrameSize())*time.Second/16000) //nolint:mnd // 16kHz
 
 	result, err := inner.Encode(pkt)
 	require.NoError(t, err)
 
-	// FDK-AAC may or may not produce output for the first frame (encoder delay)
-	// but should not return an error
+	// FDK-AAC may withhold the first frame (encoder delay); only the no-error
+	// invariant is asserted here.
 	for _, p := range result {
 		assert.Greater(t, len(p.Data()), 0)
 	}
@@ -198,7 +194,6 @@ func TestEncode_MultipleFrames(t *testing.T) {
 		totalPackets += len(result)
 	}
 
-	// Should have produced some output packets
 	assert.Greater(t, totalPackets, 0)
 }
 
@@ -213,19 +208,18 @@ func TestEncode_BufferingPartialFrames(t *testing.T) {
 	inner := enc.(*aacEncoder)
 	frameBytes := inner.NbBytesPerFrame()
 
-	// Send half a frame — should produce no output
-	halfData := make([]byte, frameBytes/2) //nolint:mnd // half frame
+	halfData := make([]byte, frameBytes/2) //nolint:mnd // half frame must not produce output
 	pkt := pcm.NewPacket(halfData, 0, "test", time.Now(), par, 0)
 
 	result, err := inner.Encode(pkt)
 	require.NoError(t, err)
 	assert.Empty(t, result, "half frame should not produce output")
 
-	// Send the other half — should now produce output
+	// Send the other half — encoder may buffer internally, so output is not
+	// guaranteed on the first full frame; we only assert that no error is returned.
 	pkt2 := pcm.NewPacket(halfData, 0, "test", time.Now(), par, 0)
-	result, err = inner.Encode(pkt2)
+	_, err = inner.Encode(pkt2)
 	require.NoError(t, err)
-	// Encoder may buffer internally, so output is not guaranteed on first full frame
 }
 
 func TestEncode_LargerThanOneFrame(t *testing.T) {
@@ -239,18 +233,14 @@ func TestEncode_LargerThanOneFrame(t *testing.T) {
 	inner := enc.(*aacEncoder)
 	frameBytes := inner.NbBytesPerFrame()
 
-	// Send 2.5 frames worth of data
 	data := make([]byte, frameBytes*2+frameBytes/2) //nolint:mnd // 2.5 frames
 	pkt := pcm.NewPacket(data, 0, "test", time.Now(), par, 0)
 
 	result, err := inner.Encode(pkt)
 	require.NoError(t, err)
 
-	// Should have encoded at least 2 frames (buffered the remaining half)
-	assert.GreaterOrEqual(t, len(result), 2) //nolint:mnd // 2.5 frames input → at least 2 output
-
-	// Internal buffer should hold the remaining half frame
-	assert.Equal(t, frameBytes/2, inner.pcmLen) //nolint:mnd // half frame remains
+	assert.GreaterOrEqual(t, len(result), 2)    //nolint:mnd // 2.5 frames in → at least 2 frames out
+	assert.Equal(t, frameBytes/2, inner.pcmLen) //nolint:mnd // remaining half-frame stays buffered
 }
 
 func TestEncode_OutputPacketMetadata(t *testing.T) {
@@ -268,7 +258,6 @@ func TestEncode_OutputPacketMetadata(t *testing.T) {
 	startTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	ts := 500 * time.Millisecond //nolint:mnd // test timestamp
 
-	// Encode enough frames to guarantee output
 	var result []gomedia.AudioPacket
 	for i := range 5 { //nolint:mnd // encode 5 frames
 		data := make([]byte, frameBytes)
@@ -432,10 +421,10 @@ func TestEncode_StereoCodecParameters(t *testing.T) {
 	inner := enc.(*aacEncoder)
 	require.NotNil(t, inner.param)
 
-	assert.Equal(t, uint(2), inner.param.Config.ChannelConfig)       //nolint:mnd // stereo
-	assert.Equal(t, uint(3), inner.param.Config.SampleRateIndex)     //nolint:mnd // index 3 = 48kHz
-	assert.Equal(t, uint64(48000), inner.param.SampleRate())         //nolint:mnd // 48kHz
-	assert.Equal(t, uint8(2), inner.param.Channels())                //nolint:mnd // stereo
+	assert.Equal(t, uint(2), inner.param.Config.ChannelConfig)   //nolint:mnd // stereo
+	assert.Equal(t, uint(3), inner.param.Config.SampleRateIndex) //nolint:mnd // index 3 = 48kHz
+	assert.Equal(t, uint64(48000), inner.param.SampleRate())     //nolint:mnd // 48kHz
+	assert.Equal(t, uint8(2), inner.param.Channels())            //nolint:mnd // stereo
 }
 
 func TestEncode_StreamIndexPreserved(t *testing.T) {
@@ -443,7 +432,7 @@ func TestEncode_StreamIndexPreserved(t *testing.T) {
 	enc := NewAacEncoder()
 	defer enc.Close()
 
-	streamIndex := uint8(3) //nolint:mnd // test stream index
+	streamIndex := uint8(3)                                           //nolint:mnd // test stream index
 	par := pcm.NewCodecParameters(streamIndex, gomedia.PCM, 1, 16000) //nolint:mnd // mono 16kHz
 	require.NoError(t, enc.Init(par))
 
@@ -474,8 +463,8 @@ func TestNbBytesPerFrame(t *testing.T) {
 		rate     uint64
 		expected int
 	}{
-		{"mono", 1, 16000, 2048},     //nolint:mnd // 2 * 1 * 1024
-		{"stereo", 2, 44100, 4096},   //nolint:mnd // 2 * 2 * 1024
+		{"mono", 1, 16000, 2048},   //nolint:mnd // 2 * 1 * 1024
+		{"stereo", 2, 44100, 4096}, //nolint:mnd // 2 * 2 * 1024
 	}
 
 	for _, tt := range tests {

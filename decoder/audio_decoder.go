@@ -49,16 +49,12 @@ type audioDecoder struct {
 
 func NewAudioDecoder(chanSize int, factory map[gomedia.CodecType]func() InnerAudioDecoder, params ...AudioDecoderParam) gomedia.AudioDecoder {
 	d := &audioDecoder{
-		AsyncManager:      nil,
-		InnerAudioDecoder: nil,
-		factory:           factory,
-		inpPackets:        make(chan gomedia.AudioPacket, chanSize),
-		outPackets:        make(chan gomedia.AudioPacket, chanSize),
-		codecPar:          nil,
-		pcmPar:            nil,
-		inBuf:             buffer.Get(0),
-		name:              "AUDIO_DECODER",
-		log:               logger.Default,
+		factory:    factory,
+		inpPackets: make(chan gomedia.AudioPacket, chanSize),
+		outPackets: make(chan gomedia.AudioPacket, chanSize),
+		inBuf:      buffer.Get(0),
+		name:       "AUDIO_DECODER",
+		log:        logger.Default,
 	}
 
 	for _, param := range params {
@@ -70,11 +66,8 @@ func NewAudioDecoder(chanSize int, factory map[gomedia.CodecType]func() InnerAud
 }
 
 func (d *audioDecoder) Decode() {
-	startFunc := func(_ *audioDecoder) error {
-		return nil
-	}
-	// Ignoring error as there's no handling needed
-	_ = d.Start(startFunc)
+	// FailSafeAsyncManager.Start never returns an error.
+	_ = d.Start(func(_ *audioDecoder) error { return nil })
 }
 
 func (d *audioDecoder) updateCodecPar(inpPar gomedia.AudioCodecParameters) (err error) {

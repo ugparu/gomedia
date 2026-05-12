@@ -186,10 +186,8 @@ Additionally, there is a new variable called NALULengthSizeMinusOne. This confus
 An advantage to this format is the ability to configure the decoder at the start and jump into the middle of a stream. This is a common use case where the media is available on a random access medium such as a hard drive, and is therefore used in common container formats such as MP4 and MKV.
 */
 
-// removeH264EmulationBytes removes emulation prevention bytes (0x03) from a H.264 byte stream.
-// Emulation prevention bytes are used to prevent the start code of NAL units
-// from appearing in the middle of the stream.
-// This function creates a new byte slice with the emulation prevention bytes removed.
+// removeH264EmulationBytes returns a copy of b with the 0x03 emulation
+// prevention byte stripped (ISO/IEC 14496-10 §B.1.2). The result is RBSP.
 func removeH264EmulationBytes(b []byte) []byte {
 	j := 0
 	r := make([]byte, len(b))
@@ -209,13 +207,10 @@ func removeH264EmulationBytes(b []byte) []byte {
 	return r[:j]
 }
 
-// parseSPS parses the Sequence Parameter Set (SPS) data and extracts relevant information into an SPSInfo struct.
-// The provided data is expected to be in H.264 format.
-// It handles the parsing of various fields such as profile, constraints, level, resolution, cropping, and more.
-// The resulting SPSInfo struct contains information about the video stream's parameters.
-//
-//nolint:lll
-func parseSPS(data []byte) (s SPSInfo, err error) { //nolint:nakedret,gocyclo,cyclop // complex function with many return points
+// parseSPS decodes an H.264 Sequence Parameter Set (ISO/IEC 14496-10 §7.3.2.1.1).
+// Input is raw SPS NALU bytes with the leading 0x67 still attached; emulation
+// prevention bytes are stripped internally.
+func parseSPS(data []byte) (s SPSInfo, err error) { //nolint:nakedret,gocyclo,cyclop // sequential bitstream parser; rewrite is out of scope
 	data = removeH264EmulationBytes(data)
 	r := &bits.GolombBitReader{R: bytes.NewReader(data)}
 
@@ -405,7 +400,7 @@ func parseSPS(data []byte) (s SPSInfo, err error) { //nolint:nakedret,gocyclo,cy
 	}
 
 	s.Width = (s.MbWidth * mbSize) - s.CropLeft*cropMultiplier - s.CropRight*cropMultiplier
-	// Calculate height based on frame type, macroblock height, and cropping values
+	// Interlaced streams have frame_mbs_only_flag == 0; their MB height is doubled.
 	mbHeightScaled := (frameHeightBase - frameMbsOnlyFlag) * s.MbHeight * mbSize
 	cropHeight := s.CropTop*cropMultiplier + s.CropBottom*cropMultiplier
 	s.Height = mbHeightScaled - cropHeight

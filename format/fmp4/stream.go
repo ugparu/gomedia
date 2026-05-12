@@ -11,12 +11,11 @@ import (
 	"github.com/ugparu/gomedia/utils/logger"
 )
 
-// Constants to avoid magic numbers
 const (
 	defaultDPI          = 72
 	defaultDepth        = 24
-	maxInt16Value       = 32767 // Maximum value for int16
-	bytesPerSampleScale = 8     // Converts bytes to bits for SampleSize per ISO 14496-12 §12.2.3
+	maxInt16Value       = 32767
+	bytesPerSampleScale = 8 // bits per byte, for SampleSize per ISO 14496-12 §12.2.3
 )
 
 type Stream struct {
@@ -39,27 +38,22 @@ func (s *Stream) timeToTS(tm time.Duration) int64 {
 	// when both audio and video tracks are present.
 	sec := tm / time.Second
 	rem := tm % time.Second
-	return int64(sec)*s.timeScale + (int64(rem)*s.timeScale + int64(time.Second)/2) / int64(time.Second) //nolint:mnd
+	return int64(sec)*s.timeScale + (int64(rem)*s.timeScale+int64(time.Second)/2)/int64(time.Second) //nolint:mnd
 }
 
-// safeInt16Conversion safely converts a uint value to int16 with validation
+// safeInt16Conversion clamps val to int16 range and logs when saturation happens.
 func (s *Stream) safeInt16Conversion(val uint, name string) int16 {
 	if val <= uint(maxInt16Value) {
 		return int16(val)
 	}
-	// Default to max int16 value if overflow would occur
 	s.log.Errorf(s, "%s value %d is too large for int16, capping at %d", name, val, maxInt16Value)
 	return maxInt16Value
 }
 
 func (s *Stream) fillTrackAtom() {
-	// Safe conversion with validation for TimeScale
-	timeScaleInt32 := safeInt32Conversion(s.log, s, s.timeScale, "timeScale")
-	s.trackAtom.Media.Header.TimeScale = timeScaleInt32
-
+	s.trackAtom.Media.Header.TimeScale = safeInt32Conversion(s.log, s, s.timeScale, "timeScale")
 	s.trackAtom.Media.Header.Duration = s.timeToTS(s.duration)
 
-	// Customize settings based on the codec type
 	switch codecPar := s.CodecParameters.(type) {
 	case *h264.CodecParameters:
 		width, height := codecPar.Width(), codecPar.Height()
@@ -130,7 +124,6 @@ func (s *Stream) fillTrackAtom() {
 		}
 		s.trackAtom.Media.Info.Video = new(mp4io.VideoMediaInfo)
 	case *aac.CodecParameters:
-		// Safe conversions with validation
 		var channelsInt16 int16
 		channelCount := codecPar.ChannelLayout().Count()
 		if channelCount >= 0 && channelCount <= maxInt16Value {

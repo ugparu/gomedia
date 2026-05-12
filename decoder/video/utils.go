@@ -79,25 +79,14 @@ func ParametersToFFmpeg(vPar gomedia.VideoCodecParameters, ptr unsafe.Pointer) e
 	return nil
 }
 
-// convertLengthPrefixedToAnnexB converts length-prefixed NAL units to Annex-B format
-// This is needed for H.265 packets which come with 4-byte length prefixes
+// convertLengthPrefixedToAnnexB rewrites each 4-byte NAL length prefix in-place
+// as the Annex-B start code (00 00 00 01), in-place. Used to feed H.265 packets
+// to FFmpeg, which expects Annex-B framing.
 func convertLengthPrefixedToAnnexB(data []byte) {
 	offset := 0
-	for offset < len(data) {
-		if offset+4 > len(data) {
-			break
-		}
-
-		// Read the 4-byte length prefix
+	for offset+4 <= len(data) {
 		nalLength := int(data[offset])<<24 | int(data[offset+1])<<16 | int(data[offset+2])<<8 | int(data[offset+3])
-
-		// Replace length prefix with Annex-B start code (0x00 0x00 0x00 0x01)
-		data[offset] = 0x00
-		data[offset+1] = 0x00
-		data[offset+2] = 0x00
-		data[offset+3] = 0x01
-
-		// Move to next NAL unit
+		data[offset], data[offset+1], data[offset+2], data[offset+3] = 0x00, 0x00, 0x00, 0x01
 		offset += 4 + nalLength
 	}
 }
@@ -136,7 +125,6 @@ func PacketToFFmpeg(vPkt gomedia.VideoPacket, ptr unsafe.Pointer) error {
 
 		slice := unsafe.Slice((*byte)(cPkt.data), int(cPkt.size))
 		copy(slice, pkt.Data())
-		// Convert length-prefixed NAL units to Annex-B format for H.265
 		convertLengthPrefixedToAnnexB(slice)
 		return nil
 	default:

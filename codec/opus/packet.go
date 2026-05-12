@@ -11,7 +11,6 @@ type Packet struct {
 	codec.AudioPacket[*CodecParameters]
 }
 
-// NewPacket creates a new Opus packet with the given parameters
 func NewPacket(
 	data []byte,
 	ts time.Duration,

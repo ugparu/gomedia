@@ -1,4 +1,9 @@
-//nolint:mnd // .
+// Package aac implements an MPEG-4 Audio (ADTS / AudioSpecificConfig) parser
+// and a CodecParameters value built on top of it.
+//
+// Magic numbers throughout this file come from ISO/IEC 14496-3 (MPEG-4 Audio)
+// and the libavcodec/mpeg4audio.h header from FFmpeg; they are tagged
+// individually rather than file-wide.
 package aac
 
 import (
@@ -127,58 +132,46 @@ var chanConfigTable = []gomedia.ChannelLayout{
 }
 
 func ParseADTSHeader(frame []byte) (config MPEG4AudioConfig, hdrlen int, framelen int, samples int, err error) {
-	// Check for minimum ADTS header length
-	if len(frame) < 7 { //nolint:mnd // 7 is the minimum length of an ADTS header
+	if len(frame) < 7 { //nolint:mnd // unprotected ADTS header is 7 bytes
 		err = fmt.Errorf("aacparser: insufficient data for ADTS header, need at least 7 bytes, got %d", len(frame))
 		return
 	}
 
-	// Check ADTS sync word
 	if frame[0] != 0xff || frame[1]&0xf6 != 0xf0 {
 		err = fmt.Errorf("aacparser: invalid ADTS sync word: %02x %02x", frame[0], frame[1])
 		return
 	}
 
-	// Extract AAC object type, sample rate index, and channel configuration
-	config.ObjectType = uint(frame[2]>>6) + 1          //nolint:mnd // 6 is the number of bits for the object type
-	config.SampleRateIndex = uint(frame[2] >> 2 & 0xf) //nolint:mnd // 2 is the number of bits for the sample rate index
+	config.ObjectType = uint(frame[2]>>6) + 1          //nolint:mnd // 2-bit profile in bits 7-6 of byte 2; AOT = profile + 1
+	config.SampleRateIndex = uint(frame[2] >> 2 & 0xf) //nolint:mnd // 4-bit sampling_frequency_index in bits 5-2 of byte 2
 	config.ChannelConfig = uint(frame[2]<<2&0x4 | frame[3]>>6&0x3)
 
-	// Validate sample rate index
 	if config.SampleRateIndex >= uint(len(sampleRateTable)) {
 		err = fmt.Errorf("aacparser: invalid sample rate index: %d", config.SampleRateIndex)
 		return
 	}
 
-	// Validate channel configuration.
-	// config == 0 is valid per ISO 14496-3 §1.6.3: it means the channel
-	// configuration is defined in the bitstream (program_config_element).
+	// config == 0 is valid per ISO 14496-3 §1.6.3: the channel configuration
+	// is defined in the bitstream (program_config_element).
 	if config.ChannelConfig >= uint(len(chanConfigTable)) {
 		err = fmt.Errorf("aacparser: invalid channel configuration: %d", config.ChannelConfig)
 		return
 	}
 
-	// Complete the configuration
 	(&config).Complete()
 
-	// Extract frame length
-	framelen = int(frame[3]&0x3)<<11 | int(frame[4])<<3 | int(frame[5]>>5) //nolint:mnd,lll // 3 is the number of bits for the frame length
+	framelen = int(frame[3]&0x3)<<11 | int(frame[4])<<3 | int(frame[5]>>5) //nolint:mnd,lll // bit fields per ISO/IEC 13818-7
+	samples = (int(frame[6]&0x3) + 1) * 1024                               //nolint:mnd // 1024 samples per AAC frame
 
-	// Extract number of samples
-	samples = (int(frame[6]&0x3) + 1) * 1024 //nolint:mnd // 3 is the number of bits for the number of samples
-
-	// Determine header length based on protection bit
 	hdrlen = 7
 	if frame[1]&0x1 == 0 {
 		hdrlen = 9
-		// Ensure we have enough data for the longer header
-		if len(frame) < 9 { //nolint:mnd // 9 is the length of the protected ADTS header
+		if len(frame) < 9 { //nolint:mnd // CRC-protected ADTS header is 9 bytes
 			err = fmt.Errorf("aacparser: insufficient data for protected ADTS header, need 9 bytes, got %d", len(frame))
 			return
 		}
 	}
 
-	// Validate frame length
 	if framelen < hdrlen {
 		err = fmt.Errorf("aacparser: invalid ADTS frame length: %d (must be >= %d)", framelen, hdrlen)
 		return
@@ -190,13 +183,11 @@ func ParseADTSHeader(frame []byte) (config MPEG4AudioConfig, hdrlen int, framele
 const ADTSHeaderLength = 7
 
 func FillADTSHeader(header []byte, config MPEG4AudioConfig, samples int, payloadLength int) error {
-	// Ensure header array is large enough
 	if len(header) < ADTSHeaderLength {
 		return fmt.Errorf("aacparser: header buffer too small, needs at least %d bytes, got %d",
 			ADTSHeaderLength, len(header))
 	}
 
-	// Validate parameters
 	if !config.IsValid() {
 		return errors.New("aacparser: invalid MPEG4 audio configuration")
 	}
@@ -219,7 +210,7 @@ func FillADTSHeader(header []byte, config MPEG4AudioConfig, samples int, payload
 
 	payloadLength += ADTSHeaderLength
 
-	// Calculate frame length - cannot exceed 13-bit field size
+	// ADTS aac_frame_length is a 13-bit field.
 	if payloadLength >= (1 << 13) {
 		return fmt.Errorf("aacparser: payload length too large: %d (max %d)", payloadLength, (1<<13)-1)
 	}
@@ -243,29 +234,27 @@ func FillADTSHeader(header []byte, config MPEG4AudioConfig, samples int, payload
 	return nil
 }
 
+// objectType is a 5-bit field in AudioSpecificConfig; the escape value 31
+// signals an extended type encoded as 31 + 6-bit (so AOTs 32-95 are reachable).
+// Don't confuse this with AotEscape (= 39), which is a real object type.
 func readObjectType(r *bits.Reader) (objectType uint, err error) {
 	if objectType, err = r.ReadBits(5); err != nil {
 		return
 	}
-	// Escape value is 31 (0x1f), not AotEscape constant (which is object type 43)
 	const escapeValue = 31
 	if objectType == escapeValue {
 		var i uint
 		if i, err = r.ReadBits(6); err != nil {
 			return
 		}
-		// Extended object type: escape (31) + 6-bit value
-		// Object type = 32 + 6-bit value
 		objectType = 32 + i
 	}
 	return
 }
 
 func writeObjectType(w *bits.Writer, objectType uint) (err error) {
+	const escapeValue = 31
 	if objectType >= 32 {
-		// Extended object type: write escape (31) + 6-bit value (objectType - 32)
-		// Note: escape value is 31 (0x1f), not AotEscape constant (which is object type 43)
-		const escapeValue = 31
 		if err = w.WriteBits(escapeValue, 5); err != nil {
 			return
 		}
@@ -273,7 +262,6 @@ func writeObjectType(w *bits.Writer, objectType uint) (err error) {
 			return
 		}
 	} else {
-		// Standard object type: write directly as 5-bit value
 		if err = w.WriteBits(objectType, 5); err != nil {
 			return
 		}
@@ -318,21 +306,18 @@ func writeSampleRateIndex(w *bits.Writer, index uint, sampleRate int) (err error
 	return
 }
 
+// ParseMPEG4AudioConfigBytes decodes an AudioSpecificConfig (ISO 14496-3 §1.6.2.1).
+// Layout: 5b objectType (+6b if escape=31), 4b sampleRateIndex (+24b Hz if escape=0xf),
+// 4b channelConfig.
+//
+// Adapted from libavcodec/mpeg4audio.c:avpriv_mpeg4audio_get_config().
 func ParseMPEG4AudioConfigBytes(data []byte) (config MPEG4AudioConfig, err error) {
-	// Copied from libavcodec/mpeg4audio.c avpriv_mpeg4audio_get_config()
-	// Validate minimum data length before parsing
-	// Minimum: 5 bits (object type) + 4 bits (sample rate) + 4 bits (channel config) = 13 bits = 2 bytes
-	// But if object type is escape (31), we need 5 + 6 = 11 more bits = 3 bytes total
-	// If sample rate is extended (0xf), we need 4 + 24 = 28 more bits = 4 bytes total
-	// So worst case: 5 + 6 + 4 + 24 + 4 = 43 bits = 6 bytes minimum
 	if len(data) == 0 {
 		return config, fmt.Errorf("aacparser: empty MPEG4 audio config data")
 	}
 
-	r := bytes.NewReader(data)
-	br := &bits.Reader{R: r}
+	br := &bits.Reader{R: bytes.NewReader(data)}
 
-	// Read object type (5 bits, or 5+6 if extended)
 	if config.ObjectType, err = readObjectType(br); err != nil {
 		if err == io.EOF {
 			return config, fmt.Errorf("aacparser: insufficient data for object type: %w", err)
@@ -340,7 +325,6 @@ func ParseMPEG4AudioConfigBytes(data []byte) (config MPEG4AudioConfig, err error
 		return
 	}
 
-	// Read sample rate index (4 bits, or 4+24 if extended)
 	var extHz int
 	if config.SampleRateIndex, extHz, err = readSampleRateIndex(br); err != nil {
 		if err == io.EOF {
@@ -349,12 +333,10 @@ func ParseMPEG4AudioConfigBytes(data []byte) (config MPEG4AudioConfig, err error
 		return
 	}
 	if extHz != 0 {
-		// Extended form: the 24-bit value is the actual sample rate in Hz.
-		// Set it directly so Complete() does not overwrite it with a table lookup.
+		// Extended form: skip the table lookup in Complete().
 		config.SampleRate = extHz
 	}
 
-	// Read channel config (4 bits)
 	if config.ChannelConfig, err = br.ReadBits(4); err != nil {
 		if err == io.EOF {
 			return config, fmt.Errorf("aacparser: insufficient data for channel config: %w", err)
@@ -402,7 +384,7 @@ func WriteMPEG4AudioConfig(w io.Writer, config MPEG4AudioConfig) (err error) {
 		return
 	}
 
-	// Write fixed suffix bytes
+	// SL config + GASpecificConfig terminator suffix (ISO 14496-1 expandable tags).
 	if _, err = w.Write([]byte{0x06, 0x80, 0x80, 0x80, 0x01, 0x02, 0x06, 0x80, 0x80, 0x80, 0x01}); err != nil {
 		return fmt.Errorf("aacparser: failed to write suffix bytes: %w", err)
 	}

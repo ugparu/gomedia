@@ -1,0 +1,73 @@
+version: "2"
+run:
+  tests: true
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - errcheck
+    - gocritic
+    - govet
+    - ineffassign
+    - misspell
+    - prealloc
+    - revive
+    - staticcheck
+    - whitespace
+  settings:
+    gocritic:
+      disabled-checks:
+        - ifElseChain
+        - singleCaseSwitch
+    revive:
+      rules:
+        - name: indent-error-flow
+        - name: error-return
+        - name: error-naming
+        - name: range
+        - name: superfluous-else
+        - name: unreachable-code
+        - name: redefines-builtin-id
+    staticcheck:
+      checks:
+        - all
+        - -QF*
+        - -ST1003
+        - -ST1006
+        - -ST1016
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - errcheck
+          - gocritic
+          - revive
+          - staticcheck
+        path: mocks/
+      - linters:
+          - errcheck
+          - gocritic
+          - prealloc
+          - gosec
+          - revive
+          - ineffassign
+        path: _test\.go$
+      - linters:
+          - staticcheck
+        path: format/mp4/mp4io/
+      - linters:
+          - gocritic
+        path: format/mp4/stream\.go
+        text: appendAssign
+    paths:
+      - third_party$
+      - builtin$
+      - ^examples/
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

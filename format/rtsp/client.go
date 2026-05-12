@@ -1,4 +1,10 @@
-//nolint:gosec,mnd //tls is unused, fix in future
+// Package rtsp implements an RTSP 1.0 client (RFC 2326) with TCP-interleaved
+// RTP transport, basic and digest authentication, and reconnect-aware reads.
+//
+// File-level nolint directives suppress gosec/mnd across the legacy parts of
+// this file; per-line directives are preferred for new code.
+//
+//nolint:gosec,mnd // sweeping suppression for the legacy parser; tighten per-site in new code
 package rtsp
 
 import (

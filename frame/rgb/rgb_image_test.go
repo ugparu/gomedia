@@ -7,18 +7,16 @@ import (
 	"testing"
 )
 
-// ---------------------------------------------------------------------------
 // Color
-// ---------------------------------------------------------------------------
 
 func TestColor_RGBA(t *testing.T) {
 	tests := []struct {
-		name       string
-		c          Color
-		wantR      uint32
-		wantG      uint32
-		wantB      uint32
-		wantA      uint32
+		name  string
+		c     Color
+		wantR uint32
+		wantG uint32
+		wantB uint32
+		wantA uint32
 	}{
 		{"black", Color{0, 0, 0}, 0, 0, 0, solid},
 		{"white", Color{255, 255, 255}, 0xffff, 0xffff, 0xffff, solid},
@@ -45,9 +43,7 @@ func TestColor_AlphaAlwaysSolid(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Model
-// ---------------------------------------------------------------------------
 
 func TestModel_ConvertPassthroughRGBColor(t *testing.T) {
 	m := Model{}
@@ -89,9 +85,7 @@ func TestModel_ConvertFromTransparent(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // NewRGB
-// ---------------------------------------------------------------------------
 
 func TestNewRGB_BasicProperties(t *testing.T) {
 	r := image.Rect(0, 0, 10, 20)
@@ -137,9 +131,7 @@ func TestNewRGB_PixInitializedToZero(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // image.Image interface compliance
-// ---------------------------------------------------------------------------
 
 func TestRGB_ImplementsImageInterface(t *testing.T) {
 	var _ image.Image = (*RGB)(nil)
@@ -167,9 +159,7 @@ func TestRGB_Opaque(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // PixOffset
-// ---------------------------------------------------------------------------
 
 func TestRGB_PixOffset_Origin(t *testing.T) {
 	img := NewRGB(image.Rect(0, 0, 10, 10))
@@ -196,9 +186,7 @@ func TestRGB_PixOffset_NonOrigin(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // At / Set
-// ---------------------------------------------------------------------------
 
 func TestRGB_SetAndAt(t *testing.T) {
 	img := NewRGB(image.Rect(0, 0, 10, 10))
@@ -290,9 +278,7 @@ func TestRGB_SetAllPixels(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // SubImage
-// ---------------------------------------------------------------------------
 
 func TestRGB_SubImage_SharesBackingBuffer(t *testing.T) {
 	img := NewRGB(image.Rect(0, 0, 10, 10))
@@ -357,9 +343,7 @@ func TestRGB_SubImage_OutOfBoundsReturnsBlack(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Clone
-// ---------------------------------------------------------------------------
 
 func TestRGB_Clone_IndependentCopy(t *testing.T) {
 	img := NewRGB(image.Rect(0, 0, 5, 5))
@@ -394,9 +378,7 @@ func TestRGB_Clone_PreservesMetadata(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // JSON round-trip
-// ---------------------------------------------------------------------------
 
 func TestRGB_MarshalUnmarshalJSON_RoundTrip(t *testing.T) {
 	img := NewRGB(image.Rect(0, 0, 4, 3))
@@ -499,9 +481,7 @@ func TestRGB_UnmarshalJSON_ZeroSize(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // JSON field structure
-// ---------------------------------------------------------------------------
 
 func TestRGB_MarshalJSON_FieldNames(t *testing.T) {
 	img := NewRGB(image.Rect(1, 2, 5, 7))
@@ -536,9 +516,7 @@ func TestRGB_MarshalJSON_FieldNames(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Edge cases
-// ---------------------------------------------------------------------------
 
 func TestRGB_SinglePixel(t *testing.T) {
 	img := NewRGB(image.Rect(0, 0, 1, 1))

@@ -20,9 +20,7 @@ import (
 
 const testDataDir = "../../tests/data/h264_aac/"
 
-// ---------------------------------------------------------------------------
 // Test data helpers
-// ---------------------------------------------------------------------------
 
 type parametersJSON struct {
 	URL   string          `json:"url"`
@@ -148,9 +146,7 @@ func createTempMP4(t *testing.T, pair gomedia.CodecParametersPair, packets []gom
 	return path
 }
 
-// ---------------------------------------------------------------------------
 // Muxer — initialization and basic API
-// ---------------------------------------------------------------------------
 
 func TestMuxer_Mux_VideoAndAudio(t *testing.T) {
 	t.Parallel()
@@ -244,9 +240,7 @@ func TestMuxer_WritePacket_InvalidStreamIndex(t *testing.T) {
 	assert.Contains(t, err.Error(), "out of range")
 }
 
-// ---------------------------------------------------------------------------
 // Muxer — file structure validation (ISO 14496-12)
-// ---------------------------------------------------------------------------
 
 func TestMuxer_FileStructure_FtypFreeeMdat(t *testing.T) {
 	t.Parallel()
@@ -483,9 +477,7 @@ func TestMuxer_Moov_NextTrackID(t *testing.T) {
 	assert.Equal(t, int32(3), moov.Header.NextTrackID, "nextTrackID should be num_tracks + 1")
 }
 
-// ---------------------------------------------------------------------------
 // Muxer — WriteTrailer writes last buffered packet
-// ---------------------------------------------------------------------------
 
 func TestMuxer_WriteTrailer_FlushesLastPacket(t *testing.T) {
 	t.Parallel()
@@ -521,9 +513,7 @@ func TestMuxer_WriteTrailer_FlushesLastPacket(t *testing.T) {
 	assert.Equal(t, 3, totalSamples, "all 3 packets should be written")
 }
 
-// ---------------------------------------------------------------------------
 // Demuxer — basic functionality
-// ---------------------------------------------------------------------------
 
 func TestDemuxer_NonexistentFile(t *testing.T) {
 	t.Parallel()
@@ -556,9 +546,7 @@ func TestDemuxer_InvalidFile(t *testing.T) {
 	dmx.Close()
 }
 
-// ---------------------------------------------------------------------------
 // Round-trip: Mux → Demux → verify codec parameters
-// ---------------------------------------------------------------------------
 
 func TestRoundTrip_CodecParameters(t *testing.T) {
 	t.Parallel()
@@ -609,9 +597,7 @@ func TestRoundTrip_VideoParameters_Accessors(t *testing.T) {
 	assert.Equal(t, gomedia.AAC, dmx.AudioParameters().Type())
 }
 
-// ---------------------------------------------------------------------------
 // Round-trip: Mux → Demux → verify packets
-// ---------------------------------------------------------------------------
 
 func TestRoundTrip_ReadAllPackets_EOF(t *testing.T) {
 	t.Parallel()
@@ -819,9 +805,7 @@ func TestRoundTrip_AudioOnly(t *testing.T) {
 	assert.Greater(t, count, 0)
 }
 
-// ---------------------------------------------------------------------------
 // Muxer — GetPreLastPacket after writing
-// ---------------------------------------------------------------------------
 
 func TestMuxer_GetPreLastPacket_AfterWrite(t *testing.T) {
 	t.Parallel()
@@ -853,9 +837,7 @@ func TestMuxer_GetPreLastPacket_AfterWrite(t *testing.T) {
 	require.NotNil(t, result)
 }
 
-// ---------------------------------------------------------------------------
 // Muxer — GetWritePosition
-// ---------------------------------------------------------------------------
 
 func TestMuxer_GetWritePosition(t *testing.T) {
 	t.Parallel()
@@ -888,9 +870,7 @@ func TestMuxer_GetWritePosition(t *testing.T) {
 	assert.Greater(t, mux.GetWritePosition(), int64(56))
 }
 
-// ---------------------------------------------------------------------------
 // Muxer — stts (TimeToSample) and stsz (SampleSize) validation
-// ---------------------------------------------------------------------------
 
 func TestMuxer_SampleTable_SttsAndStsz(t *testing.T) {
 	t.Parallel()
@@ -918,9 +898,7 @@ func TestMuxer_SampleTable_SttsAndStsz(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Demuxer — SourceID
-// ---------------------------------------------------------------------------
 
 func TestDemuxer_SourceID(t *testing.T) {
 	t.Parallel()
@@ -936,9 +914,7 @@ func TestDemuxer_SourceID(t *testing.T) {
 	assert.Equal(t, path, params.SourceID, "SourceID should be the file path")
 }
 
-// ---------------------------------------------------------------------------
 // ChunkOffset — stco vs co64
-// ---------------------------------------------------------------------------
 
 func TestMuxer_ChunkOffset_Stco(t *testing.T) {
 	t.Parallel()
@@ -960,9 +936,7 @@ func TestMuxer_ChunkOffset_Stco(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Composition offset (ctts) — should be 0 for this muxer
-// ---------------------------------------------------------------------------
 
 func TestMuxer_CompositionOffset_Zero(t *testing.T) {
 	t.Parallel()
@@ -982,9 +956,7 @@ func TestMuxer_CompositionOffset_Zero(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Multiple ReadPacket after EOF
-// ---------------------------------------------------------------------------
 
 func TestDemuxer_ReadPacket_MultipleEOF(t *testing.T) {
 	t.Parallel()
@@ -1014,9 +986,7 @@ func TestDemuxer_ReadPacket_MultipleEOF(t *testing.T) {
 	assert.Equal(t, io.EOF, err)
 }
 
-// ---------------------------------------------------------------------------
 // Ftyp brands validation
-// ---------------------------------------------------------------------------
 
 func TestMuxer_Ftyp_Brands(t *testing.T) {
 	t.Parallel()
@@ -1037,9 +1007,7 @@ func TestMuxer_Ftyp_Brands(t *testing.T) {
 	assert.Greater(t, len(ftyp.CompatibleBrands), 0, "must have compatible brands")
 }
 
-// ---------------------------------------------------------------------------
 // Muxer — Flush writes data to writer mid-stream
-// ---------------------------------------------------------------------------
 
 func TestMuxer_Flush_WritesToWriter(t *testing.T) {
 	t.Parallel()
@@ -1136,9 +1104,7 @@ func TestMuxer_NoFlush_WriteTrailer_ProducesValidMP4(t *testing.T) {
 	assert.Greater(t, moov.Header.Duration, int64(0))
 }
 
-// ---------------------------------------------------------------------------
 // Helper: parse moov from a muxed file
-// ---------------------------------------------------------------------------
 
 func demuxAndGetMoov(t *testing.T, path string) *mp4io.Movie {
 	t.Helper()

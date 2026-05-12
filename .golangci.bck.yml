@@ -1,0 +1,67 @@
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - gosec
+    - staticcheck
+    - govet
+    - ineffassign
+    - unused
+    - revive
+    - gocritic
+    - misspell
+    - unparam
+    - bodyclose
+    - nolintlint
+    - lll
+    - prealloc
+    - whitespace
+    - gofumpt
+    - dupl
+
+linters-settings:
+  lll:
+    line-length: 140
+    tab-width: 4
+  nolintlint:
+    require-explanation: false
+    require-specific: true
+    allow-unused: false
+  revive:
+    rules:
+      - name: var-naming
+      - name: exported
+        arguments: [disableStutteringCheck]
+      - name: package-comments
+      - name: indent-error-flow
+      - name: error-return
+      - name: error-naming
+      - name: if-return
+      - name: increment-decrement
+      - name: range
+      - name: superfluous-else
+      - name: unreachable-code
+      - name: redefines-builtin-id
+  gocritic:
+    disabled-checks:
+      - ifElseChain
+      - singleCaseSwitch
+
+issues:
+  exclude-rules:
+    - path: mocks/
+      linters: [revive, gocritic, lll, unparam, dupl, gosec, staticcheck, errcheck]
+    - path: examples/
+      linters: [errcheck, gosec, revive, gocritic, lll, dupl]
+    - path: _test\.go$
+      linters: [lll, dupl, gosec, unparam, gocritic]
+    - path: codec/h264/parser\.go
+      linters: [lll]
+    - linters: [revive]
+      text: "exported: comment on exported"
+  max-issues-per-linter: 0
+  max-same-issues: 0

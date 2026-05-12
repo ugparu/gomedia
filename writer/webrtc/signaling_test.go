@@ -11,9 +11,7 @@ import (
 	"github.com/ugparu/gomedia"
 )
 
-// ---------------------------------------------------------------------------
 // DefaultSignalingHandler tests
-// ---------------------------------------------------------------------------
 
 func TestDefaultSignaling_BuildAvailableStreams(t *testing.T) {
 	h := &DefaultSignalingHandler{}

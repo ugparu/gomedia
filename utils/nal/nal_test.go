@@ -12,9 +12,7 @@ import (
 	"github.com/ugparu/gomedia/tests"
 )
 
-// ---------------------------------------------------------------------------
 // isStartCode
-// ---------------------------------------------------------------------------
 
 func TestIsStartCode_3Byte(t *testing.T) {
 	// 0x000001
@@ -63,9 +61,7 @@ func TestIsStartCode_PositionAtEnd(t *testing.T) {
 	assert.False(t, found)
 }
 
-// ---------------------------------------------------------------------------
 // SplitNALUs — ANNEXB format
-// ---------------------------------------------------------------------------
 
 func TestSplitNALUs_AnnexB_3ByteStartCode(t *testing.T) {
 	// Two NALUs: [0x00 0x00 0x01] + NALU1 + [0x00 0x00 0x01] + NALU2
@@ -116,9 +112,7 @@ func TestSplitNALUs_AnnexB_SingleNALU(t *testing.T) {
 	assert.Equal(t, []byte{0x65, 0xAA, 0xBB, 0xCC}, nalus[0])
 }
 
-// ---------------------------------------------------------------------------
 // SplitNALUs — AVCC format
-// ---------------------------------------------------------------------------
 
 func TestSplitNALUs_AVCC_SingleNALU(t *testing.T) {
 	// Length prefix (4 bytes big-endian) = 3, followed by 3 bytes of NALU data.
@@ -153,9 +147,7 @@ func TestSplitNALUs_AVCC_CorruptedStream(t *testing.T) {
 	assert.Equal(t, []byte{0x67, 0x42, 0x00, 0xAA}, nalus[0])
 }
 
-// ---------------------------------------------------------------------------
 // SplitNALUs — Raw format
-// ---------------------------------------------------------------------------
 
 func TestSplitNALUs_Raw_TooShort(t *testing.T) {
 	b := []byte{0x67, 0x42, 0x00}
@@ -183,9 +175,7 @@ func TestSplitNALUs_Empty(t *testing.T) {
 	assert.Equal(t, 1, len(nalus))
 }
 
-// ---------------------------------------------------------------------------
 // SplitNALUs — edge cases
-// ---------------------------------------------------------------------------
 
 func TestSplitNALUs_AnnexB_ConsecutiveStartCodes(t *testing.T) {
 	// Two start codes back-to-back (empty NALU between them, should be skipped).
@@ -220,17 +210,13 @@ func TestSplitNALUs_AVCC_ExactLength(t *testing.T) {
 	assert.Equal(t, []byte{0x01, 0x02, 0x03, 0x04}, nalus[0])
 }
 
-// ---------------------------------------------------------------------------
 // Constants
-// ---------------------------------------------------------------------------
 
 func TestMinNaluSize(t *testing.T) {
 	assert.Equal(t, 4, MinNaluSize)
 }
 
-// ---------------------------------------------------------------------------
 // Helpers for real-data tests
-// ---------------------------------------------------------------------------
 
 // H264 NAL unit types.
 const h264IDR = 5
@@ -259,9 +245,7 @@ func decodeData(t *testing.T, b64 string) []byte {
 	return data
 }
 
-// ---------------------------------------------------------------------------
 // SplitNALUs — real H264 data
-// ---------------------------------------------------------------------------
 
 func TestSplitNALUs_RealH264(t *testing.T) {
 	packets := loadPackets(t, "../../tests/data/h264/packets.json")
@@ -293,9 +277,7 @@ func TestSplitNALUs_RealH264(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // SplitNALUs — real HEVC data
-// ---------------------------------------------------------------------------
 
 func TestSplitNALUs_RealHEVC(t *testing.T) {
 	packets := loadPackets(t, "../../tests/data/hevc/packets.json")

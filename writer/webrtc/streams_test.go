@@ -18,9 +18,7 @@ import (
 	"github.com/ugparu/gomedia/utils/logger"
 )
 
-// ---------------------------------------------------------------------------
 // sortedStreams helpers
-// ---------------------------------------------------------------------------
 
 func newTestSortedStreams() *sortedStreams {
 	return &sortedStreams{
@@ -47,9 +45,7 @@ func newTestPeerTrack(targetURL string) *peerTrack {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Exists
-// ---------------------------------------------------------------------------
 
 func TestSortedStreams_Exists_ReturnsFalseForMissing(t *testing.T) {
 	ss := newTestSortedStreams()
@@ -63,9 +59,7 @@ func TestSortedStreams_Exists_ReturnsTrueAfterAdd(t *testing.T) {
 	assert.True(t, ss.Exists("rtsp://cam1"))
 }
 
-// ---------------------------------------------------------------------------
 // Add
-// ---------------------------------------------------------------------------
 
 func TestSortedStreams_Add_CreatesStream(t *testing.T) {
 	ss := newTestSortedStreams()
@@ -113,9 +107,7 @@ func TestSortedStreams_Add_MovesPendingPeers(t *testing.T) {
 	assert.True(t, ss.streams["rtsp://cam1"].tracks[pt])
 }
 
-// ---------------------------------------------------------------------------
 // Remove
-// ---------------------------------------------------------------------------
 
 func TestSortedStreams_Remove_NonexistentIsNoOp(t *testing.T) {
 	ss := newTestSortedStreams()
@@ -176,9 +168,7 @@ func TestSortedStreams_Remove_HandlesToAddPeers(t *testing.T) {
 	assert.True(t, ss.pendingPeers[pt])
 }
 
-// ---------------------------------------------------------------------------
 // Update
-// ---------------------------------------------------------------------------
 
 func TestSortedStreams_Update_NonexistentReturnsFalse(t *testing.T) {
 	ss := newTestSortedStreams()
@@ -206,9 +196,7 @@ func TestSortedStreams_Update_AudioParamsUpdate(t *testing.T) {
 	assert.Equal(t, audioCp, ss.streams["rtsp://cam1"].codecPar.AudioCodecParameters)
 }
 
-// ---------------------------------------------------------------------------
 // Insert
-// ---------------------------------------------------------------------------
 
 func TestSortedStreams_Insert_AddsToTargetStream(t *testing.T) {
 	ss := newTestSortedStreams()
@@ -232,9 +220,7 @@ func TestSortedStreams_Insert_UnknownURLReturnsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "rtsp://nonexistent")
 }
 
-// ---------------------------------------------------------------------------
 // Move
-// ---------------------------------------------------------------------------
 
 func TestSortedStreams_Move_AddsToTargetToAdd(t *testing.T) {
 	ss := newTestSortedStreams()
@@ -260,9 +246,7 @@ func TestSortedStreams_Move_NonexistentTargetReturnsError(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// ---------------------------------------------------------------------------
 // sortURLsByResolution
-// ---------------------------------------------------------------------------
 
 func TestSortedStreams_SortedByResolution(t *testing.T) {
 	ss := newTestSortedStreams()
@@ -277,9 +261,7 @@ func TestSortedStreams_SortedByResolution(t *testing.T) {
 	assert.Len(t, ss.sortedURLs, 3)
 }
 
-// ---------------------------------------------------------------------------
 // validatePacket
-// ---------------------------------------------------------------------------
 
 func TestSortedStreams_ValidatePacket_NilPacket(t *testing.T) {
 	ss := newTestSortedStreams()
@@ -326,9 +308,7 @@ func TestSortedStreams_ValidatePacket_Success(t *testing.T) {
 	assert.NotNil(t, str)
 }
 
-// ---------------------------------------------------------------------------
 // writePacket
-// ---------------------------------------------------------------------------
 
 func TestSortedStreams_WritePacket_DropsPreKeyframe(t *testing.T) {
 	ss := newTestSortedStreams()
@@ -421,7 +401,7 @@ func TestSortedStreams_WritePacket_SkipsClosedPeer(t *testing.T) {
 
 	pt := newTestPeerTrack("rtsp://test")
 	ss.streams["rtsp://test"].tracks[pt] = true // seeded
-	close(pt.done)                               // mark as closed
+	close(pt.done)                              // mark as closed
 
 	absTime := time.Now()
 	pkt := makeVideoPacket(t, videoCp, "rtsp://test", true, 0, 33*time.Millisecond, absTime)
@@ -462,9 +442,7 @@ func TestSortedStreams_WritePacket_AudioDistribution(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // writePacket with real test data
-// ---------------------------------------------------------------------------
 
 func TestSortedStreams_WritePacket_RealData(t *testing.T) {
 	ss := newTestSortedStreams()
@@ -502,9 +480,7 @@ done:
 	assert.Greater(t, audioCount, 0, "expected audio packets delivered to peer")
 }
 
-// ---------------------------------------------------------------------------
 // processPendingTracks / moveTrackToStream
-// ---------------------------------------------------------------------------
 
 func TestSortedStreams_MoveTrackToStream_SendsBufferedPackets(t *testing.T) {
 	ss := newTestSortedStreams()
@@ -554,9 +530,7 @@ done:
 	assert.True(t, seeded)
 }
 
-// ---------------------------------------------------------------------------
 // Update — codec type change
-// ---------------------------------------------------------------------------
 
 const hevcTestDataDir = "../../tests/data/hevc/"
 

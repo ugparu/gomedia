@@ -50,7 +50,6 @@ func loadTestParameters(t *testing.T) (*CodecParameters, uint8) {
 	return &cp, params.StreamIndex
 }
 
-// TestNewPacket verifies that NewPacket correctly stores all fields.
 func TestNewPacket(t *testing.T) {
 	t.Parallel()
 
@@ -85,7 +84,6 @@ func TestNewPacket(t *testing.T) {
 	require.Equal(t, uint8(2), pkt.CodecParameters().Channels())
 }
 
-// TestPacket_Clone_CopyData verifies Clone(true) produces an independent copy.
 func TestPacket_Clone_CopyData(t *testing.T) {
 	t.Parallel()
 
@@ -116,7 +114,6 @@ func TestPacket_Clone_CopyData(t *testing.T) {
 	require.Equal(t, byte(0xAA), pkt.Data()[0], "original buffer must be unaffected")
 }
 
-// TestPacket_Clone_SharedData verifies Clone(false) shares the underlying buffer.
 func TestPacket_Clone_SharedData(t *testing.T) {
 	t.Parallel()
 
@@ -144,7 +141,6 @@ func TestPacket_Clone_SharedData(t *testing.T) {
 	cloned.Release()
 }
 
-// TestPacket_Release verifies Release is safe for heap-backed packets.
 func TestPacket_Release(t *testing.T) {
 	t.Parallel()
 
@@ -160,7 +156,6 @@ func TestPacket_Release(t *testing.T) {
 	require.NotPanics(t, pkt.Release)
 }
 
-// TestLoadParametersFromFile loads the real test parameters and validates the decoded codec.
 func TestLoadParametersFromFile(t *testing.T) {
 	t.Parallel()
 
@@ -187,7 +182,6 @@ func TestLoadParametersFromFile(t *testing.T) {
 	require.Equal(t, "mp4a.40.2", cp.Tag())
 }
 
-// TestLoadPacketsFromFile loads real packets and wraps each in an aac.Packet.
 func TestLoadPacketsFromFile(t *testing.T) {
 	t.Parallel()
 
@@ -221,7 +215,6 @@ func TestLoadPacketsFromFile(t *testing.T) {
 	}
 }
 
-// TestLoadPackets_CloneRoundtrip verifies Clone on real packet data.
 func TestLoadPackets_CloneRoundtrip(t *testing.T) {
 	t.Parallel()
 
@@ -234,7 +227,6 @@ func TestLoadPackets_CloneRoundtrip(t *testing.T) {
 	require.NoError(t, json.Unmarshal(pktsRaw, &pkts))
 	require.NotEmpty(t, pkts.Packets)
 
-	// Validate the first 10 packets (or all if fewer) via clone roundtrip.
 	limit := min(10, len(pkts.Packets))
 	for i, entry := range pkts.Packets[:limit] {
 		data, _ := base64.StdEncoding.DecodeString(entry.Data)
@@ -249,7 +241,6 @@ func TestLoadPackets_CloneRoundtrip(t *testing.T) {
 		require.Equal(t, pkt.Data(), cloned.Data(), "packet %d", i)
 		require.Equal(t, pkt.Len(), cloned.Len(), "packet %d", i)
 
-		// Shared-buffer clone.
 		sharedClone, ok2 := pkt.Clone(false).(*Packet)
 		require.True(t, ok2, "packet %d: Clone(false) type assertion", i)
 		require.Equal(t, pkt.Data(), sharedClone.Data(), "packet %d shared data", i)

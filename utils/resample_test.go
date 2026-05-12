@@ -43,7 +43,7 @@ func readS16LE(pcm []byte, idx int) int16 {
 	return int16(binary.LittleEndian.Uint16(pcm[idx*2:]))
 }
 
-// --- Constructor Tests ---
+// Constructor Tests
 
 func TestNewResampler_ValidMono(t *testing.T) {
 	t.Parallel()
@@ -99,7 +99,7 @@ func TestNewResampler_InvalidOutputSampleRate_Zero(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid nSampleRate")
 }
 
-// --- Resample Input Validation Tests ---
+// Resample Input Validation Tests
 
 func TestResample_EmptyPCM(t *testing.T) {
 	t.Parallel()
@@ -157,7 +157,7 @@ func TestResample_ExactlyFourSamples(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// --- Same Sample Rate Passthrough ---
+// Same Sample Rate Passthrough
 
 func TestResample_SameSampleRate_Passthrough(t *testing.T) {
 	t.Parallel()
@@ -170,7 +170,7 @@ func TestResample_SameSampleRate_Passthrough(t *testing.T) {
 	assert.Equal(t, pcm, out, "same sample rate should return input unchanged")
 }
 
-// --- Output Length Tests ---
+// Output Length Tests
 
 func TestResample_Mono_OutputLength(t *testing.T) {
 	t.Parallel()
@@ -225,7 +225,7 @@ func TestResample_Stereo_OutputLength(t *testing.T) {
 	assert.Equal(t, expectedLen, len(out))
 }
 
-// --- Signal Integrity Tests ---
+// Signal Integrity Tests
 
 func TestResample_SilenceIn_SilenceOut(t *testing.T) {
 	t.Parallel()
@@ -303,7 +303,7 @@ func TestResample_OutputWithinInt16Range(t *testing.T) {
 	require.Greater(t, numSamples, 0)
 }
 
-// --- Multiple Consecutive Calls (Cache Continuity) ---
+// Multiple Consecutive Calls (Cache Continuity)
 
 func TestResample_MultipleCalls_ContinuousOutput(t *testing.T) {
 	t.Parallel()
@@ -363,7 +363,7 @@ func TestResample_MultipleCalls_NoDrift(t *testing.T) {
 		"chunked resampling should produce same total length as single-call")
 }
 
-// --- Spline Interpolation Tests ---
+// Spline Interpolation Tests
 
 func TestSpline_AtKnotPoints_ReturnsOriginalValues(t *testing.T) {
 	t.Parallel()
@@ -445,7 +445,7 @@ func TestSpline_MismatchedXoYo(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid yo")
 }
 
-// --- Internal Function Tests ---
+// Internal Function Tests
 
 func TestResamplerInitChannel_Mono(t *testing.T) {
 	t.Parallel()
@@ -525,7 +525,7 @@ func TestResampleMerge_Stereo(t *testing.T) {
 	assert.Equal(t, int16(400), int16(binary.LittleEndian.Uint16(result[6:])))
 }
 
-// --- Helpers ---
+// Helpers
 
 func computeRMS(pcm []byte, channels int) float64 {
 	numSamples := len(pcm) / (2 * channels)

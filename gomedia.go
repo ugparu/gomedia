@@ -9,178 +9,193 @@ import (
 	"github.com/ugparu/gomedia/frame/rgb"
 )
 
-// CodecParameters defines the interface for multimedia codec configuration.
+// CodecParameters describes a stream (codec type, container tag, bitrate, position).
 type CodecParameters interface {
-	Type() CodecType      // Returns the codec type (audio/video).
-	Tag() string          // Returns the codec identifier string.
-	StreamIndex() uint8   // Returns the index of the stream in a container.
-	SetStreamIndex(uint8) // Sets the stream index value.
-	Bitrate() uint        // Returns the codec's bitrate in bits per second.
-	SetBitrate(uint)      // Sets the codec's target bitrate.
+	Type() CodecType
+	Tag() string
+	StreamIndex() uint8
+	SetStreamIndex(uint8)
+	Bitrate() uint
+	SetBitrate(uint)
 }
 
-// VideoCodecParameters extends CodecParameters with video-specific properties.
+// VideoCodecParameters adds video-specific fields: pixel dimensions and frame rate.
 type VideoCodecParameters interface {
-	CodecParameters // Inherits all CodecParameters methods.
-	Width() uint    // Returns the video frame width in pixels.
-	Height() uint   // Returns the video frame height in pixels.
-	FPS() uint      // Returns the video frame rate (frames per second).
+	CodecParameters
+	Width() uint
+	Height() uint
+	FPS() uint
 }
 
-// AudioCodecParameters extends CodecParameters with audio-specific properties.
+// AudioCodecParameters adds audio-specific fields: sample rate, sample format, channel count.
 type AudioCodecParameters interface {
-	CodecParameters             // Inherits all CodecParameters methods.
-	SampleRate() uint64         // Returns the audio sampling frequency in Hz.
-	SampleFormat() SampleFormat // Returns the format of audio samples.
-	Channels() uint8            // Returns the number of audio channels.
+	CodecParameters
+	SampleRate() uint64
+	SampleFormat() SampleFormat
+	Channels() uint8
 }
 
-// CodecParametersPair bundles audio and video codec parameters for a multimedia stream.
+// CodecParametersPair bundles the audio and video parameters of a single source.
 type CodecParametersPair struct {
-	SourceID string // The source ID of the multimedia stream.
+	SourceID string
 	AudioCodecParameters
 	VideoCodecParameters
 }
 
-// Packet defines the interface for multimedia data containers.
+// Packet carries one encoded frame. Packets are reference-counted: Clone(false)
+// shares the backing buffer, Clone(true) deep-copies. Every owner — original and
+// each clone — must call Release exactly once.
 type Packet interface {
-	// Clone creates a copy of the packet. When copyData is false the clone shares
-	// the same underlying buffer (reference count is incremented); when true a heap
-	// copy is made and the clone is fully independent. Every owner — original and
-	// each clone — must call Release exactly once when finished.
+	// Clone returns a new owner of the packet. If copyData is false the new
+	// owner shares the underlying buffer (refcount++); if true the data is
+	// heap-copied and the clone is fully independent.
 	Clone(copyData bool) Packet
-	// Release decrements the shared buffer reference count. When it reaches zero
-	// the backing memory is returned to the ring allocator (or becomes GC-eligible
-	// for heap-backed packets). Must be called exactly once per owner.
+	// Release drops one reference. When the count reaches zero the backing
+	// buffer is returned to the ring allocator (or becomes GC-eligible for
+	// heap-backed packets). Must be called exactly once per owner.
 	Release()
-	SourceID() string           // Returns the source ID of the packet.
-	SetSourceID(string)         // Sets the source ID for the packet.
-	StreamIndex() uint8         // Returns the stream index this packet belongs to.
-	SetStreamIndex(uint8)       // Sets the stream index for this packet.
-	Timestamp() time.Duration   // Returns the presentation timestamp.
-	SetTimestamp(time.Duration) // Sets the presentation timestamp.
-	StartTime() time.Time       // Returns the absolute start time.
-	SetStartTime(time.Time)     // Sets the absolute start time.
-	Duration() time.Duration    // Returns the duration of the packet content.
-	SetDuration(time.Duration)  // Sets the duration of the packet content.
-	Len() int                   // Returns the length of the packet data.
-	Data() []byte               // Returns the packet data.
+	SourceID() string
+	SetSourceID(string)
+	StreamIndex() uint8
+	SetStreamIndex(uint8)
+	Timestamp() time.Duration
+	SetTimestamp(time.Duration)
+	StartTime() time.Time
+	SetStartTime(time.Time)
+	Duration() time.Duration
+	SetDuration(time.Duration)
+	Len() int
+	Data() []byte
 }
 
-// VideoPacket extends Packet with video-specific functionality.
+// VideoPacket is a Packet that carries a video frame.
 type VideoPacket interface {
-	Packet                                 // Inherits all Packet methods.
-	IsKeyFrame() bool                      // Indicates if this packet contains a keyframe.
-	CodecParameters() VideoCodecParameters // Returns the associated video codec configuration.
+	Packet
+	IsKeyFrame() bool
+	CodecParameters() VideoCodecParameters
 }
 
-// AudioPacket extends Packet with audio-specific functionality.
+// AudioPacket is a Packet that carries an audio frame.
 type AudioPacket interface {
-	Packet                                 // Inherits all Packet methods.
-	CodecParameters() AudioCodecParameters // Returns the associated audio codec configuration.
+	Packet
+	CodecParameters() AudioCodecParameters
 }
 
-// Demuxer defines the interface for extracting packets from multimedia containers.
+// Demuxer reads a container and emits packets. ReadPacket may return (nil, nil)
+// for filler/AUD packets and other no-ops the caller should skip.
 type Demuxer interface {
-	Demux() (CodecParametersPair, error) // Initializes and returns detected stream parameters.
-	ReadPacket() (pkt Packet, err error) // Reads the next packet from the container.
-	Close()                              // Releases resources used by the demuxer.
+	Demux() (CodecParametersPair, error)
+	ReadPacket() (pkt Packet, err error)
+	Close()
 }
 
-// Muxer defines the interface for packaging packets into multimedia containers.
+// Muxer consumes packets and writes a container. Mux must be called once with
+// the detected parameters before the first WritePacket.
 type Muxer interface {
-	Mux(CodecParametersPair) (err error) // Initializes the muxer with stream parameters.
-	WritePacket(pkt Packet) (err error)  // Writes a packet to the container.
-	Close()                              // Finalizes the container and releases resources.
+	Mux(CodecParametersPair) (err error)
+	WritePacket(pkt Packet) (err error)
+	Close()
 }
 
-// Reader defines the interface for multimedia stream reading operations.
+// Reader is a high-level multi-source ingest. Add and remove sources via the
+// AddURL/RemoveURL channels; consume packets from Packets().
 type Reader interface {
-	Read()                    // Starts the reading process.
-	AddURL() chan<- string    // Channel to add new stream URLs.
-	RemoveURL() chan<- string // Channel to remove stream URLs.
-	Packets() <-chan Packet   // Channel providing read packets.
-	Close()                   // Stops reading and releases resources.
+	Read()
+	AddURL() chan<- string
+	RemoveURL() chan<- string
+	Packets() <-chan Packet
+	Close()
 }
 
-// Writer defines the interface for multimedia stream writing operations.
+// Writer is a high-level fan-out sink. Feed packets via Packets(); attach and
+// detach source URLs through AddSource/RemoveSource. Done closes when Write
+// terminates.
 type Writer interface {
-	Write()                      // Starts the writing process.
-	Packets() chan<- Packet      // Channel for packets to be written.
-	RemoveSource() chan<- string // Channel to remove source streams.
-	AddSource() chan<- string    // Channel to add source streams.
-	Done() <-chan struct{}       // Channel signaling completion.
-	Close()                      // Stops writing and releases resources.
+	Write()
+	Packets() chan<- Packet
+	RemoveSource() chan<- string
+	AddSource() chan<- string
+	Done() <-chan struct{}
+	Close()
 }
 
-// Decoder defines a generic interface for decoding multimedia packets.
+// Decoder is the generic async decode pipeline: feed encoded packets in,
+// receive decoded output from a codec-specific channel exposed by the
+// concrete VideoDecoder / AudioDecoder.
 type Decoder[P Packet] interface {
-	Decode()               // Starts the decoding process.
-	Packets() chan<- P     // Channel for packets to be decoded.
-	Close()                // Stops decoding and releases resources.
-	Done() <-chan struct{} // Channel signaling completion.
+	Decode()
+	Packets() chan<- P
+	Close()
+	Done() <-chan struct{}
 }
 
-// VideoDecoder specializes Decoder for video packet processing.
+// VideoDecoder decodes VideoPacket frames into RGB images.
+// FPS is a throttling signal: send 0 to pause, -1 for native rate.
 type VideoDecoder interface {
-	Decoder[VideoPacket]        // Inherits Decoder methods for VideoPacket.
-	Images() <-chan rgb.ReleasableImage // Channel providing decoded video frames.
-	FPS() chan<- int            // Channel to set frames per second.
+	Decoder[VideoPacket]
+	Images() <-chan rgb.ReleasableImage
+	FPS() chan<- int
 }
 
-// AudioDecoder specializes Decoder for audio packet processing.
+// AudioDecoder decodes AudioPacket frames into PCM samples.
 type AudioDecoder interface {
-	Decoder[AudioPacket]         // Inherits Decoder methods for AudioPacket.
-	Samples() <-chan AudioPacket // Channel providing decoded audio samples.
+	Decoder[AudioPacket]
+	Samples() <-chan AudioPacket
 }
 
-// Encoder defines the interface for multimedia encoding operations.
+// Encoder produces encoded packets on its Packets() channel.
 type Encoder interface {
-	Packets() <-chan Packet // Channel providing encoded packets.
+	Packets() <-chan Packet
 }
 
-// AudioEncoder specializes Encoder for audio encoding.
+// AudioEncoder consumes PCM samples on Samples() and produces encoded
+// AudioPackets on Packets() (inherited from Encoder).
 type AudioEncoder interface {
-	Encoder                      // Inherits Encoder methods.
-	Samples() chan<- AudioPacket // Channel for audio samples to encode.
-	Encode()                     // Starts the encoding process.
+	Encoder
+	Samples() chan<- AudioPacket
+	Encode()
 }
 
-// HLSMuxer represents an HLS muxer for single stream.
+// HLSMuxer is a single-source HLS muxer. It rotates segments on
+// segmentDuration and exposes the playlist/segment/fragment bytes via the
+// Get* methods. UpdateCodecParameters injects an HLS discontinuity.
 type HLSMuxer interface {
-	Muxer                                                                    // HLSMuxer extends Muxer.
-	UpdateCodecParameters(CodecParametersPair) error                         // UpdateCodecParameters updates codec params mid-stream with HLS discontinuity.
-	GetMasterEntry() (string, error)                                         // GetMasterEntry returns the master playlist.
-	GetIndexM3u8(ctx context.Context, msn int64, prt int8) (string, error)   // GetIndexM3u8 returns the index playlist.
-	GetInit() ([]byte, error)                                                // GetInit returns the current initialization segment.
-	GetInitByVersion(version int) ([]byte, error)                            // GetInitByVersion returns the init segment for a specific codec version.
-	GetSegment(ctx context.Context, seg uint64) ([]byte, error)              // GetSegment returns the segment.
-	GetFragment(ctx context.Context, seg uint64, frag uint8) ([]byte, error) // GetFragment returns the fragment.
+	Muxer
+	UpdateCodecParameters(CodecParametersPair) error
+	GetMasterEntry() (string, error)
+	GetIndexM3u8(ctx context.Context, msn int64, prt int8) (string, error)
+	GetInit() ([]byte, error)
+	GetInitByVersion(version int) ([]byte, error)
+	GetSegment(ctx context.Context, seg uint64) ([]byte, error)
+	GetFragment(ctx context.Context, seg uint64, frag uint8) ([]byte, error)
 }
 
-// HLS represents an hls receiving interface for several levels.
+// HLS is the read-side interface of a multi-source HLS streamer: it serves a
+// master playlist plus per-source playlists, init segments, segments, and
+// fragments. uid identifies the source.
 type HLS interface {
-	GetMasterPlaylist() (string, error)                                                 // GetMasterEntry returns the master playlist.
-	GetIndexM3u8(ctx context.Context, uid string, msn int64, prt int8) (string, error)  // GetIndexM3u8 returns the index playlist.
-	GetInit(uid string) ([]byte, error)                                                 // GetInit returns the initialization segment.
-	GetInitByVersion(uid string, version int) ([]byte, error)                           // GetInitByVersion returns the init segment for a specific codec version.
-	GetSegment(ctx context.Context, uid string, seg uint64) ([]byte, error)             // GetSegment returns the segment.
-	GetFragment(ctx context.Context, uid string, seg uint64, frag uint8) ([]byte, error) // GetFragment returns the fragment.
+	GetMasterPlaylist() (string, error)
+	GetIndexM3u8(ctx context.Context, uid string, msn int64, prt int8) (string, error)
+	GetInit(uid string) ([]byte, error)
+	GetInitByVersion(uid string, version int) ([]byte, error)
+	GetSegment(ctx context.Context, uid string, seg uint64) ([]byte, error)
+	GetFragment(ctx context.Context, uid string, seg uint64, frag uint8) ([]byte, error)
 }
 
-// HLSStreamer represents an HLS streamer for several inputs.
+// HLSStreamer is a multi-source HLS pipeline: Writer for ingest, HLS for read.
 type HLSStreamer interface {
-	Writer // HLSStreamer extends Writer.
-	HLS    // HLSStreamer extends HLS.
+	Writer
+	HLS
 }
 
-// WebRTCCodec represents a codec configuration for WebRTC streaming.
+// WebRTCCodec is the JSON payload returned to clients describing the available
+// video resolutions and whether an audio track is present.
 type WebRTCCodec struct {
 	HasAudio    bool         `json:"hasAudio"`
 	Resolutions []Resolution `json:"resolutions"`
 }
 
-// Resolution defines video dimensions for WebRTC streaming.
+// Resolution is one selectable video rendition exposed to a WebRTC client.
 type Resolution struct {
 	URL    string `json:"url"`
 	Width  int    `json:"width"`
@@ -188,51 +203,57 @@ type Resolution struct {
 	Codec  string `json:"codec"`
 }
 
-// WebRTCPeer represents a WebRTC peer connection status.
+// WebRTCPeer is an SDP offer/answer exchange. The caller fills SDP+TargetURL,
+// the streamer fills SDP (answer) and Err, then closes Done.
 type WebRTCPeer struct {
-	SDP       string        // Session Description Protocol data
-	TargetURL string        // Target source URL (must match stream URL)
-	Delay     int           // Connection delay in seconds
-	Err       error         // Any error associated with this peer
-	Done      chan struct{} // Channel signaling completion
+	SDP       string
+	TargetURL string
+	Delay     int
+	Err       error
+	Done      chan struct{}
 }
 
-// WebRTC defines the interface for WebRTC streaming functionality.
+// WebRTC is the read-side interface of a WebRTC streamer: peer negotiation
+// plus the list of available codec/resolution pairs.
 type WebRTC interface {
-	Peers() chan<- *WebRTCPeer // Channel for peer connection events
+	Peers() chan<- *WebRTCPeer
 	SortedResolutions() *WebRTCCodec
 }
 
-// WebRTCStreamer combines Writer and WebRTC interfaces for WebRTC streaming.
+// WebRTCStreamer is a multi-source WebRTC pipeline: Writer for ingest, WebRTC
+// for client negotiation.
 type WebRTCStreamer interface {
-	Writer // Inherits Writer methods
-	WebRTC // Inherits WebRTC methods
+	Writer
+	WebRTC
 }
 
-// RecordMode represents archiver recording mode.
+// RecordMode controls when the segmenter writes packets to disk.
 type RecordMode uint8
 
 const (
-	Never  RecordMode = iota // Never record
-	Event                    // Record on movement
-	Always                   // Record continuously
+	Never  RecordMode = iota // never record
+	Event                    // record only while an event is active
+	Always                   // record continuously
 )
 
-// FileInfo holds information about a recorded file.
+// FileInfo describes one closed segment file produced by a Segmenter.
 type FileInfo struct {
-	Name       string    // File name
-	Start      time.Time // First packet real time
-	Stop       time.Time // Last packet real time
-	Size       int       // Size in bytes
-	Resolution string    // Resolution of the source stream
-	URL        string    // URL of the source stream
-	Codec      string    // Codec of the source stream
+	Name       string
+	Start      time.Time
+	Stop       time.Time
+	Size       int
+	Resolution string
+	URL        string
+	Codec      string
 }
 
+// Segmenter records sources into rolling MP4 files. Events triggers an
+// event-mode capture; RecordMode swaps the mode at runtime; Files yields
+// FileInfo for every closed segment.
 type Segmenter interface {
 	Writer
-	Events() chan<- struct{}       // Events returns the events channel.
-	RecordMode() chan<- RecordMode // RecordMode returns the record mode channel.
-	Files() <-chan FileInfo        // Files returns the recorded files channel.
-	RecordCurStatus() <-chan bool  // Files returns the current record status.
+	Events() chan<- struct{}
+	RecordMode() chan<- RecordMode
+	Files() <-chan FileInfo
+	RecordCurStatus() <-chan bool
 }

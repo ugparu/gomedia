@@ -185,7 +185,6 @@ func (mux *Muxer) newStream(codec gomedia.CodecParameters) (err error) {
 		},
 	}
 
-	// Customize settings based on the codec type.
 	switch codec.Type() {
 	case gomedia.H264, gomedia.H265, gomedia.MJPEG:
 		stream.sample.SyncSample = new(mp4io.SyncSample)
@@ -358,7 +357,7 @@ func (mux *Muxer) copyPendingInto(dst []byte, off int) int {
 		pw := &mux.pending[i]
 		for j := range pw.numExtras {
 			pio.PutU32BE(dst[off:], uint32(len(pw.extras[j]))) //nolint:gosec
-			off += 4                                            //nolint:mnd
+			off += 4                                           //nolint:mnd
 			copy(dst[off:], pw.extras[j])
 			off += len(pw.extras[j])
 		}

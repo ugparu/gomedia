@@ -15,9 +15,7 @@ import (
 	"github.com/zaf/g711"
 )
 
-// ---------------------------------------------------------------------------
 // Test data helpers
-// ---------------------------------------------------------------------------
 
 type lawPacketJSON struct {
 	Codec       string `json:"codec"`
@@ -56,9 +54,7 @@ const (
 	mulawDataPath = "../../tests/data/mulaw/packets.json"
 )
 
-// ---------------------------------------------------------------------------
 // Constructor
-// ---------------------------------------------------------------------------
 
 func TestNewALAWDecoder(t *testing.T) {
 	t.Parallel()
@@ -72,9 +68,7 @@ func TestNewULAWDecoder(t *testing.T) {
 	require.NotNil(t, d)
 }
 
-// ---------------------------------------------------------------------------
 // Init
-// ---------------------------------------------------------------------------
 
 func TestInit_ALAW(t *testing.T) {
 	t.Parallel()
@@ -90,9 +84,7 @@ func TestInit_ULAW(t *testing.T) {
 	require.NoError(t, d.Init(nilParam))
 }
 
-// ---------------------------------------------------------------------------
 // Close
-// ---------------------------------------------------------------------------
 
 func TestClose_ALAW(t *testing.T) {
 	t.Parallel()
@@ -106,9 +98,7 @@ func TestClose_ULAW(t *testing.T) {
 	require.NotPanics(t, d.Close)
 }
 
-// ---------------------------------------------------------------------------
 // Decode — output size: 8-bit law → 16-bit PCM (2× input size)
-// ---------------------------------------------------------------------------
 
 func TestDecode_ALAW_NilRing(t *testing.T) {
 	t.Parallel()
@@ -142,9 +132,7 @@ func TestDecode_ULAW_NilRing(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Decode — data correctness: output must match g711 reference decode
-// ---------------------------------------------------------------------------
 
 func TestDecode_ALAW_DataCorrectness(t *testing.T) {
 	t.Parallel()
@@ -181,9 +169,7 @@ func TestDecode_ULAW_DataCorrectness(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Decode — known values: verify a-law silence (0xD5 → 0x0008) decodes correctly
-// ---------------------------------------------------------------------------
 
 func TestDecode_ALAW_KnownSilence(t *testing.T) {
 	t.Parallel()
@@ -221,9 +207,7 @@ func TestDecode_ULAW_KnownSilence(t *testing.T) {
 		"Mu-law 0xFF must decode to PCM %d", expected)
 }
 
-// ---------------------------------------------------------------------------
 // Decode — ring allocator path
-// ---------------------------------------------------------------------------
 
 func TestDecode_ALAW_WithRingAlloc(t *testing.T) {
 	t.Parallel()
@@ -270,9 +254,7 @@ func TestDecode_ULAW_WithRingAlloc(t *testing.T) {
 	slot.Release()
 }
 
-// ---------------------------------------------------------------------------
 // Decode — GrowingRingAlloc with tiny initial size
-// ---------------------------------------------------------------------------
 
 func TestDecode_ALAW_WithSmallRing(t *testing.T) {
 	t.Parallel()
@@ -310,9 +292,7 @@ func TestDecode_ULAW_WithSmallRing(t *testing.T) {
 	slot.Release()
 }
 
-// ---------------------------------------------------------------------------
 // Decode — empty input
-// ---------------------------------------------------------------------------
 
 func TestDecode_ALAW_EmptyInput(t *testing.T) {
 	t.Parallel()
@@ -326,9 +306,7 @@ func TestDecode_ALAW_EmptyInput(t *testing.T) {
 	require.Nil(t, slot)
 }
 
-// ---------------------------------------------------------------------------
 // Decode — stateless: multiple calls produce consistent results
-// ---------------------------------------------------------------------------
 
 func TestDecode_ALAW_Stateless(t *testing.T) {
 	t.Parallel()

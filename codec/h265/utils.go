@@ -173,7 +173,7 @@ func ParseSliceHeaderComplete(packet []byte) (header SliceHeader, err error) {
 		return
 	}
 	nalUnitType := (packet[0] >> 1) & 0x3f //nolint:mnd // RFC 7798 §1.1.4: nal_unit_type = (byte0 >> 1) & 0x3F
-	if nalUnitType >= 32 {                  //nolint:mnd // RFC 7798 §1.1.4: types 0-31 are VCL; non-VCL have no slice header
+	if nalUnitType >= 32 {                 //nolint:mnd // RFC 7798 §1.1.4: types 0-31 are VCL; non-VCL have no slice header
 		err = fmt.Errorf("h265parser: nal_unit_type=%d has no slice header", nalUnitType)
 		return
 	}
@@ -218,17 +218,13 @@ type PPSValidator struct {
 	isNewFrame        bool
 }
 
-// NewPPSValidator creates a new PPS validator
 func NewPPSValidator() *PPSValidator {
-	return &PPSValidator{
-		isNewFrame: true,
-	}
+	return &PPSValidator{isNewFrame: true}
 }
 
 // ValidateSlice checks if the slice uses consistent PPS within the same frame
 func (v *PPSValidator) ValidateSlice(sliceHeader SliceHeader, isFirstSliceInPicture bool) error {
 	if isFirstSliceInPicture || v.isNewFrame {
-		// Start of new frame - set the expected PPS ID
 		v.currentFramePPSID = &sliceHeader.PPSID
 		v.isNewFrame = false
 		return nil
@@ -238,7 +234,6 @@ func (v *PPSValidator) ValidateSlice(sliceHeader SliceHeader, isFirstSliceInPict
 		return errors.New("h265parser: PPS validator not properly initialized")
 	}
 
-	// Check if this slice uses the same PPS as other slices in this frame
 	if sliceHeader.PPSID != *v.currentFramePPSID {
 		return fmt.Errorf("h265parser: PPS changed between slices (expected %d, got %d)",
 			*v.currentFramePPSID, sliceHeader.PPSID)
