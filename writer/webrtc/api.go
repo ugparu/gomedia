@@ -3,6 +3,7 @@ package webrtc
 import (
 	"fmt"
 	"net"
+	"time"
 
 	"github.com/pion/interceptor"
 	"github.com/pion/rtp"
@@ -12,6 +13,19 @@ import (
 
 var api *webrtc.API
 var Conf webrtc.Configuration
+
+const (
+	// iceSTUNGatherTimeout caps how long ICE waits for a STUN/TURN response
+	// per candidate. Pion's default is 5s, so a single lost response under a
+	// burst of simultaneous connections stalls gathering for the full 5s.
+	// A valid response on LAN arrives in <50ms and on WAN typically <1s, so a
+	// lower cap turns those stalls into a short, bounded wait.
+	iceSTUNGatherTimeout = time.Second
+	// udpReadBufferSize enlarges the ICE UDP mux socket receive buffer so a
+	// burst of STUN/TURN responses isn't dropped by the kernel. The value may
+	// be clamped by net.core.rmem_max.
+	udpReadBufferSize = 8 * 1024 * 1024 // 8 MiB
+)
 
 // Init builds the shared pion API and registers every H.264/H.265
 // profile-level-id + RTX payload the server is willing to answer with, so
@@ -430,10 +444,16 @@ func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer
 	}
 
 	var s webrtc.SettingEngine
+	s.SetSTUNGatherTimeout(iceSTUNGatherTimeout)
 	if maxPort == 0 {
 		udpListener, err := net.ListenPacket("udp", fmt.Sprintf(":%d", minPort))
 		if err != nil {
 			return err
+		}
+		if udpConn, ok := udpListener.(*net.UDPConn); ok {
+			if bufErr := udpConn.SetReadBuffer(udpReadBufferSize); bufErr != nil {
+				logger.Default.Infof("WEBRTC", "Failed to set UDP read buffer to %d: %v", udpReadBufferSize, bufErr)
+			}
 		}
 		s.SetICEUDPMux(webrtc.NewICEUDPMux(nil, udpListener))
 	} else if err := s.SetEphemeralUDPPortRange(minPort, maxPort); err != nil {
