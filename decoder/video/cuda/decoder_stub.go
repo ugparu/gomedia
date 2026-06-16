@@ -23,6 +23,17 @@ func NewFFmpegCUDADecoder() decoder.InnerVideoDecoder {
 	return unavailableCUDADecoder{}
 }
 
+// CheckCuda always reports false in builds without the "cuda" tag.
+func CheckCuda() bool {
+	return false
+}
+
+// InitCuda is a no-op in builds without the "cuda" tag.
+func InitCuda(maxMats int) {}
+
+// CloseCuda is a no-op in builds without the "cuda" tag.
+func CloseCuda() {}
+
 func (unavailableCUDADecoder) Init(gomedia.VideoCodecParameters) error {
 	return errCUDAUnavailable
 }
