@@ -1,3 +1,5 @@
+//go:build cuda
+
 #include <libavutil/dict.h>
 #include <libavutil/avutil.h>
 #include "decoder_cuda.h"
