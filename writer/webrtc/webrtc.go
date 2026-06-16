@@ -27,6 +27,17 @@ func WithSignalingHandler(h SignalingHandler) Option {
 	return func(w *webRTCWriter) { w.signaling = h }
 }
 
+// WithGatherTimeout bounds how long addConnection waits for ICE gathering
+// before returning the answer with whatever candidates are available. Since
+// signaling is a one-shot request/response (no trickle), this caps the
+// worst-case setup latency caused by slow STUN/TURN candidates.
+func WithGatherTimeout(d time.Duration) Option {
+	return func(w *webRTCWriter) { w.gatherTimeout = d }
+}
+
+// defaultGatherTimeout is the upper bound on the ICE gathering wait.
+const defaultGatherTimeout = 5 * time.Second
+
 type webRTCWriter struct {
 	lifecycle.AsyncManager[*webRTCWriter]
 	log              logger.Logger
@@ -41,6 +52,7 @@ type webRTCWriter struct {
 	addSrcCh         chan string
 	name             string
 	signaling        SignalingHandler
+	gatherTimeout    time.Duration
 }
 
 func New(chanSize int, targetDuration time.Duration, opts ...Option) gomedia.WebRTCStreamer {
@@ -65,6 +77,7 @@ func New(chanSize int, targetDuration time.Duration, opts ...Option) gomedia.Web
 		addSrcCh:         make(chan string, chanSize),
 		name:             "WEBRTC_WRITER",
 		signaling:        &DefaultSignalingHandler{},
+		gatherTimeout:    defaultGatherTimeout,
 	}
 	for _, o := range opts {
 		o(wr)
@@ -340,6 +353,8 @@ func extractFmtpLineFromSDP(sdp string, codecType gomedia.CodecType) string {
 func (element *webRTCWriter) addConnection(inpPeer *gomedia.WebRTCPeer, targetURL string, codecType gomedia.CodecType) (err error) {
 	defer close(inpPeer.Done)
 
+	start := time.Now()
+
 	sdp64 := inpPeer.SDP
 
 	sdpB, err := base64.StdEncoding.DecodeString(sdp64)
@@ -457,29 +472,45 @@ func (element *webRTCWriter) addConnection(inpPeer *gomedia.WebRTCPeer, targetUR
 	}
 	go dropRTCP(aRTPSender)
 
+	tracksSetup := time.Now()
+
 	if err = peer.SetRemoteDescription(offer); err != nil {
 		inpPeer.Err = err
 		return inpPeer.Err
 	}
+	remoteSet := time.Now()
 
 	answer, err := peer.CreateAnswer(nil)
 	if err != nil {
 		inpPeer.Err = err
 		return inpPeer.Err
 	}
+	answerCreated := time.Now()
+
 	gatherCompletePromise := webrtc.GatheringCompletePromise(peer)
 
 	if err = peer.SetLocalDescription(answer); err != nil {
 		inpPeer.Err = err
 		return inpPeer.Err
 	}
+	localSet := time.Now()
 
 	pt.aBuf = buffer.Get(0)
 	pt.vBuf = buffer.Get(0)
 
-	<-gatherCompletePromise
+	gatherOutcome := "complete"
+	select {
+	case <-gatherCompletePromise:
+	case <-time.After(element.gatherTimeout):
+		gatherOutcome = "timeout"
+	}
 
 	inpPeer.SDP = base64.StdEncoding.EncodeToString([]byte(peer.LocalDescription().SDP))
+
+	element.log.Infof(element,
+		"Peer connect [%s]: total=%s setup=%s remote=%s answer=%s gather=%s(%s)",
+		targetURL, time.Since(start), tracksSetup.Sub(start), remoteSet.Sub(tracksSetup),
+		answerCreated.Sub(remoteSet), time.Since(localSet), gatherOutcome)
 
 	go writeVideoPacketsToPeer(pt, pt.vflush, pt.vChan, pt.vt, pt.vBuf, pt.delay)
 	go writeAudioPacketsToPeer(pt, pt.aflush, pt.aChan, pt.at, pt.aBuf, pt.delay)
