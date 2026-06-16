@@ -747,6 +747,21 @@
             dataChannel.send(JSON.stringify(msg));
         }
 
+        async function dataChannelDataToText(data) {
+            if (typeof data === 'string') return data;
+            if (data instanceof ArrayBuffer) {
+                return new TextDecoder('utf-8').decode(new Uint8Array(data));
+            }
+            if (data instanceof Uint8Array) {
+                return new TextDecoder('utf-8').decode(data);
+            }
+            if (data instanceof Blob) {
+                const buf = await data.arrayBuffer();
+                return new TextDecoder('utf-8').decode(new Uint8Array(buf));
+            }
+            throw new Error(`Unsupported datachannel payload type: ${Object.prototype.toString.call(data)}`);
+        }
+
         async function startWebRTC() {
             if (isConnecting) return;
             isConnecting = true;
@@ -769,12 +784,13 @@
                     log('WebRTC: Data channel opened', 'webrtc');
                 };
 
-                dataChannel.onmessage = (event) => {
+                dataChannel.onmessage = async (event) => {
                     let msg;
                     try {
-                        msg = JSON.parse(event.data);
-                    } catch {
-                        log(`WebRTC: Non-JSON message: ${event.data}`, 'webrtc');
+                        const raw = await dataChannelDataToText(event.data);
+                        msg = JSON.parse(raw);
+                    } catch (error) {
+                        log(`WebRTC: Non-JSON message: ${error?.message || event.data}`, 'webrtc');
                         return;
                     }
 

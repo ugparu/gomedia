@@ -13,18 +13,14 @@ import (
 var api *webrtc.API
 var Conf webrtc.Configuration
 
-// Init builds the shared pion API with an ICE UDP mux on minPort and
-// registers every H.264/H.265 profile-level-id + RTX payload the server is
-// willing to answer with, so browsers can negotiate whichever matches.
+// Init builds the shared pion API and registers every H.264/H.265
+// profile-level-id + RTX payload the server is willing to answer with, so
+// browsers can negotiate whichever matches.
+// When maxPort is 0 the server uses a single ICE UDP mux bound to minPort;
+// otherwise it allocates ephemeral UDP ports in the [minPort, maxPort] range.
 // hosts lets the server advertise 1:1 NAT public addresses when running
 // behind a mapped UDP port.
 func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer) (err error) {
-	udpListener, err := net.ListenPacket("udp", fmt.Sprintf(":%d", minPort))
-	if err != nil {
-		return err
-	}
-	udpMux := webrtc.NewICEUDPMux(nil, udpListener)
-
 	Conf = webrtc.Configuration{
 		ICEServers:           iceServers,
 		ICETransportPolicy:   webrtc.ICETransportPolicyAll,
@@ -434,11 +430,25 @@ func Init(minPort, maxPort uint16, hosts []string, iceServers []webrtc.ICEServer
 	}
 
 	var s webrtc.SettingEngine
-	s.SetICEUDPMux(udpMux)
+	if maxPort == 0 {
+		udpListener, err := net.ListenPacket("udp", fmt.Sprintf(":%d", minPort))
+		if err != nil {
+			return err
+		}
+		s.SetICEUDPMux(webrtc.NewICEUDPMux(nil, udpListener))
+	} else if err := s.SetEphemeralUDPPortRange(minPort, maxPort); err != nil {
+		return err
+	}
 
 	if len(hosts) > 0 {
 		logger.Default.Infof("WEBRTC", "Setting host candidates to %v", hosts)
-		s.SetNAT1To1IPs(hosts, webrtc.ICECandidateTypeHost) //nolint:staticcheck // pion v4 still supports this; migration to SetICEAddressRewriteRules pending
+		if err := s.SetICEAddressRewriteRules(webrtc.ICEAddressRewriteRule{
+			External:        hosts,
+			AsCandidateType: webrtc.ICECandidateTypeHost,
+			Mode:            webrtc.ICEAddressRewriteReplace,
+		}); err != nil {
+			return err
+		}
 	}
 
 	api = webrtc.NewAPI(webrtc.WithMediaEngine(m), webrtc.WithInterceptorRegistry(i), webrtc.WithSettingEngine(s))

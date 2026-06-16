@@ -32,7 +32,7 @@ import (
 	"github.com/ugparu/gomedia/writer/webrtc"
 )
 
-var rtspURLs = strings.Split(os.Getenv("RTSP_URLS"), ",")
+var rtspURLs []string
 
 const segSize = 4 * time.Second
 
@@ -60,6 +60,11 @@ var log logger.Logger
 
 func main() {
 	log = examplelogger.New(logrus.InfoLevel)
+	rtspURLs = parseRTSPURLs(os.Getenv("RTSP_URLS"))
+	if len(rtspURLs) == 0 {
+		log.Errorf(log, "RTSP_URLS is empty or invalid")
+		os.Exit(1)
+	}
 
 	// Initialize HLS writer
 	hlsWr.Write()
@@ -175,6 +180,18 @@ func main() {
 	seg.Close()
 	GetServer().Close()
 	log.Infof(log, "Server shutdown complete")
+}
+
+func parseRTSPURLs(raw string) []string {
+	parts := strings.Split(raw, ",")
+	urls := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			urls = append(urls, trimmed)
+		}
+	}
+	return urls
 }
 
 // HTTP Server
