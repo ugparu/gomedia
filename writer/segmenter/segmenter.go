@@ -141,8 +141,15 @@ func WithPathFunc(f PathFunc) Option {
 }
 
 // WithPreBufferDuration overrides the default event mode pre-buffer duration (targetDuration / 2).
+// This controls how much video before the event trigger is included in the recording.
 func WithPreBufferDuration(d time.Duration) Option {
 	return func(s *segmenter) { s.preBufferDuration = d }
+}
+
+// WithPostEventDuration overrides the default event mode post-event duration (targetDuration / 2).
+// This controls how long the recording keeps running after the last event trigger before it is closed.
+func WithPostEventDuration(d time.Duration) Option {
+	return func(s *segmenter) { s.postEventDuration = d }
 }
 
 // WithMaxEventDuration overrides the default max event recording duration (1 minute).
@@ -180,6 +187,7 @@ type segmenter struct {
 
 	pathFunc          PathFunc
 	preBufferDuration time.Duration
+	postEventDuration time.Duration
 	maxEventDuration  time.Duration
 	dirPerm           os.FileMode
 	batchedDump       bool
@@ -267,6 +275,9 @@ func New(dest string, segSize time.Duration, recordMode gomedia.RecordMode, chan
 	}
 	if newArch.preBufferDuration == 0 {
 		newArch.preBufferDuration = newArch.targetDuration / 2
+	}
+	if newArch.postEventDuration == 0 {
+		newArch.postEventDuration = newArch.targetDuration / 2
 	}
 	if newArch.maxEventDuration == 0 {
 		newArch.maxEventDuration = time.Minute
@@ -663,14 +674,14 @@ func (s *segmenter) handleEventMode(url string, stream *streamState, pkt gomedia
 }
 
 // handleEventModeActiveFile closes the in-flight event file either when the
-// trigger has gone idle for ≥ targetDuration/2, or when the event has run
+// trigger has gone idle for ≥ postEventDuration, or when the event has run
 // past maxEventDuration — both thresholds must align with a keyframe so the
 // next segment starts decodable.
 func (s *segmenter) handleEventModeActiveFile(url string, stream *streamState, pkt gomedia.Packet, isKeyframe bool) ([]*gomedia.FileInfo, error) {
 	var infos []*gomedia.FileInfo
 
 	shouldClose := isKeyframe && stream.eventSaved &&
-		(time.Since(s.lastEvent) >= s.targetDuration/2 || stream.activeFile.duration >= s.maxEventDuration)
+		(time.Since(s.lastEvent) >= s.postEventDuration || stream.activeFile.duration >= s.maxEventDuration)
 
 	if shouldClose {
 		info, err := s.closeSegment(stream, 0)
