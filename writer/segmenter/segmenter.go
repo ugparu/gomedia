@@ -36,19 +36,33 @@ type activeFile struct {
 // shift the tail over packet[1], preserving approximate coherence for
 // mostly-static scenes at the cost of a dropped middle.
 type ringBuffer struct {
-	packets  []gomedia.Packet
-	duration time.Duration
-	maxDur   time.Duration
-	hardCap  time.Duration
+	packets    []gomedia.Packet
+	duration   time.Duration
+	maxDur     time.Duration
+	hardCap    time.Duration
+	maxPackets int
 }
+
+// ringPacketsPerSecond is a conservative headroom estimate for interleaved
+// audio+video when enforcing a packet-count cap on the idle pre-buffer.
+const ringPacketsPerSecond = 60
 
 func newRingBuffer(maxDur, hardCap time.Duration) *ringBuffer {
 	return &ringBuffer{
-		packets:  make([]gomedia.Packet, 0),
-		duration: 0,
-		maxDur:   maxDur,
-		hardCap:  hardCap,
+		packets:    make([]gomedia.Packet, 0),
+		duration:   0,
+		maxDur:     maxDur,
+		hardCap:    hardCap,
+		maxPackets: ringMaxPackets(hardCap),
 	}
+}
+
+func ringMaxPackets(hardCap time.Duration) int {
+	n := int(hardCap.Seconds()) * ringPacketsPerSecond
+	if n < 512 {
+		return 512
+	}
+	return n
 }
 
 // ringHardCap bounds the idle pre-buffer when trim() cannot find a keyframe.
@@ -56,6 +70,30 @@ func newRingBuffer(maxDur, hardCap time.Duration) *ringBuffer {
 // size for Always mode) can retain minutes of packets and exhaust the ring allocator.
 func ringHardCap(preBuffer time.Duration) time.Duration {
 	return preBuffer * 2
+}
+
+func (rb *ringBuffer) dropPacketAt(idx int) {
+	dropped := rb.packets[idx]
+	if _, ok := dropped.(gomedia.VideoPacket); ok {
+		rb.duration -= dropped.Duration()
+		if rb.duration < 0 {
+			rb.duration = 0
+		}
+	}
+	dropped.Release()
+	copy(rb.packets[idx:], rb.packets[idx+1:])
+	rb.packets = rb.packets[:len(rb.packets)-1]
+}
+
+func (rb *ringBuffer) enforceLimits() {
+	// Duration-based cap (video timing). Audio is excluded from duration but
+	// still holds ring-allocator slots, so also enforce a packet-count cap.
+	for rb.duration > rb.hardCap && len(rb.packets) > 1 {
+		rb.dropPacketAt(1)
+	}
+	for len(rb.packets) > rb.maxPackets && len(rb.packets) > 1 {
+		rb.dropPacketAt(1)
+	}
 }
 
 func (rb *ringBuffer) add(pkt gomedia.Packet) {
@@ -67,15 +105,7 @@ func (rb *ringBuffer) add(pkt gomedia.Packet) {
 	}
 	// Overflow fallback: shift the tail down over packet[1] so the leading
 	// keyframe survives even when no later keyframe is in sight for trim().
-	for rb.duration > rb.hardCap && len(rb.packets) > 1 {
-		dropped := rb.packets[1]
-		if _, ok := dropped.(gomedia.VideoPacket); ok {
-			rb.duration -= dropped.Duration()
-		}
-		dropped.Release()
-		copy(rb.packets[1:], rb.packets[2:])
-		rb.packets = rb.packets[:len(rb.packets)-1]
-	}
+	rb.enforceLimits()
 }
 
 // trim drops everything before the next keyframe whenever the window
@@ -622,6 +652,44 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 	return
 }
 
+// eventFlushInterval is how much video may accumulate in the MP4 muxer between
+// Flush calls during Event-mode recording. Without periodic flush the muxer
+// holds every packet until WriteTrailer, which can exhaust the ring allocator
+// on long pre/post-event windows.
+func (s *segmenter) eventFlushInterval() time.Duration {
+	interval := s.preBufferDuration / 4
+	if interval < 2*time.Second {
+		return 2 * time.Second
+	}
+	if interval > 8*time.Second {
+		return 8 * time.Second
+	}
+	return interval
+}
+
+func (s *segmenter) flushEventSegment(stream *streamState) error {
+	af := stream.activeFile
+	if af == nil {
+		return nil
+	}
+	if err := af.muxer.Flush(); err != nil {
+		return err
+	}
+	af.lastFlush = af.duration
+	return nil
+}
+
+func (s *segmenter) maybeFlushEventSegment(stream *streamState) error {
+	af := stream.activeFile
+	if af == nil {
+		return nil
+	}
+	if af.duration-af.lastFlush < s.eventFlushInterval() {
+		return nil
+	}
+	return s.flushEventSegment(stream)
+}
+
 // handleAlwaysMode rotates and writes in the "always recording" mode:
 // segments rotate on the first keyframe past targetDuration, and a periodic
 // Flush releases muxer-held packets so memory doesn't grow unboundedly on
@@ -760,7 +828,13 @@ func (s *segmenter) handleEventModeActiveFile(url string, stream *streamState, p
 		}
 	}
 
-	return infos, s.writePacket(stream, pkt)
+	if err := s.writePacket(stream, pkt); err != nil {
+		return infos, err
+	}
+	if err := s.maybeFlushEventSegment(stream); err != nil {
+		return infos, err
+	}
+	return infos, nil
 }
 
 // startEventRecording drains the pre-buffer into a fresh segment, skipping
@@ -797,6 +871,9 @@ func (s *segmenter) startEventRecording(url string, stream *streamState) error {
 			}
 			return err
 		}
+	}
+	if err := s.flushEventSegment(stream); err != nil {
+		return err
 	}
 
 	stream.eventSaved = true

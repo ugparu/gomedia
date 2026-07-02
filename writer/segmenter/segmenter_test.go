@@ -223,6 +223,39 @@ func TestRingHardCap_UsesPreBufferOnly(t *testing.T) {
 	assert.Equal(t, 20*time.Second, ringHardCap(10*time.Second))
 }
 
+func TestRingMaxPackets_ScalesWithHardCap(t *testing.T) {
+	assert.Equal(t, 512, ringMaxPackets(1*time.Second))
+	assert.Equal(t, int((40*time.Second).Seconds())*ringPacketsPerSecond, ringMaxPackets(40*time.Second))
+}
+
+func TestRingBuffer_CapsAudioPacketsWithoutVideoDurationGrowth(t *testing.T) {
+	sourceID := "rtsp://cam1"
+	_, videoCp, audioCp := loadTestCodecPair(t, sourceID)
+
+	rb := newRingBuffer(20*time.Second, ringHardCap(20*time.Second))
+	absBase := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	// One keyframe plus a burst of audio that does not advance video duration.
+	keyPkt := h264.NewPacket(true, 0, absBase, []byte{1, 2, 3}, sourceID, videoCp)
+	keyPkt.SetDuration(33 * time.Millisecond)
+	rb.add(keyPkt)
+
+	for i := 1; i <= rb.maxPackets+100; i++ {
+		ts := time.Duration(i) * 20 * time.Millisecond
+		rb.add(aac.NewPacket([]byte{1, 2}, ts, sourceID, absBase.Add(ts), audioCp, 20*time.Millisecond))
+	}
+
+	assert.LessOrEqual(t, len(rb.packets), rb.maxPackets)
+	rb.clear()
+}
+
+func TestEventFlushInterval_ScalesWithPreBuffer(t *testing.T) {
+	seg := New("/tmp/test", time.Minute, gomedia.Event, 64,
+		WithPreBufferDuration(20*time.Second),
+	).(*segmenter)
+	assert.Equal(t, 5*time.Second, seg.eventFlushInterval())
+}
+
 func TestNew_WithOptions(t *testing.T) {
 	seg := New("/tmp/test", 10*time.Second, gomedia.Always, 64,
 		WithLogger(logger.Default),
