@@ -498,7 +498,12 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 		s.lastEvent = time.Now()
 		s.streamsMu.Lock()
 		for _, stream := range s.streams {
-			stream.eventSaved = false
+			// Only idle streams need eventSaved cleared so the next keyframe
+			// drains the ring buffer. Resetting it during an active recording
+			// blocks the post-event idle close (shouldClose requires eventSaved).
+			if stream.activeFile == nil {
+				stream.eventSaved = false
+			}
 		}
 		s.streamsMu.Unlock()
 
@@ -676,11 +681,12 @@ func (s *segmenter) handleEventMode(url string, stream *streamState, pkt gomedia
 // handleEventModeActiveFile closes the in-flight event file either when the
 // trigger has gone idle for ≥ postEventDuration, or when the event has run
 // past maxEventDuration — both thresholds must align with a keyframe so the
-// next segment starts decodable.
+// next segment starts decodable. Extension events during recording only
+// refresh lastEvent; they must not clear eventSaved on an active file.
 func (s *segmenter) handleEventModeActiveFile(url string, stream *streamState, pkt gomedia.Packet, isKeyframe bool) ([]*gomedia.FileInfo, error) {
 	var infos []*gomedia.FileInfo
 
-	shouldClose := isKeyframe && stream.eventSaved &&
+	shouldClose := isKeyframe &&
 		(time.Since(s.lastEvent) >= s.postEventDuration || stream.activeFile.duration >= s.maxEventDuration)
 
 	if shouldClose {

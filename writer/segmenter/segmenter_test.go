@@ -968,6 +968,45 @@ func TestAlwaysMode_WrittenFileIsValidMP4(t *testing.T) {
 
 // Event mode — max event duration
 
+func TestEventMode_StopsAfterIdleDespiteExtensionEvent(t *testing.T) {
+	dest := t.TempDir()
+	sourceID := "rtsp://cam1"
+
+	_, videoCp, audioCp := loadTestCodecPair(t, sourceID)
+	packets := loadTestPackets(t, sourceID, videoCp, audioCp, 1000)
+
+	s := newSegmenter(t, dest+"/", 30*time.Second, gomedia.Event,
+		WithPreBufferDuration(5*time.Second),
+		WithPostEventDuration(100*time.Millisecond),
+	)
+	addSourceAndWait(t, s, sourceID)
+
+	// Fill pre-buffer and start recording.
+	sendPackets(t, s, packets[:336])
+	time.Sleep(50 * time.Millisecond)
+	s.Events() <- struct{}{}
+	time.Sleep(50 * time.Millisecond)
+	sendPackets(t, s, packets[336:673])
+	time.Sleep(50 * time.Millisecond)
+
+	status := waitForStatus(t, s, 2*time.Second)
+	require.True(t, status, "recording should start after first event")
+
+	// Extension event while recording is active — must not block idle close.
+	s.Events() <- struct{}{}
+	time.Sleep(200 * time.Millisecond)
+
+	// Packets after idle window; close should happen on the next keyframe.
+	sendPackets(t, s, packets[673:1000])
+	time.Sleep(100 * time.Millisecond)
+
+	status = waitForStatus(t, s, 2*time.Second)
+	assert.False(t, status, "recording should stop after post-event idle period")
+
+	info := waitForFile(t, s, 2*time.Second)
+	assert.Greater(t, info.Size, 0)
+}
+
 func TestEventMode_MaxDurationEnforcedOnClose(t *testing.T) {
 	dest := t.TempDir()
 	sourceID := "rtsp://cam1"
