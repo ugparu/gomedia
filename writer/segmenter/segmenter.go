@@ -51,6 +51,13 @@ func newRingBuffer(maxDur, hardCap time.Duration) *ringBuffer {
 	}
 }
 
+// ringHardCap bounds the idle pre-buffer when trim() cannot find a keyframe.
+// It must track preBufferDuration only — tying it to targetDuration (segment
+// size for Always mode) can retain minutes of packets and exhaust the ring allocator.
+func ringHardCap(preBuffer time.Duration) time.Duration {
+	return preBuffer * 2
+}
+
 func (rb *ringBuffer) add(pkt gomedia.Packet) {
 	rb.packets = append(rb.packets, pkt)
 	// Only video packets have meaningful durations; audio packet timing is
@@ -119,11 +126,12 @@ func (rb *ringBuffer) drain() []gomedia.Packet {
 }
 
 type streamState struct {
-	activeFile   *activeFile
-	ringBuf      *ringBuffer
-	seenKeyframe bool
-	eventSaved   bool
-	codecPar     gomedia.CodecParametersPair
+	activeFile       *activeFile
+	ringBuf          *ringBuffer
+	seenKeyframe     bool
+	eventSaved       bool
+	eventRecordStart time.Time
+	codecPar         gomedia.CodecParametersPair
 }
 
 type Option func(*segmenter)
@@ -146,7 +154,7 @@ func WithPreBufferDuration(d time.Duration) Option {
 	return func(s *segmenter) { s.preBufferDuration = d }
 }
 
-// WithPostEventDuration overrides the default event mode post-event duration (targetDuration / 2).
+// WithPostEventDuration overrides the default event mode post-event duration (maxEventDuration in Event mode).
 // This controls how long the recording keeps running after the last event trigger before it is closed.
 func WithPostEventDuration(d time.Duration) Option {
 	return func(s *segmenter) { s.postEventDuration = d }
@@ -276,11 +284,17 @@ func New(dest string, segSize time.Duration, recordMode gomedia.RecordMode, chan
 	if newArch.preBufferDuration == 0 {
 		newArch.preBufferDuration = newArch.targetDuration / 2
 	}
-	if newArch.postEventDuration == 0 {
-		newArch.postEventDuration = newArch.targetDuration / 2
-	}
 	if newArch.maxEventDuration == 0 {
 		newArch.maxEventDuration = time.Minute
+	}
+	if newArch.postEventDuration == 0 {
+		if newArch.recordMode == gomedia.Event {
+			newArch.postEventDuration = newArch.maxEventDuration
+		} else {
+			newArch.postEventDuration = newArch.targetDuration / 2
+		}
+	} else if newArch.recordMode == gomedia.Event && newArch.postEventDuration > newArch.maxEventDuration {
+		newArch.postEventDuration = newArch.maxEventDuration
 	}
 	if newArch.dirPerm == 0 {
 		newArch.dirPerm = os.ModePerm
@@ -533,7 +547,7 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 		if !exists {
 			stream = &streamState{
 				activeFile:   nil,
-				ringBuf:      newRingBuffer(s.preBufferDuration, s.preBufferDuration+s.targetDuration),
+				ringBuf:      newRingBuffer(s.preBufferDuration, ringHardCap(s.preBufferDuration)),
 				seenKeyframe: false,
 				eventSaved:   true,
 				codecPar:     gomedia.CodecParametersPair{SourceID: url, AudioCodecParameters: nil, VideoCodecParameters: nil},
@@ -678,16 +692,31 @@ func (s *segmenter) handleEventMode(url string, stream *streamState, pkt gomedia
 	return nil, nil
 }
 
-// handleEventModeActiveFile closes the in-flight event file either when the
-// trigger has gone idle for ≥ postEventDuration, or when the event has run
-// past maxEventDuration — both thresholds must align with a keyframe so the
-// next segment starts decodable. Extension events during recording only
-// refresh lastEvent; they must not clear eventSaved on an active file.
+// shouldCloseEventRecording reports whether an active event recording has hit
+// its max length or outlived the post-event idle window.
+func (s *segmenter) shouldCloseEventRecording(stream *streamState) bool {
+	if stream.activeFile == nil {
+		return false
+	}
+	videoDur := stream.activeFile.duration
+	wallDur := time.Since(stream.eventRecordStart)
+	idleDur := time.Since(s.lastEvent)
+	return videoDur >= s.maxEventDuration ||
+		wallDur >= s.maxEventDuration ||
+		idleDur >= s.postEventDuration
+}
+
+// handleEventModeActiveFile closes the in-flight event file when the trigger
+// has gone idle for ≥ postEventDuration or the session has run past
+// maxEventDuration. Idle close waits for a keyframe; max-duration close does
+// not, so a short maxEventDuration is not stretched to the next GOP.
 func (s *segmenter) handleEventModeActiveFile(url string, stream *streamState, pkt gomedia.Packet, isKeyframe bool) ([]*gomedia.FileInfo, error) {
 	var infos []*gomedia.FileInfo
 
-	shouldClose := isKeyframe &&
-		(time.Since(s.lastEvent) >= s.postEventDuration || stream.activeFile.duration >= s.maxEventDuration)
+	maxReached := stream.activeFile.duration >= s.maxEventDuration ||
+		time.Since(stream.eventRecordStart) >= s.maxEventDuration
+	idleReached := isKeyframe && time.Since(s.lastEvent) >= s.postEventDuration
+	shouldClose := maxReached || idleReached
 
 	if shouldClose {
 		info, err := s.closeSegment(stream, 0)
@@ -698,6 +727,7 @@ func (s *segmenter) handleEventModeActiveFile(url string, stream *streamState, p
 			pkt.Release()
 			return infos, err
 		}
+		stream.eventRecordStart = time.Time{}
 
 		hasActiveFile := false
 		for _, st := range s.streams {
@@ -753,6 +783,7 @@ func (s *segmenter) startEventRecording(url string, stream *streamState) error {
 		}
 		return err
 	}
+	stream.eventRecordStart = time.Now()
 
 	if !s.recordCurStatus {
 		s.recordCurStatus = true

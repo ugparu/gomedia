@@ -208,6 +208,21 @@ func TestNew_DefaultOptions(t *testing.T) {
 	assert.Equal(t, os.FileMode(0o750), seg.dirPerm)
 }
 
+func TestNew_EventModeDefaults(t *testing.T) {
+	seg := New("/tmp/test", 2*time.Minute, gomedia.Event, 64,
+		WithPreBufferDuration(10*time.Second),
+		WithMaxEventDuration(10*time.Second),
+	).(*segmenter)
+
+	assert.Equal(t, 10*time.Second, seg.preBufferDuration)
+	assert.Equal(t, 10*time.Second, seg.maxEventDuration)
+	assert.Equal(t, 10*time.Second, seg.postEventDuration, "post-event idle must not inherit targetDuration/2")
+}
+
+func TestRingHardCap_UsesPreBufferOnly(t *testing.T) {
+	assert.Equal(t, 20*time.Second, ringHardCap(10*time.Second))
+}
+
 func TestNew_WithOptions(t *testing.T) {
 	seg := New("/tmp/test", 10*time.Second, gomedia.Always, 64,
 		WithLogger(logger.Default),
@@ -1005,6 +1020,46 @@ func TestEventMode_StopsAfterIdleDespiteExtensionEvent(t *testing.T) {
 
 	info := waitForFile(t, s, 2*time.Second)
 	assert.Greater(t, info.Size, 0)
+}
+
+func TestEventMode_MaxDurationStopsDespiteLargeTargetDuration(t *testing.T) {
+	dest := t.TempDir()
+	sourceID := "rtsp://cam1"
+
+	_, videoCp, audioCp := loadTestCodecPair(t, sourceID)
+	packets := loadTestPackets(t, sourceID, videoCp, audioCp, 1000)
+
+	// targetDuration is large (Always-mode segment size) but event caps are short.
+	s := newSegmenter(t, dest+"/", 2*time.Minute, gomedia.Event,
+		WithPreBufferDuration(10*time.Second),
+		WithMaxEventDuration(10*time.Second),
+	)
+	addSourceAndWait(t, s, sourceID)
+
+	sendPackets(t, s, packets[:336])
+	time.Sleep(50 * time.Millisecond)
+	s.Events() <- struct{}{}
+	time.Sleep(50 * time.Millisecond)
+	sendPackets(t, s, packets[336:673])
+	time.Sleep(50 * time.Millisecond)
+
+	started := waitForStatus(t, s, 2*time.Second)
+	require.True(t, started, "recording should start after event trigger")
+
+	sendPackets(t, s, packets[673:1000])
+	time.Sleep(100 * time.Millisecond)
+
+	stopped := waitForStatus(t, s, 2*time.Second)
+	assert.False(t, stopped, "recording should stop once max event duration is reached")
+
+	info := waitForFile(t, s, 2*time.Second)
+	segDur := info.Stop.Sub(info.Start)
+	assert.LessOrEqual(t, segDur, 11*time.Second,
+		"segment should respect maxEventDuration even with a large targetDuration")
+	assert.Greater(t, info.Size, 0)
+
+	// Drain any follow-up packets without producing another segment.
+	expectNoFile(t, s)
 }
 
 func TestEventMode_MaxDurationEnforcedOnClose(t *testing.T) {
