@@ -90,7 +90,7 @@ func NewRingAlloc(size int, opts ...RingAllocOption) *RingAlloc {
 
 // defaultMaxRingSize is the reference ring growth cap. RingBudgetBytes scales
 // this for other targetDuration / preBufferDuration pairs (reference: 10s + 5s).
-const defaultMaxRingSize = 16 * 1024 * 1024 //nolint:mnd
+const defaultMaxRingSize = 32 * 1024 * 1024 //nolint:mnd
 
 // DefaultMaxRingSize returns the built-in reference ring growth cap (16 MB).
 func DefaultMaxRingSize() int { return defaultMaxRingSize }
