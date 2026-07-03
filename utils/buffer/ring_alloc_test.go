@@ -5,6 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -635,4 +636,14 @@ func BenchmarkGrowingRingAlloc_AllocRelease(b *testing.B) {
 		_, h := g.Alloc(64)
 		h.Release()
 	}
+}
+
+func TestRingBudgetBytes_ReferencePair(t *testing.T) {
+	assert.Equal(t, defaultMaxRingSize, RingBudgetBytes(10*time.Second, 5*time.Second))
+}
+
+func TestGrowingRingAlloc_SetMaxRingBytes(t *testing.T) {
+	g := NewGrowingRingAlloc(1024)
+	g.SetMaxRingBytes(4096)
+	assert.Equal(t, 4096, g.maxRingCap())
 }

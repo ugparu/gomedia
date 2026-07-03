@@ -12,6 +12,7 @@ import (
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/format/mp4"
 	"github.com/ugparu/gomedia/utils"
+	"github.com/ugparu/gomedia/utils/buffer"
 	"github.com/ugparu/gomedia/utils/lifecycle"
 	"github.com/ugparu/gomedia/utils/logger"
 )
@@ -38,29 +39,55 @@ type activeFile struct {
 type ringBuffer struct {
 	packets    []gomedia.Packet
 	duration   time.Duration
+	bytes      int
 	maxDur     time.Duration
 	hardCap    time.Duration
 	maxPackets int
+	maxBytes   int
 }
 
 // ringPacketsPerSecond is a conservative headroom estimate for interleaved
 // audio+video when enforcing a packet-count cap on the idle pre-buffer.
 const ringPacketsPerSecond = 60
 
-func newRingBuffer(maxDur, hardCap time.Duration) *ringBuffer {
+func newRingBuffer(maxDur, hardCap time.Duration, maxBytes int) *ringBuffer {
 	return &ringBuffer{
 		packets:    make([]gomedia.Packet, 0),
 		duration:   0,
 		maxDur:     maxDur,
 		hardCap:    hardCap,
-		maxPackets: ringMaxPackets(hardCap),
+		maxBytes:   maxBytes,
+		maxPackets: ringMaxPackets(maxBytes, hardCap),
 	}
 }
 
-func ringMaxPackets(hardCap time.Duration) int {
-	n := int(hardCap.Seconds()) * ringPacketsPerSecond
-	if n < 512 {
-		return 512
+// ringByteBudgets splits RingBudgetBytes(target, preBuffer) between the idle
+// pre-buffer and the in-flight muxer window (reference: 10s target + 5s pre-buffer).
+func ringByteBudgets(target, preBuffer time.Duration) (ringBufBytes, muxerBytes int) {
+	total := buffer.RingBudgetBytes(target, preBuffer)
+	window := target.Seconds() + preBuffer.Seconds()
+	if window <= 0 {
+		return total / 3, total - total/3 //nolint:mnd
+	}
+	ringBufBytes = int(float64(total) * preBuffer.Seconds() / window)
+	if ringBufBytes < 256*1024 { //nolint:mnd
+		ringBufBytes = 256 * 1024 //nolint:mnd
+	}
+	if ringBufBytes > total {
+		ringBufBytes = total
+	}
+	return ringBufBytes, total - ringBufBytes
+}
+
+func ringMaxPackets(maxBytes int, hardCap time.Duration) int {
+	byBytes := maxBytes / 4096 //nolint:mnd
+	byDuration := int(hardCap.Seconds()) * ringPacketsPerSecond
+	n := byBytes
+	if byDuration < n {
+		n = byDuration
+	}
+	if n < 128 { //nolint:mnd
+		return 128
 	}
 	return n
 }
@@ -74,6 +101,10 @@ func ringHardCap(preBuffer time.Duration) time.Duration {
 
 func (rb *ringBuffer) dropPacketAt(idx int) {
 	dropped := rb.packets[idx]
+	rb.bytes -= dropped.Len()
+	if rb.bytes < 0 {
+		rb.bytes = 0
+	}
 	if _, ok := dropped.(gomedia.VideoPacket); ok {
 		rb.duration -= dropped.Duration()
 		if rb.duration < 0 {
@@ -86,6 +117,9 @@ func (rb *ringBuffer) dropPacketAt(idx int) {
 }
 
 func (rb *ringBuffer) enforceLimits() {
+	for rb.bytes > rb.maxBytes && len(rb.packets) > 1 {
+		rb.dropPacketAt(1)
+	}
 	// Duration-based cap (video timing). Audio is excluded from duration but
 	// still holds ring-allocator slots, so also enforce a packet-count cap.
 	for rb.duration > rb.hardCap && len(rb.packets) > 1 {
@@ -98,6 +132,7 @@ func (rb *ringBuffer) enforceLimits() {
 
 func (rb *ringBuffer) add(pkt gomedia.Packet) {
 	rb.packets = append(rb.packets, pkt)
+	rb.bytes += pkt.Len()
 	// Only video packets have meaningful durations; audio packet timing is
 	// per-chunk and would distort the rolling window bound.
 	if _, ok := pkt.(gomedia.VideoPacket); ok {
@@ -133,11 +168,13 @@ func (rb *ringBuffer) trim() {
 			}
 		}
 		for i := 0; i < trimIdx; i++ {
+			rb.bytes -= rb.packets[i].Len()
 			rb.packets[i].Release()
 		}
 		rb.packets = rb.packets[trimIdx:]
 		rb.duration -= trimDur
 	}
+	rb.enforceLimits()
 }
 
 func (rb *ringBuffer) clear() {
@@ -146,12 +183,14 @@ func (rb *ringBuffer) clear() {
 	}
 	rb.packets = rb.packets[:0]
 	rb.duration = 0
+	rb.bytes = 0
 }
 
 func (rb *ringBuffer) drain() []gomedia.Packet {
 	pkts := rb.packets
 	rb.packets = rb.packets[:0]
 	rb.duration = 0
+	rb.bytes = 0
 	return pkts
 }
 
@@ -229,6 +268,8 @@ type segmenter struct {
 	maxEventDuration  time.Duration
 	dirPerm           os.FileMode
 	batchedDump       bool
+	ringBufferByteCap int
+	muxerFlushByteCap int
 
 	sources   []string
 	streams   map[string]*streamState
@@ -329,8 +370,17 @@ func New(dest string, segSize time.Duration, recordMode gomedia.RecordMode, chan
 	if newArch.dirPerm == 0 {
 		newArch.dirPerm = os.ModePerm
 	}
+	newArch.ringBufferByteCap, newArch.muxerFlushByteCap = ringByteBudgets(
+		newArch.targetDuration, newArch.preBufferDuration,
+	)
 	newArch.AsyncManager = lifecycle.NewFailSafeAsyncManager(newArch, newArch.log)
 	return newArch
+}
+
+// RingAllocatorBudget returns the recommended GrowingRingAlloc byte cap for the
+// given segmenter timings (reference: target=10s, preBuffer=5s → 16 MB).
+func RingAllocatorBudget(target, preBuffer time.Duration) int {
+	return buffer.RingBudgetBytes(target, preBuffer)
 }
 
 // createFile is os.Create with an implicit MkdirAll on ENOENT — avoids the
@@ -577,7 +627,7 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 		if !exists {
 			stream = &streamState{
 				activeFile:   nil,
-				ringBuf:      newRingBuffer(s.preBufferDuration, ringHardCap(s.preBufferDuration)),
+				ringBuf:      newRingBuffer(s.preBufferDuration, ringHardCap(s.preBufferDuration), s.ringBufferByteCap),
 				seenKeyframe: false,
 				eventSaved:   true,
 				codecPar:     gomedia.CodecParametersPair{SourceID: url, AudioCodecParameters: nil, VideoCodecParameters: nil},
@@ -684,7 +734,8 @@ func (s *segmenter) maybeFlushEventSegment(stream *streamState) error {
 	if af == nil {
 		return nil
 	}
-	if af.duration-af.lastFlush < s.eventFlushInterval() {
+	if af.duration-af.lastFlush < s.eventFlushInterval() &&
+		af.muxer.PendingBytes() < s.muxerFlushByteCap {
 		return nil
 	}
 	return s.flushEventSegment(stream)
@@ -869,6 +920,9 @@ func (s *segmenter) startEventRecording(url string, stream *streamState) error {
 			for j := i + 1; j < len(bufferedPkts); j++ {
 				bufferedPkts[j].Release()
 			}
+			return err
+		}
+		if err := s.maybeFlushEventSegment(stream); err != nil {
 			return err
 		}
 	}

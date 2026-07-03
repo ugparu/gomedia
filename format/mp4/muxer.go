@@ -252,6 +252,9 @@ func (mux *Muxer) WritePacket(pkt gomedia.Packet) (err error) {
 	return mux.streams[idx].writePacket(pkt)
 }
 
+// PendingBytes returns the number of media bytes waiting in the muxer queue.
+func (mux *Muxer) PendingBytes() int { return mux.pendingSize }
+
 // ReleasePending releases all accumulated packets without writing.
 // Use this to discard a segment on error or when the segment is too short.
 func (mux *Muxer) ReleasePending() { mux.releasePending() }

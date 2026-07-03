@@ -14,6 +14,7 @@ import (
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/codec/aac"
 	"github.com/ugparu/gomedia/codec/h264"
+	"github.com/ugparu/gomedia/utils/buffer"
 	"github.com/ugparu/gomedia/utils/logger"
 )
 
@@ -223,16 +224,36 @@ func TestRingHardCap_UsesPreBufferOnly(t *testing.T) {
 	assert.Equal(t, 20*time.Second, ringHardCap(10*time.Second))
 }
 
+func TestRingByteBudgets_ReferenceCalibration(t *testing.T) {
+	ringCap, muxCap := ringByteBudgets(10*time.Second, 5*time.Second)
+	total := buffer.DefaultMaxRingSize()
+	assert.Equal(t, total, ringCap+muxCap)
+	assert.Equal(t, int(float64(total)*5.0/15.0), ringCap)
+	assert.Equal(t, total-ringCap, muxCap)
+}
+
+func TestRingAllocatorBudget(t *testing.T) {
+	assert.Equal(t, buffer.DefaultMaxRingSize(), RingAllocatorBudget(10*time.Second, 5*time.Second))
+}
+
+func TestNew_DefaultRingBudgets(t *testing.T) {
+	seg := New("/tmp/test", 10*time.Second, gomedia.Event, 64).(*segmenter)
+	ringCap, muxCap := ringByteBudgets(10*time.Second, 5*time.Second)
+	assert.Equal(t, ringCap, seg.ringBufferByteCap)
+	assert.Equal(t, muxCap, seg.muxerFlushByteCap)
+}
+
 func TestRingMaxPackets_ScalesWithHardCap(t *testing.T) {
-	assert.Equal(t, 512, ringMaxPackets(1*time.Second))
-	assert.Equal(t, int((40*time.Second).Seconds())*ringPacketsPerSecond, ringMaxPackets(40*time.Second))
+	maxBytes := int(float64(buffer.DefaultMaxRingSize()) * 5.0 / 15.0)
+	assert.LessOrEqual(t, ringMaxPackets(maxBytes, ringHardCap(5*time.Second)), maxBytes/4096)
 }
 
 func TestRingBuffer_CapsAudioPacketsWithoutVideoDurationGrowth(t *testing.T) {
 	sourceID := "rtsp://cam1"
 	_, videoCp, audioCp := loadTestCodecPair(t, sourceID)
 
-	rb := newRingBuffer(20*time.Second, ringHardCap(20*time.Second))
+	ringCap, _ := ringByteBudgets(10*time.Second, 20*time.Second)
+	rb := newRingBuffer(20*time.Second, ringHardCap(20*time.Second), ringCap)
 	absBase := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	// One keyframe plus a burst of audio that does not advance video duration.

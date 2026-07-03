@@ -3,6 +3,7 @@ package buffer
 import (
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	"github.com/ugparu/gomedia/utils/logger"
 )
@@ -87,10 +88,29 @@ func NewRingAlloc(size int, opts ...RingAllocOption) *RingAlloc {
 	return r
 }
 
-// maxRingSize is the upper bound for ring growth. Once the current ring
-// reaches this capacity, Alloc returns nil instead of growing further —
-// the caller is expected to allocate memory on its own.
-const maxRingSize = 16 * 1024 * 1024 //nolint:mnd // 16 MB hard cap
+// defaultMaxRingSize is the reference ring growth cap. RingBudgetBytes scales
+// this for other targetDuration / preBufferDuration pairs (reference: 10s + 5s).
+const defaultMaxRingSize = 16 * 1024 * 1024 //nolint:mnd
+
+// DefaultMaxRingSize returns the built-in reference ring growth cap (16 MB).
+func DefaultMaxRingSize() int { return defaultMaxRingSize }
+
+// RingBudgetBytes returns the recommended ring-allocator byte budget for the
+// given segmenter timings. It scales linearly from the reference pair
+// targetDuration=10s, preBufferDuration=5s → DefaultMaxRingSize().
+func RingBudgetBytes(target, preBuffer time.Duration) int {
+	const refSec = 15.0 // 10s target + 5s pre-buffer
+	window := target.Seconds() + preBuffer.Seconds()
+	if window <= 0 {
+		return defaultMaxRingSize
+	}
+	b := int(float64(defaultMaxRingSize) * window / refSec)
+	const minBytes = 256 * 1024 //nolint:mnd
+	if b < minBytes {
+		return minBytes
+	}
+	return b
+}
 
 // GrowingRingAlloc wraps RingAlloc with automatic growth. The ring starts at
 // the requested initSize; when it cannot satisfy an allocation it creates a new,
@@ -101,6 +121,22 @@ const maxRingSize = 16 * 1024 * 1024 //nolint:mnd // 16 MB hard cap
 type GrowingRingAlloc struct {
 	current *RingAlloc
 	opts    []RingAllocOption
+	maxCap  int // 0 → defaultMaxRingSize
+}
+
+// SetMaxRingBytes overrides the growth cap for this allocator. Use
+// RingBudgetBytes(targetDuration, preBufferDuration) to derive the value.
+func (g *GrowingRingAlloc) SetMaxRingBytes(n int) {
+	if n > 0 {
+		g.maxCap = n
+	}
+}
+
+func (g *GrowingRingAlloc) maxRingCap() int {
+	if g.maxCap > 0 {
+		return g.maxCap
+	}
+	return defaultMaxRingSize
 }
 
 // NewGrowingRingAlloc creates a growing ring allocator with the given initial
@@ -123,7 +159,7 @@ func (g *GrowingRingAlloc) calcGrowth(currentCap, allocSize int) int {
 	} else if currentCap > 1024*1024 {
 		grov = 14 //nolint:mnd // growth factor ×1.4 for >1 MB
 	}
-	return min(max(currentCap*grov/10, allocSize*2), maxRingSize) //nolint:mnd // factor is tenths, capped at maxRingSize
+	return min(max(currentCap*grov/10, allocSize*2), g.maxRingCap()) //nolint:mnd // factor is tenths, capped at maxRingCap
 }
 
 // grow creates a new, larger ring. The old ring stays alive until all its
@@ -153,8 +189,9 @@ func (g *GrowingRingAlloc) Alloc(n int) ([]byte, *SlotHandle) {
 			g.current, ringSlotCount))
 	}
 
-	if g.current.bcap >= maxRingSize {
-		g.current.log.Warningf(g.current, "ring allocator reached max size: %d", maxRingSize)
+	maxCap := g.maxRingCap()
+	if g.current.bcap >= maxCap {
+		g.current.log.Warningf(g.current, "ring allocator reached max size: %d", maxCap)
 		return nil, nil
 	}
 
