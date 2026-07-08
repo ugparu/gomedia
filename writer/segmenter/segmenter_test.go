@@ -1148,3 +1148,50 @@ func TestEventMode_MaxDurationEnforcedOnClose(t *testing.T) {
 	info := <-s.Files()
 	assert.Greater(t, info.Size, 0)
 }
+
+// TestEventMode_SplitsSessionIntoTargetDurationSegments verifies that an event
+// recording is sliced into targetDuration chunks (rotating on keyframes) rather
+// than accumulated into a single stretched file, while the session keeps running
+// past a single targetDuration until the post-event idle window elapses.
+func TestEventMode_SplitsSessionIntoTargetDurationSegments(t *testing.T) {
+	dest := t.TempDir()
+	sourceID := "rtsp://cam1"
+
+	_, videoCp, audioCp := loadTestCodecPair(t, sourceID)
+	// Keyframes sit at ~0s, ~8.7s, ~17.4s across the 1000-packet fixture.
+	packets := loadTestPackets(t, sourceID, videoCp, audioCp, 1000)
+
+	// 5s target forces rotation on the keyframes that fall past it. The event
+	// caps are generous so neither idle nor max close ends the rapid send early.
+	s := newSegmenter(t, dest+"/", 5*time.Second, gomedia.Event,
+		WithPreBufferDuration(5*time.Second),
+		WithMaxEventDuration(2*time.Minute),
+		WithPostEventDuration(2*time.Minute),
+	)
+	addSourceAndWait(t, s, sourceID)
+
+	sendPackets(t, s, packets[:336])
+	time.Sleep(50 * time.Millisecond)
+	s.Events() <- struct{}{}
+	time.Sleep(50 * time.Millisecond)
+
+	// The next keyframe (in packets[336:]) starts the recording.
+	sendPackets(t, s, packets[336:673])
+	time.Sleep(50 * time.Millisecond)
+	started := waitForStatus(t, s, 2*time.Second)
+	require.True(t, started, "recording should start after event trigger")
+
+	sendPackets(t, s, packets[673:])
+	time.Sleep(200 * time.Millisecond)
+
+	s.Close()
+	<-s.Done()
+
+	files := drainFiles(s)
+	require.GreaterOrEqual(t, len(files), 2,
+		"event session must be split into multiple targetDuration segments")
+	for _, info := range files {
+		assert.Greater(t, info.Size, 0)
+		assert.True(t, info.Stop.After(info.Start), "each segment should have positive duration")
+	}
+}
