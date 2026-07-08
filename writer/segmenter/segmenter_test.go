@@ -1195,3 +1195,48 @@ func TestEventMode_SplitsSessionIntoTargetDurationSegments(t *testing.T) {
 		assert.True(t, info.Stop.After(info.Start), "each segment should have positive duration")
 	}
 }
+
+// TestEventMode_SplitsPreBufferWhenLargerThanTarget verifies that a
+// preBufferDuration larger than targetDuration is itself sliced into
+// targetDuration chunks instead of being flushed as one oversized leading
+// segment. Keyframes sit ~8.7s apart, so a 20s pre-buffer holding two GOPs must
+// produce a leading segment far shorter than the whole buffered window.
+func TestEventMode_SplitsPreBufferWhenLargerThanTarget(t *testing.T) {
+	dest := t.TempDir()
+	sourceID := "rtsp://cam1"
+
+	_, videoCp, audioCp := loadTestCodecPair(t, sourceID)
+	packets := loadTestPackets(t, sourceID, videoCp, audioCp, 1000)
+
+	s := newSegmenter(t, dest+"/", 5*time.Second, gomedia.Event,
+		WithPreBufferDuration(20*time.Second),
+		WithMaxEventDuration(2*time.Minute),
+		WithPostEventDuration(2*time.Minute),
+	)
+	addSourceAndWait(t, s, sourceID)
+
+	// Fill the pre-buffer with two full GOPs (~17s) before the event fires.
+	sendPackets(t, s, packets[:673])
+	time.Sleep(50 * time.Millisecond)
+	s.Events() <- struct{}{}
+	time.Sleep(50 * time.Millisecond)
+
+	// The next keyframe drains and splits the pre-buffer into targetDuration chunks.
+	sendPackets(t, s, packets[673:])
+	time.Sleep(50 * time.Millisecond)
+	started := waitForStatus(t, s, 2*time.Second)
+	require.True(t, started, "recording should start after event trigger")
+	time.Sleep(200 * time.Millisecond)
+
+	s.Close()
+	<-s.Done()
+
+	files := drainFiles(s)
+	require.GreaterOrEqual(t, len(files), 2, "pre-buffer must be split into multiple segments")
+
+	// The leading segment must be a targetDuration chunk (~one GOP), not the
+	// entire buffered pre-event window.
+	leadDur := files[0].Stop.Sub(files[0].Start)
+	assert.Less(t, leadDur, 12*time.Second,
+		"leading pre-buffer segment must be split, not one oversized file")
+}

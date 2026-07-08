@@ -813,7 +813,7 @@ func (s *segmenter) handleEventMode(url string, stream *streamState, pkt gomedia
 	}
 
 	if !stream.eventSaved && isKeyframe {
-		return nil, s.startEventRecording(url, stream)
+		return s.startEventRecording(url, stream)
 	}
 
 	return nil, nil
@@ -921,16 +921,21 @@ func (s *segmenter) endEventSession(stream *streamState, pkt gomedia.Packet, isK
 	return infos, nil
 }
 
-// startEventRecording drains the pre-buffer into a fresh segment, skipping
-// packets before the first usable keyframe so decoding starts cleanly. When a
-// previous event recording ended less than preBufferDuration ago the pre-buffer
-// still holds footage already written to that file; in that case the drain
-// starts at the first keyframe at/after lastRecordStop so the new recording
-// continues right where the last one left off instead of duplicating footage.
-func (s *segmenter) startEventRecording(url string, stream *streamState) error {
+// startEventRecording drains the pre-buffer into fresh segments, skipping
+// packets before the first usable keyframe so decoding starts cleanly. The
+// pre-buffer itself is sliced into targetDuration chunks (rotating on keyframes)
+// so a preBufferDuration larger than targetDuration does not yield one oversized
+// leading segment. When a previous event recording ended less than
+// preBufferDuration ago the pre-buffer still holds footage already written to
+// that file; in that case the drain starts at the first keyframe at/after
+// lastRecordStop so the new recording continues right where the last one left
+// off instead of duplicating footage.
+func (s *segmenter) startEventRecording(url string, stream *streamState) ([]*gomedia.FileInfo, error) {
+	var infos []*gomedia.FileInfo
+
 	bufferedPkts := stream.ringBuf.drain()
 	if len(bufferedPkts) == 0 {
-		return nil
+		return infos, nil
 	}
 
 	startIdx := s.findFirstKeyframe(bufferedPkts)
@@ -946,7 +951,7 @@ func (s *segmenter) startEventRecording(url string, stream *streamState) error {
 		for i := startIdx; i < len(bufferedPkts); i++ {
 			bufferedPkts[i].Release()
 		}
-		return err
+		return infos, err
 	}
 	stream.eventRecordStart = time.Now()
 	stream.eventSessionDur = 0
@@ -957,27 +962,52 @@ func (s *segmenter) startEventRecording(url string, stream *streamState) error {
 	}
 
 	for i := startIdx; i < len(bufferedPkts); i++ {
+		pkt := bufferedPkts[i]
 		var vDur time.Duration
-		if vPkt, ok := bufferedPkts[i].(gomedia.VideoPacket); ok {
+		isKeyframe := false
+		if vPkt, ok := pkt.(gomedia.VideoPacket); ok {
 			vDur = vPkt.Duration()
+			isKeyframe = vPkt.IsKeyFrame()
 		}
-		if err := s.writePacket(stream, bufferedPkts[i]); err != nil {
+
+		// Rotate the pre-buffer into targetDuration chunks on keyframes, matching
+		// the live-recording split so a long pre-buffer is not one big segment.
+		if isKeyframe && stream.activeFile.duration >= s.targetDuration {
+			info, err := s.closeSegment(stream, 0)
+			if info != nil {
+				infos = append(infos, info)
+			}
+			if err != nil {
+				for j := i; j < len(bufferedPkts); j++ {
+					bufferedPkts[j].Release()
+				}
+				return infos, err
+			}
+			if err = s.openNewSegment(url, stream, pkt.StartTime()); err != nil {
+				for j := i; j < len(bufferedPkts); j++ {
+					bufferedPkts[j].Release()
+				}
+				return infos, err
+			}
+		}
+
+		if err := s.writePacket(stream, pkt); err != nil {
 			for j := i + 1; j < len(bufferedPkts); j++ {
 				bufferedPkts[j].Release()
 			}
-			return err
+			return infos, err
 		}
 		stream.eventSessionDur += vDur
 		if err := s.maybeFlushEventSegment(stream); err != nil {
-			return err
+			return infos, err
 		}
 	}
 	if err := s.flushEventSegment(stream); err != nil {
-		return err
+		return infos, err
 	}
 
 	stream.eventSaved = true
-	return nil
+	return infos, nil
 }
 
 func (s *segmenter) findFirstKeyframe(pkts []gomedia.Packet) int {
