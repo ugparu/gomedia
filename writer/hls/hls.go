@@ -296,52 +296,60 @@ func (hlsw *hlsWriter) GetMasterPlaylist() (string, error) {
 	return hlsw.master, nil
 }
 
-func (hlsw *hlsWriter) GetIndexM3u8(ctx context.Context, uid string, needMSN int64, needPart int8) (string, error) {
+// lookupMuxer resolves a muxer by its master-playlist UID. It holds mu only for
+// the map read: the returned muxer must be used with the lock released, because
+// the reads below block (LL-HLS long-poll) and mu is also taken for writing by
+// the Step goroutine. Holding a read lock across a blocking call would let one
+// slow reader stall recalcManifest, which in turn blocks every subsequent
+// reader — Go's RWMutex parks readers behind a waiting writer — and wedges the
+// writer permanently. Concurrent muxer close is safe: the muxer guards its own
+// state and reports released segments as expired.
+func (hlsw *hlsWriter) lookupMuxer(uid string) (gomedia.HLSMuxer, error) {
 	hlsw.mu.RLock()
 	defer hlsw.mu.RUnlock()
 	mux, found := hlsw.muxerIDs[uid]
 	if !found {
-		return "", fmt.Errorf("output %s not found", uid)
+		return nil, fmt.Errorf("output %s not found", uid)
+	}
+	return mux, nil
+}
+
+func (hlsw *hlsWriter) GetIndexM3u8(ctx context.Context, uid string, needMSN int64, needPart int8) (string, error) {
+	mux, err := hlsw.lookupMuxer(uid)
+	if err != nil {
+		return "", err
 	}
 	return mux.GetIndexM3u8(ctx, needMSN, needPart)
 }
 
 func (hlsw *hlsWriter) GetInit(uid string) ([]byte, error) {
-	hlsw.mu.RLock()
-	defer hlsw.mu.RUnlock()
-	mux, found := hlsw.muxerIDs[uid]
-	if !found {
-		return nil, fmt.Errorf("output %s not found", uid)
+	mux, err := hlsw.lookupMuxer(uid)
+	if err != nil {
+		return nil, err
 	}
 	return mux.GetInit()
 }
 
 func (hlsw *hlsWriter) GetInitByVersion(uid string, version int) ([]byte, error) {
-	hlsw.mu.RLock()
-	defer hlsw.mu.RUnlock()
-	mux, found := hlsw.muxerIDs[uid]
-	if !found {
-		return nil, fmt.Errorf("output %s not found", uid)
+	mux, err := hlsw.lookupMuxer(uid)
+	if err != nil {
+		return nil, err
 	}
 	return mux.GetInitByVersion(version)
 }
 
 func (hlsw *hlsWriter) GetSegment(ctx context.Context, uid string, segIndex uint64) ([]byte, error) {
-	hlsw.mu.RLock()
-	defer hlsw.mu.RUnlock()
-	mux, found := hlsw.muxerIDs[uid]
-	if !found {
-		return nil, fmt.Errorf("output %s not found", uid)
+	mux, err := hlsw.lookupMuxer(uid)
+	if err != nil {
+		return nil, err
 	}
 	return mux.GetSegment(ctx, segIndex)
 }
 
 func (hlsw *hlsWriter) GetFragment(ctx context.Context, uid string, segIndex uint64, fragIndex uint8) ([]byte, error) {
-	hlsw.mu.RLock()
-	defer hlsw.mu.RUnlock()
-	mux, found := hlsw.muxerIDs[uid]
-	if !found {
-		return nil, fmt.Errorf("output %s not found", uid)
+	mux, err := hlsw.lookupMuxer(uid)
+	if err != nil {
+		return nil, err
 	}
 	return mux.GetFragment(ctx, segIndex, fragIndex)
 }

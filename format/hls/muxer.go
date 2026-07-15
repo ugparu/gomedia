@@ -433,6 +433,15 @@ func (mxr *muxer) GetIndexM3u8(ctx context.Context, needSeg int64, needPart int8
 		return mxr.manifest.Load().(string), nil
 	}
 
+	// The whole blocking reload — waiting for the segment/part AND for the
+	// manifest rebuild — must be bounded. A caller whose ctx never fires (an
+	// unbounded request context) would otherwise wait here forever once the
+	// source stops producing packets, since the segment it waits on can only be
+	// finished by an incoming packet. Callers hold locks across this call, so
+	// an unbounded wait deadlocks the writer rather than just the request.
+	ctx, cancel := context.WithTimeout(ctx, mxr.blockingTimeout)
+	defer cancel()
+
 	// Capture the broadcast channel BEFORE waiting, so if the manifest is
 	// updated while we wait for the segment/part, the channel will already
 	// be closed and we won't block below.
@@ -443,9 +452,6 @@ func (mxr *muxer) GetIndexM3u8(ctx context.Context, needSeg int64, needPart int8
 	if waitErr != nil {
 		return "", waitErr
 	}
-
-	ctx, cancel := context.WithTimeout(ctx, mxr.blockingTimeout)
-	defer cancel()
 
 	select {
 	case <-ctx.Done():
@@ -484,23 +490,8 @@ func (mxr *muxer) waitForSegmentOrPart(ctx context.Context, needSeg int64, needP
 			return nil
 		}
 		if curSeg.id == needSegUint64 && shouldWaitForPart {
-			// waitFragment loops internally, so a separate goroutine lets us
-			// honour ctx without racing the mutex inside curSeg.
-			doneCh := make(chan struct{})
-			go func() {
-				defer close(doneCh)
-				var partIndex uint8
-				if needPart >= 0 {
-					partIndex = uint8(needPart)
-				}
-				curSeg.waitFragment(ctx, partIndex)
-			}()
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-doneCh:
-				return nil
-			}
+			curSeg.waitFragment(ctx, uint8(needPart))
+			return ctx.Err()
 		}
 
 		select {
