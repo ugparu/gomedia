@@ -833,13 +833,20 @@ func (s *segmenter) shouldCloseEventRecording(stream *streamState) bool {
 		idleDur >= s.postEventDuration
 }
 
+// minEventSegmentDuration is the shortest event-mode file we keep. Closing on
+// maxEventDuration / postEventDuration after targetDuration rotations otherwise
+// leaves an unplayable stub (e.g. a fraction of a second after a 10s cut).
+const minEventSegmentDuration = 5 * time.Second
+
 // handleEventModeActiveFile drives an in-flight event recording. The session
 // is sliced into targetDuration segments (rotating only on keyframes so every
 // file stays independently decodable) and keeps running as long as triggers
 // arrive: it ends postEventDuration after the last event, or when the session
 // outlives maxEventDuration. The idle close waits for a keyframe so the next
 // recording can start cleanly; the max cap fires immediately so a short cap is
-// not stretched to the next GOP.
+// not stretched to the next GOP. Rotation is skipped when the remaining
+// max/idle budget is below minEventSegmentDuration so the tail stays on the
+// current file instead of becoming a stub.
 func (s *segmenter) handleEventModeActiveFile(url string, stream *streamState, pkt gomedia.Packet, isKeyframe bool) ([]*gomedia.FileInfo, error) {
 	var infos []*gomedia.FileInfo
 
@@ -853,8 +860,11 @@ func (s *segmenter) handleEventModeActiveFile(url string, stream *streamState, p
 
 	// Rotate to a fresh targetDuration segment on the first keyframe past the
 	// target so long sessions are split into digestible files rather than one
-	// stretched recording.
-	if isKeyframe && stream.activeFile.duration >= s.targetDuration {
+	// stretched recording. Skip the rotate when max/idle would cut the next
+	// file shorter than minEventSegmentDuration — keep writing into the
+	// current segment instead.
+	if isKeyframe && stream.activeFile.duration >= s.targetDuration &&
+		s.eventSegmentBudgetAllowsRotate(stream) {
 		info, err := s.closeSegment(stream, 0)
 		if info != nil {
 			infos = append(infos, info)
@@ -883,14 +893,36 @@ func (s *segmenter) handleEventModeActiveFile(url string, stream *streamState, p
 	return infos, nil
 }
 
+// eventSegmentBudgetAllowsRotate reports whether a new targetDuration segment
+// would still have room to reach minEventSegmentDuration before max or idle
+// closes the session. When postEventDuration itself is below the minimum the
+// idle budget is ignored so short idle windows do not block all rotations.
+func (s *segmenter) eventSegmentBudgetAllowsRotate(stream *streamState) bool {
+	remainingToMax := s.maxEventDuration - stream.eventSessionDur
+	if wallLeft := s.maxEventDuration - time.Since(stream.eventRecordStart); wallLeft < remainingToMax {
+		remainingToMax = wallLeft
+	}
+	if remainingToMax < minEventSegmentDuration {
+		return false
+	}
+	if s.postEventDuration >= minEventSegmentDuration {
+		if remainingToIdle := s.postEventDuration - time.Since(s.lastEvent); remainingToIdle < minEventSegmentDuration {
+			return false
+		}
+	}
+	return true
+}
+
 // endEventSession finalizes the current event recording and returns the stream
 // to idle. The triggering packet is pushed into the pre-buffer instead of being
 // dropped so a follow-up event arriving within preBufferDuration can resume
-// seamlessly (see startEventRecording).
+// seamlessly (see startEventRecording). Segments shorter than
+// minEventSegmentDuration are discarded so a max/idle close cannot publish a
+// stub after the last full targetDuration cut.
 func (s *segmenter) endEventSession(stream *streamState, pkt gomedia.Packet, isKeyframe bool) ([]*gomedia.FileInfo, error) {
 	var infos []*gomedia.FileInfo
 
-	info, err := s.closeSegment(stream, 0)
+	info, err := s.closeSegment(stream, minEventSegmentDuration)
 	if info != nil {
 		infos = append(infos, info)
 		stream.lastRecordStop = info.Stop
