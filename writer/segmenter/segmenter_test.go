@@ -1240,3 +1240,62 @@ func TestEventMode_SplitsPreBufferWhenLargerThanTarget(t *testing.T) {
 	assert.Less(t, leadDur, 12*time.Second,
 		"leading pre-buffer segment must be split, not one oversized file")
 }
+
+// TestEventMode_FollowUpEventsExtendPastMax verifies that motion triggers while
+// a session is already recording slide the maxEventDuration window forward, so
+// back-to-back motion is not truncated mid-session after a targetDuration split.
+// Recording must keep running for postEventDuration after the last trigger —
+// not stop after only minEventSegmentDuration of padding on the last file.
+func TestEventMode_FollowUpEventsExtendPastMax(t *testing.T) {
+	dest := t.TempDir()
+	sourceID := "rtsp://cam1"
+
+	_, videoCp, audioCp := loadTestCodecPair(t, sourceID)
+	packets := loadTestPackets(t, sourceID, videoCp, audioCp, 1000)
+
+	s := newSegmenter(t, dest+"/", 5*time.Second, gomedia.Event,
+		WithPreBufferDuration(5*time.Second),
+		WithMaxEventDuration(8*time.Second),
+		WithPostEventDuration(20*time.Second),
+	)
+	addSourceAndWait(t, s, sourceID)
+
+	sendPackets(t, s, packets[:336])
+	time.Sleep(50 * time.Millisecond)
+	s.Events() <- struct{}{}
+	time.Sleep(50 * time.Millisecond)
+
+	sendPackets(t, s, packets[336:500])
+	time.Sleep(50 * time.Millisecond)
+	started := waitForStatus(t, s, 2*time.Second)
+	require.True(t, started, "recording should start after event trigger")
+
+	// Follow-up motion while recording — must refresh the max window so the
+	// session survives past the original 8s cap and through targetDuration splits.
+	s.Events() <- struct{}{}
+	sendPackets(t, s, packets[500:750])
+	time.Sleep(50 * time.Millisecond)
+	s.Events() <- struct{}{}
+	sendPackets(t, s, packets[750:])
+	time.Sleep(100 * time.Millisecond)
+
+	// Still recording well past the original maxEventDuration thanks to follow-ups.
+	select {
+	case status := <-s.RecordCurStatus():
+		t.Fatalf("recording stopped unexpectedly while motion events continued: status=%v", status)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	s.Close()
+	<-s.Done()
+
+	files := drainFiles(s)
+	require.NotEmpty(t, files, "expected recorded segments from the extended session")
+	var total time.Duration
+	for _, info := range files {
+		total += info.Stop.Sub(info.Start)
+	}
+	assert.Greater(t, total, 8*time.Second,
+		"follow-up events must extend the session past the original maxEventDuration")
+}
+

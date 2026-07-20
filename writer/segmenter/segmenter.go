@@ -600,11 +600,18 @@ func (s *segmenter) Step(stopCh <-chan struct{}) (err error) {
 		s.lastEvent = time.Now()
 		s.streamsMu.Lock()
 		for _, stream := range s.streams {
-			// Only idle streams need eventSaved cleared so the next keyframe
-			// drains the ring buffer. Resetting it during an active recording
-			// blocks the post-event idle close (shouldClose requires eventSaved).
 			if stream.activeFile == nil {
+				// Idle streams need eventSaved cleared so the next keyframe
+				// drains the ring buffer. Resetting it during an active
+				// recording would block the post-event idle close.
 				stream.eventSaved = false
+			} else {
+				// Follow-up triggers while recording slide the max-duration
+				// window forward so back-to-back motion is not cut off by
+				// maxEventDuration mid-session; the session still ends
+				// postEventDuration after the last trigger.
+				stream.eventRecordStart = time.Now()
+				stream.eventSessionDur = 0
 			}
 		}
 		s.streamsMu.Unlock()
@@ -843,13 +850,14 @@ const minEventSegmentDuration = 5 * time.Second
 // handleEventModeActiveFile drives an in-flight event recording. The session
 // is sliced into targetDuration segments (rotating only on keyframes so every
 // file stays independently decodable) and keeps running as long as triggers
-// arrive: it ends postEventDuration after the last event, or when the session
-// outlives maxEventDuration. The idle close waits for a keyframe so the next
-// recording can start cleanly; the max cap fires once the current file is at
-// least minEventSegmentDuration. Rotation is skipped when the remaining
-// max/idle budget is below that minimum so the tail stays on the current file.
-// If a limit hits while the active file is still shorter, writing continues
-// until the file reaches minEventSegmentDuration (padding past the limit).
+// arrive: follow-up events slide the maxEventDuration window, and the session
+// ends postEventDuration after the last event (or when max is hit with no
+// further triggers). The idle close waits for a keyframe so the next recording
+// can start cleanly; the max cap fires once the current file is at least
+// minEventSegmentDuration. Rotation is skipped when the remaining max budget
+// is below targetDuration so a trailing stub is not opened just before the
+// cap. If a limit hits while the active file is still shorter than
+// minEventSegmentDuration, writing continues until that length (padding).
 func (s *segmenter) handleEventModeActiveFile(url string, stream *streamState, pkt gomedia.Packet, isKeyframe bool) ([]*gomedia.FileInfo, error) {
 	var infos []*gomedia.FileInfo
 
@@ -903,23 +911,18 @@ func (s *segmenter) handleEventModeActiveFile(url string, stream *streamState, p
 }
 
 // eventSegmentBudgetAllowsRotate reports whether a new targetDuration segment
-// would still have room to reach minEventSegmentDuration before max or idle
-// closes the session. When postEventDuration itself is below the minimum the
-// idle budget is ignored so short idle windows do not block all rotations.
+// would still have room to run to the next natural rotate before max closes
+// the session. Requiring a full targetDuration (not just minEventSegmentDuration)
+// avoids opening a trailing file that only lives for the 5s pad and then ends
+// the session — which looked like postEventDuration was ignored after a split.
+// Idle is not consulted here: follow-up events slide the max window, and a
+// short final file after idle is padded to minEventSegmentDuration instead.
 func (s *segmenter) eventSegmentBudgetAllowsRotate(stream *streamState) bool {
 	remainingToMax := s.maxEventDuration - stream.eventSessionDur
 	if wallLeft := s.maxEventDuration - time.Since(stream.eventRecordStart); wallLeft < remainingToMax {
 		remainingToMax = wallLeft
 	}
-	if remainingToMax < minEventSegmentDuration {
-		return false
-	}
-	if s.postEventDuration >= minEventSegmentDuration {
-		if remainingToIdle := s.postEventDuration - time.Since(s.lastEvent); remainingToIdle < minEventSegmentDuration {
-			return false
-		}
-	}
-	return true
+	return remainingToMax >= s.targetDuration
 }
 
 // endEventSession finalizes the current event recording and returns the stream
