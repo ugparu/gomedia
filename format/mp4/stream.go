@@ -11,6 +11,7 @@ import (
 	"github.com/ugparu/gomedia/codec/h265"
 	"github.com/ugparu/gomedia/codec/mjpeg"
 	"github.com/ugparu/gomedia/format/mp4/mp4io"
+	"github.com/ugparu/gomedia/utils/logger"
 	"github.com/ugparu/gomedia/utils/nal"
 )
 
@@ -431,6 +432,18 @@ func (s *Stream) readPacket(tm time.Duration, url string) (pkt gomedia.Packet, e
 	}
 }
 
+// maxSampleDuration bounds the duration a single sample may be assigned.
+// Duration is derived from the gap to the *next* packet's timestamp (see
+// below), so anything upstream that ever hands the muxer a non-monotonic or
+// implausibly large gap -- e.g. a source reconnecting after an outage lasting
+// seconds to hours, with the resumed stream's timestamp rebased across the
+// whole gap -- must not be allowed to silently become that sample's duration.
+// Without this bound, a negative gap wraps to a huge value when cast to the
+// stts table's uint32, and a large-but-positive gap is written verbatim,
+// either way producing a single-sample file whose reported duration spans the
+// entire outage instead of the actual recorded content.
+const maxSampleDuration = 5 * time.Second
+
 // writePacket records a pending write for the previous packet and updates sample tables.
 // No I/O is performed; actual writing is deferred to Flush/WriteTrailer.
 func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
@@ -442,7 +455,16 @@ func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
 		return
 	}
 
-	s.lastPacket.SetDuration(nPkt.Timestamp() - s.lastPacket.Timestamp())
+	dur := nPkt.Timestamp() - s.lastPacket.Timestamp()
+	switch {
+	case dur <= 0:
+		logger.Default.Errorf(s, "mp4: non-monotonic packet timestamp (delta %v), clamping sample duration to avoid stts corruption", dur)
+		dur = time.Millisecond
+	case dur > maxSampleDuration:
+		logger.Default.Errorf(s, "mp4: implausible sample duration %v (likely a timestamp gap across a source reconnect), clamping to %v", dur, maxSampleDuration)
+		dur = maxSampleDuration
+	}
+	s.lastPacket.SetDuration(dur)
 
 	pkt := s.lastPacket
 	_ = pkt.Data() // ensure data slice is accessible (no-op for ring-backed packets)

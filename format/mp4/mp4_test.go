@@ -898,6 +898,79 @@ func TestMuxer_SampleTable_SttsAndStsz(t *testing.T) {
 	}
 }
 
+// writePacket — anomalous timestamp gaps (source reconnect / clock jump)
+
+// TestMuxer_WritePacket_ClampsImplausibleAndNonMonotonicDurations reproduces
+// the "3.5-hour broken video" bug: a source reconnecting after an outage can
+// hand the muxer a packet whose timestamp jumps by the whole outage duration,
+// or (with a slightly different recovery path) one that goes backwards. Either
+// case must not turn into a single sample whose stts duration spans the
+// outage -- previously it did, since duration was written straight from the
+// unclamped gap to the next packet's timestamp (and a negative gap wrapped to
+// a huge value once cast to the stts table's uint32).
+func TestMuxer_WritePacket_ClampsImplausibleAndNonMonotonicDurations(t *testing.T) {
+	t.Parallel()
+	pair, videoCp, _ := loadTestCodecPair(t)
+	pair.AudioCodecParameters = nil
+
+	f, err := os.CreateTemp("", "gomedia_test_*.mp4")
+	require.NoError(t, err)
+	path := f.Name()
+	t.Cleanup(func() { os.Remove(path) })
+
+	mux := NewMuxer(f, WithBatchedDump())
+	require.NoError(t, mux.Mux(pair))
+
+	base := time.Now()
+	newPkt := func(ts time.Duration) gomedia.Packet {
+		pkt := h264.NewPacket(true, ts, base, []byte{0x01}, "test", videoCp)
+		pkt.SetDuration(33 * time.Millisecond)
+		return pkt
+	}
+
+	const (
+		normalGap = 33 * time.Millisecond
+		hugeGap   = 3 * time.Hour // e.g. a camera reconnecting after a long outage
+	)
+
+	t0 := time.Duration(0)
+	t1 := t0 + normalGap
+	t2 := t1 + hugeGap     // implausibly large positive gap
+	t3 := t2 - time.Second // non-monotonic: goes backwards relative to t2
+	t4 := t3 + normalGap   // recovery: normal gap again, flushes t3's duration
+
+	for _, ts := range []time.Duration{t0, t1, t2, t3, t4} {
+		require.NoError(t, mux.WritePacket(newPkt(ts)))
+	}
+	require.NoError(t, mux.WriteTrailer())
+	require.NoError(t, f.Close())
+
+	moov := demuxAndGetMoov(t, path)
+	require.Len(t, moov.Tracks, 1)
+
+	track := moov.Tracks[0]
+	timeScale := int64(track.Media.Header.TimeScale)
+	maxTicks := timeToTS(maxSampleDuration, timeScale)
+
+	entries := track.Media.Info.Sample.TimeToSample.Entries
+	require.NotEmpty(t, entries)
+
+	var totalTicks int64
+	for _, entry := range entries {
+		// Neither the huge positive gap nor a uint32-wrapped negative gap may
+		// survive into the sample table.
+		assert.LessOrEqualf(t, int64(entry.Duration), maxTicks,
+			"stts entry duration %d ticks exceeds the %v clamp -- an outage gap leaked into the file", entry.Duration, maxSampleDuration)
+		totalTicks += int64(entry.Duration) * int64(entry.Count)
+	}
+
+	// The whole track duration must stay in the neighborhood of the clamp
+	// bound, not balloon to ~3 hours the way the original bug reported.
+	trackDuration := time.Duration(totalTicks) * time.Second / time.Duration(timeScale)
+	assert.Lessf(t, trackDuration, 2*maxSampleDuration,
+		"track duration %v suggests the outage gap was encoded into the file instead of being clamped", trackDuration)
+}
+
 // Demuxer — SourceID
 
 func TestDemuxer_SourceID(t *testing.T) {
