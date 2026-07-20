@@ -852,12 +852,14 @@ const minEventSegmentDuration = 5 * time.Second
 // file stays independently decodable) and keeps running as long as triggers
 // arrive: follow-up events slide the maxEventDuration window, and the session
 // ends postEventDuration after the last event (or when max is hit with no
-// further triggers). The idle close waits for a keyframe so the next recording
-// can start cleanly; the max cap fires once the current file is at least
+// further triggers). Idle close always waits for a keyframe — even when max
+// is also reached (common when postEventDuration == maxEventDuration) — so the
+// closing packet seeds the pre-buffer; a mid-GOP stop leaves lastRecordStop
+// between keyframes and the next motion event gaps until a later keyframe.
+// Max alone still stops as soon as the active file is at least
 // minEventSegmentDuration. Rotation is skipped when the remaining max budget
-// is below targetDuration so a trailing stub is not opened just before the
-// cap. If a limit hits while the active file is still shorter than
-// minEventSegmentDuration, writing continues until that length (padding).
+// is below targetDuration. If a limit hits while the active file is still
+// shorter than minEventSegmentDuration, writing continues until that length.
 func (s *segmenter) handleEventModeActiveFile(url string, stream *streamState, pkt gomedia.Packet, isKeyframe bool) ([]*gomedia.FileInfo, error) {
 	var infos []*gomedia.FileInfo
 
@@ -865,20 +867,24 @@ func (s *segmenter) handleEventModeActiveFile(url string, stream *streamState, p
 	maxReached := stream.eventSessionDur >= s.maxEventDuration ||
 		time.Since(stream.eventRecordStart) >= s.maxEventDuration
 
-	// Close only when the active file is long enough to play. A short tail
-	// after the last targetDuration cut is padded past idle/max rather than
-	// closed early or discarded (which left gaps before the next pre-buffer).
-	if (idleReached || maxReached) && stream.activeFile.duration >= minEventSegmentDuration {
-		if maxReached || isKeyframe {
+	if stream.activeFile.duration >= minEventSegmentDuration {
+		switch {
+		case idleReached && isKeyframe:
+			// Seed the ring buffer with this keyframe (see endEventSession).
+			return s.endEventSession(stream, pkt, isKeyframe)
+		case idleReached:
+			// Past postEventDuration but mid-GOP: keep writing until the next
+			// keyframe. Do not let maxReached short-circuit this wait — when
+			// post and max share the same deadline both flags flip together.
+		case maxReached:
 			return s.endEventSession(stream, pkt, isKeyframe)
 		}
 	}
 
 	// Rotate to a fresh targetDuration segment on the first keyframe past the
 	// target so long sessions are split into digestible files rather than one
-	// stretched recording. Skip while padding past idle/max, and when the
-	// remaining budget would leave the next file shorter than
-	// minEventSegmentDuration.
+	// stretched recording. Skip while past idle/max or when the remaining max
+	// budget cannot fit another full targetDuration segment.
 	if isKeyframe && !idleReached && !maxReached &&
 		stream.activeFile.duration >= s.targetDuration &&
 		s.eventSegmentBudgetAllowsRotate(stream) {
