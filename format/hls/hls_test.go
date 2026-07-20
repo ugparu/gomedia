@@ -752,3 +752,99 @@ func TestConcurrentAccess(t *testing.T) {
 		}
 	}
 }
+
+// Keyframe gate tests
+
+func TestKeyframeSplit_DropsUntilFirstKeyframe(t *testing.T) {
+	mxr, _, vCp, aCp := initMuxer(t, 2*time.Second, 3, WithKeyframeSplit(true))
+	defer mxr.Release()
+	packets := loadTestPackets(t, vCp, aCp, 400)
+
+	// Feed everything before the second GOP except the opening keyframe
+	// (index 1): audio and mid-GOP video packets must all be dropped.
+	for i, pkt := range packets[:336] {
+		if i == 1 {
+			continue
+		}
+		require.NoError(t, mxr.WritePacket(pkt))
+	}
+	assert.Empty(t, mxr.getCurSegment().fragments[0].packets)
+
+	// The next keyframe (index 336) opens the gate.
+	for _, pkt := range packets[336:] {
+		require.NoError(t, mxr.WritePacket(pkt))
+	}
+	seg, ok := mxr.getSegment(0)
+	require.True(t, ok)
+	require.NotEmpty(t, seg.fragments[0].packets)
+	vFirst, isVideo := seg.fragments[0].packets[0].(gomedia.VideoPacket)
+	require.True(t, isVideo)
+	assert.True(t, vFirst.IsKeyFrame())
+}
+
+func TestNoKeyframeSplit_AcceptsPreKeyframePackets(t *testing.T) {
+	mxr, _, vCp, aCp := initMuxer(t, 2*time.Second, 3)
+	defer mxr.Release()
+	packets := loadTestPackets(t, vCp, aCp, 10)
+
+	// Default strategy is unchanged: mid-GOP packets are written as before.
+	for i, pkt := range packets {
+		if i == 1 {
+			continue
+		}
+		require.NoError(t, mxr.WritePacket(pkt))
+	}
+	seg, ok := mxr.getSegment(0)
+	require.True(t, ok)
+	assert.NotEmpty(t, seg.fragments[0].packets)
+}
+
+// Timestamp wrap tests
+
+func TestWrap_EmitsDiscontinuityAndResetsTimeline(t *testing.T) {
+	mxr, _, vCp, aCp := initMuxer(t, 2*time.Second, 10,
+		WithKeyframeSplit(true), WithMaxTimestamp(5*time.Second))
+	defer mxr.Release()
+	packets := loadTestPackets(t, vCp, aCp, 1000)
+
+	for _, pkt := range packets {
+		require.NoError(t, mxr.WritePacket(pkt))
+	}
+
+	m, err := mxr.GetIndexM3u8(context.Background(), -1, -1)
+	require.NoError(t, err)
+	assert.Contains(t, m, "#EXT-X-DISCONTINUITY\n")
+
+	var discoSeg *segment
+	mxr.segments.RLock()
+	for _, id := range mxr.segments.segIDs {
+		seg := mxr.segments.segments[id]
+		if seg.discontinuity {
+			discoSeg = seg
+			break
+		}
+	}
+	mxr.segments.RUnlock()
+	require.NotNil(t, discoSeg)
+
+	// The post-wrap segment opens with the keyframe that reset the epoch.
+	require.NotEmpty(t, discoSeg.fragments[0].packets)
+	first := discoSeg.fragments[0].packets[0]
+	vFirst, isVideo := first.(gomedia.VideoPacket)
+	require.True(t, isVideo)
+	assert.True(t, vFirst.IsKeyFrame())
+	assert.Equal(t, time.Duration(0), first.Timestamp())
+
+	// The timeline stays bounded: maxTS plus at most one GOP of overshoot
+	// (fixture GOP is ~14.5s) and never goes negative.
+	mxr.segments.RLock()
+	for _, id := range mxr.segments.segIDs {
+		for _, frag := range mxr.segments.segments[id].fragments {
+			for _, pkt := range frag.packets {
+				assert.GreaterOrEqual(t, pkt.Timestamp(), time.Duration(0))
+				assert.Less(t, pkt.Timestamp(), 15*time.Second)
+			}
+		}
+	}
+	mxr.segments.RUnlock()
+}

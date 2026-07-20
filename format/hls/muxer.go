@@ -97,6 +97,8 @@ func WithVersion(v int) MuxerOption {
 // split mid-GOP. When true, rotation is deferred to the next video keyframe
 // after the target duration is reached, guaranteeing every segment starts with
 // an independently decodable frame at the cost of variable segment lengths.
+// This guarantee covers the stream start as well: packets arriving before the
+// first video keyframe are dropped, so segment 0 never opens mid-GOP.
 func WithKeyframeSplit(enabled bool) MuxerOption {
 	return func(m *muxer) { m.keyframeSplit = enabled }
 }
@@ -127,6 +129,8 @@ type muxer struct {
 	manifestBuilder       strings.Builder                     // Reusable builder for manifest generation.
 	manifestDirty         bool                                // True when manifest needs rebuild.
 	keyframeSplit         bool                                // When true, defer segment rotation to the next video keyframe.
+	tsOffset              time.Duration                       // Timeline epoch: subtracted from incoming timestamps, advanced on wrap.
+	gateOpen              bool                                // False until the first video keyframe arrives; packets are dropped meanwhile.
 }
 
 // NewHLSMuxer creates a new HLS muxer with the specified segment duration and segment count.
@@ -241,6 +245,10 @@ func (mxr *muxer) UpdateCodecParameters(codecPars gomedia.CodecParametersPair) e
 	newSeg.initVersion = initVersion
 	mxr.addSegment(newSeg)
 
+	// The post-discontinuity segment must also open on a keyframe: the player
+	// reinitializes its decoder here, so a mid-GOP start would hang it again.
+	mxr.gateOpen = false
+
 	mxr.evictOldSegments()
 
 	mxr.manifest.Store(mxr.updateIndexM3u8())
@@ -296,13 +304,69 @@ func (mxr *muxer) cleanupInitCache() {
 	}
 }
 
+// canOpenTimelineEpoch reports whether pkt may start a new timeline epoch:
+// a video keyframe, or any packet when the stream has no video track. Both the
+// stream start gate and the wrap point are aligned to such packets so every
+// advertised segment begins with an independently decodable frame.
+func (mxr *muxer) canOpenTimelineEpoch(pkt gomedia.Packet) bool {
+	if mxr.codecPars.VideoCodecParameters == nil {
+		return true
+	}
+	vPkt, isVideo := pkt.(gomedia.VideoPacket)
+	return isVideo && vPkt.IsKeyFrame()
+}
+
+// startDiscontinuitySegment force-closes the current segment and opens a new
+// one flagged with #EXT-X-DISCONTINUITY, telling players the media timeline
+// restarts rather than letting them observe tfdt jumping backwards.
+func (mxr *muxer) startDiscontinuitySegment() {
+	curSeg := mxr.getCurSegment()
+	curSeg.closeSeg()
+	newSeg := newSegment(curSeg.id+1, mxr.fragmentDuration, mxr.segmentDuration, mxr.codecPars, mxr.mediaName, mxr.blockingTimeout, mxr.log)
+	newSeg.discontinuity = true
+	newSeg.initVersion = mxr.initVersion
+	mxr.addSegment(newSeg)
+	mxr.evictOldSegments()
+	mxr.manifestDirty = true
+}
+
 // WritePacket writes a multimedia packet to the current fragment of the current segment.
 func (mxr *muxer) WritePacket(inpPkt gomedia.Packet) (err error) {
 	if inpPkt == nil {
 		return &utils.NilPacketError{}
 	}
 
-	inpPkt.SetTimestamp(inpPkt.Timestamp() % mxr.maxTS)
+	// With keyframeSplit every segment must start with an independently
+	// decodable frame — including the very first one. A segment opening on a
+	// P-frame cannot be decoded until the next IDR, so the player hangs for up
+	// to a GOP and then plays that far behind live. Drop everything until the
+	// first video keyframe (mirrors the WebRTC writer's GOP buffer). The
+	// caller keeps ownership of dropped packets and releases them.
+	if mxr.keyframeSplit && !mxr.gateOpen {
+		if !mxr.canOpenTimelineEpoch(inpPkt) {
+			return nil
+		}
+		mxr.gateOpen = true
+	}
+
+	// Bound the relative timeline: players (hls.js/MSE) degrade on very large
+	// baseMediaDecodeTime values, so timestamps must not grow without limit.
+	// Unlike a silent modulo, the epoch reset happens only on a packet that may
+	// start a segment and is announced via #EXT-X-DISCONTINUITY, so players
+	// reinitialize instead of stalling on a backwards tfdt jump. The overshoot
+	// past maxTS while waiting for a keyframe is harmless (tfdt is uint64).
+	ts := inpPkt.Timestamp() - mxr.tsOffset
+	if ts >= mxr.maxTS && mxr.canOpenTimelineEpoch(inpPkt) {
+		mxr.tsOffset += ts
+		ts = 0
+		mxr.startDiscontinuitySegment()
+	}
+	if ts < 0 {
+		// An audio packet interleaved slightly behind the wrap keyframe would
+		// otherwise carry a negative timestamp into the fMP4 muxer.
+		ts = 0
+	}
+	inpPkt.SetTimestamp(ts)
 
 	// Rotate segment according to the configured strategy.
 	//   - keyframeSplit=true: wait for the next video keyframe once the
