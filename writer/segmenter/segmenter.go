@@ -852,14 +852,17 @@ const minEventSegmentDuration = 5 * time.Second
 // file stays independently decodable) and keeps running as long as triggers
 // arrive: follow-up events slide the maxEventDuration window, and the session
 // ends postEventDuration after the last event (or when max is hit with no
-// further triggers). Idle close always waits for a keyframe — even when max
-// is also reached (common when postEventDuration == maxEventDuration) — so the
-// closing packet seeds the pre-buffer; a mid-GOP stop leaves lastRecordStop
-// between keyframes and the next motion event gaps until a later keyframe.
-// Max alone still stops as soon as the active file is at least
-// minEventSegmentDuration. Rotation is skipped when the remaining max budget
-// is below targetDuration. If a limit hits while the active file is still
-// shorter than minEventSegmentDuration, writing continues until that length.
+// further triggers).
+//
+// Idle close always lands on a keyframe and does not write that packet into
+// the finished file — it is pushed into the pre-buffer instead (see
+// endEventSession). Including it in the file and advancing lastRecordStop past
+// its PTS made the next motion event skip it and wait for a later keyframe,
+// leaving a GOP-sized hole after postEventDuration (even when maxEventDuration
+// is still the default 1 minute). Max alone still stops as soon as the active
+// file is at least minEventSegmentDuration. Rotation is skipped when the
+// remaining max budget is below targetDuration. Short tails are padded up to
+// minEventSegmentDuration before an idle/max close.
 func (s *segmenter) handleEventModeActiveFile(url string, stream *streamState, pkt gomedia.Packet, isKeyframe bool) ([]*gomedia.FileInfo, error) {
 	var infos []*gomedia.FileInfo
 
@@ -870,12 +873,12 @@ func (s *segmenter) handleEventModeActiveFile(url string, stream *streamState, p
 	if stream.activeFile.duration >= minEventSegmentDuration {
 		switch {
 		case idleReached && isKeyframe:
-			// Seed the ring buffer with this keyframe (see endEventSession).
+			// Close without writePacket: this keyframe seeds the ring buffer.
 			return s.endEventSession(stream, pkt, isKeyframe)
 		case idleReached:
-			// Past postEventDuration but mid-GOP: keep writing until the next
-			// keyframe. Do not let maxReached short-circuit this wait — when
-			// post and max share the same deadline both flags flip together.
+			// Past postEventDuration but mid-GOP — keep writing until the next
+			// keyframe so the finished file ends on a GOP boundary and the
+			// closing keyframe can seed the next recording.
 		case maxReached:
 			return s.endEventSession(stream, pkt, isKeyframe)
 		}
@@ -933,19 +936,26 @@ func (s *segmenter) eventSegmentBudgetAllowsRotate(stream *streamState) bool {
 
 // endEventSession finalizes the current event recording and returns the stream
 // to idle. The triggering packet is pushed into the pre-buffer instead of being
-// dropped so a follow-up event arriving within preBufferDuration can resume
-// seamlessly (see startEventRecording).
+// written into the closed file so a follow-up event arriving within
+// preBufferDuration can resume seamlessly (see startEventRecording). When that
+// packet is a keyframe, lastRecordStop is set to its StartTime (not info.Stop):
+// info.Stop can land slightly after the keyframe PTS, which made
+// findKeyframeAtOrAfter skip the seeded frame and open a GOP-sized gap.
 func (s *segmenter) endEventSession(stream *streamState, pkt gomedia.Packet, isKeyframe bool) ([]*gomedia.FileInfo, error) {
 	var infos []*gomedia.FileInfo
 
 	info, err := s.closeSegment(stream, 0)
 	if info != nil {
 		infos = append(infos, info)
-		stream.lastRecordStop = info.Stop
 	}
 	if err != nil {
 		pkt.Release()
 		return infos, err
+	}
+	if isKeyframe {
+		stream.lastRecordStop = pkt.StartTime()
+	} else if info != nil {
+		stream.lastRecordStop = info.Stop
 	}
 	stream.eventRecordStart = time.Time{}
 	stream.eventSessionDur = 0
