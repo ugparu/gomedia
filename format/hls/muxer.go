@@ -121,6 +121,17 @@ func WithMaxSegmentDuration(d time.Duration) MuxerOption {
 	return func(m *muxer) { m.maxSegmentDuration = d }
 }
 
+// WithMinPlaylistDuration switches segment eviction from count-based to
+// duration-based: the oldest closed segment is evicted only while the
+// remaining closed segments still sum to at least d. Segment count becomes
+// irrelevant — a playlist of many short segments and one of few long segments
+// both retain the same number of playable seconds, which also bounds muxer
+// memory at roughly d plus two max-length segments. When unset (0), the
+// legacy count-based eviction (segmentCount) applies.
+func WithMinPlaylistDuration(d time.Duration) MuxerOption {
+	return func(m *muxer) { m.minPlaylistDuration = d }
+}
+
 // muxer is an implementation of the HLS interface.
 type muxer struct {
 	lifecycle.Manager[*muxer] // Embedding lifecycle.Manager to manage lifecycle functions.
@@ -147,6 +158,7 @@ type muxer struct {
 	manifestBuilder       strings.Builder                     // Reusable builder for manifest generation.
 	manifestDirty         bool                                // True when manifest needs rebuild.
 	keyframeSplit         bool                                // When true, defer segment rotation to the next video keyframe.
+	minPlaylistDuration   time.Duration                       // Duration-based eviction bound (0 → count-based eviction).
 	maxSegmentDuration    time.Duration                       // Hard cap for segment length under keyframeSplit (0 → 2x segmentDuration).
 	partHoldBack          float64                             // PART-HOLD-BACK advertised in the header; kept for header rebuilds.
 	capSplitSeen          bool                                // True once any segment was force-cut mid-GOP at the cap.
@@ -296,10 +308,46 @@ func (mxr *muxer) UpdateCodecParameters(codecPars gomedia.CodecParametersPair) e
 	return nil
 }
 
-// evictOldSegments removes the oldest segments when both conditions are met:
+// evictOldSegments removes the oldest segments according to the configured
+// strategy: duration-based when minPlaylistDuration is set, count-based
+// otherwise.
+func (mxr *muxer) evictOldSegments() {
+	if mxr.minPlaylistDuration > 0 {
+		mxr.evictByDuration()
+	} else {
+		mxr.evictByCount()
+	}
+	mxr.cleanupInitCache()
+}
+
+// evictByDuration drops the oldest closed segment while the remaining closed
+// segments still sum to at least minPlaylistDuration. The in-progress segment
+// is not counted — the bound is on seconds a client can actually play. Keeps
+// at least one closed segment plus the current one.
+func (mxr *muxer) evictByDuration() {
+	const minSegments = 2 // one closed + the in-progress segment
+	for len(mxr.segIDs) > minSegments {
+		var closedDuration time.Duration
+		for _, id := range mxr.segIDs[:len(mxr.segIDs)-1] {
+			if seg, ok := mxr.getSegment(id); ok {
+				closedDuration += seg.duration
+			}
+		}
+		oldest, ok := mxr.getSegment(mxr.segIDs[0])
+		if !ok {
+			break
+		}
+		if closedDuration-oldest.duration < mxr.minPlaylistDuration {
+			break
+		}
+		mxr.evictOldest()
+	}
+}
+
+// evictByCount removes the oldest segments when both conditions are met:
 //  1. segment count exceeds segmentCount (minimum number of segments to keep)
 //  2. total duration of all segments exceeds segmentCount * segmentDuration
-func (mxr *muxer) evictOldSegments() {
+func (mxr *muxer) evictByCount() {
 	maxDuration := time.Duration(mxr.segmentCount) * mxr.segmentDuration
 	// RFC 8216: playlist duration MUST NOT fall below 3 * targetDuration.
 	minDuration := 3 * mxr.segmentDuration
@@ -316,14 +364,19 @@ func (mxr *muxer) evictOldSegments() {
 		if totalDuration <= maxDuration {
 			break
 		}
-		oldestID := mxr.segIDs[0]
-		if seg, ok := mxr.getSegment(oldestID); ok && seg.discontinuity {
-			mxr.discontinuitySequence++
-		}
-		mxr.removeSegment(oldestID)
-		mxr.mediaSequence++
+		mxr.evictOldest()
 	}
-	mxr.cleanupInitCache()
+}
+
+// evictOldest removes the head segment, advancing the media and discontinuity
+// sequence counters accordingly.
+func (mxr *muxer) evictOldest() {
+	oldestID := mxr.segIDs[0]
+	if seg, ok := mxr.getSegment(oldestID); ok && seg.discontinuity {
+		mxr.discontinuitySequence++
+	}
+	mxr.removeSegment(oldestID)
+	mxr.mediaSequence++
 }
 
 // cleanupInitCache removes init versions that are no longer referenced by any segment.

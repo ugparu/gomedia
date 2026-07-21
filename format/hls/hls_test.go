@@ -922,3 +922,52 @@ func TestMaxSegmentDuration_ClampedToSegmentDuration(t *testing.T) {
 	assert.Equal(t, 4*time.Second, mxr.maxSegmentDuration)
 	assert.Contains(t, mxr.header, "#EXT-X-TARGETDURATION:4")
 }
+
+// Duration-based eviction tests
+
+func TestDurationEviction_KeepsMinPlaylistDuration(t *testing.T) {
+	// Time-based 1s segments, keep at least 3s of closed segments.
+	mxr, _, vCp, aCp := initMuxer(t, time.Second, 3, WithMinPlaylistDuration(3*time.Second))
+	defer mxr.Release()
+	packets := loadTestPackets(t, vCp, aCp, 500)
+	for _, pkt := range packets {
+		require.NoError(t, mxr.WritePacket(pkt))
+	}
+
+	// Eviction must have happened (fixture holds ~14s of media).
+	assert.Greater(t, mxr.mediaSequence, int64(0))
+
+	var closed time.Duration
+	var oldest time.Duration
+	for i, id := range mxr.segIDs[:len(mxr.segIDs)-1] {
+		seg, ok := mxr.getSegment(id)
+		require.True(t, ok)
+		if i == 0 {
+			oldest = seg.duration
+		}
+		closed += seg.duration
+	}
+	// The retained closed segments satisfy the minimum...
+	assert.GreaterOrEqual(t, closed, 3*time.Second)
+	// ...and evicting one more would violate it (window is tight).
+	assert.Less(t, closed-oldest, 3*time.Second)
+}
+
+func TestDurationEviction_CountIsIrrelevant(t *testing.T) {
+	// segmentCount=1 must not shrink the playlist below the duration bound.
+	mxr, _, vCp, aCp := initMuxer(t, time.Second, 1, WithMinPlaylistDuration(5*time.Second))
+	defer mxr.Release()
+	packets := loadTestPackets(t, vCp, aCp, 500)
+	for _, pkt := range packets {
+		require.NoError(t, mxr.WritePacket(pkt))
+	}
+
+	var closed time.Duration
+	for _, id := range mxr.segIDs[:len(mxr.segIDs)-1] {
+		if seg, ok := mxr.getSegment(id); ok {
+			closed += seg.duration
+		}
+	}
+	assert.GreaterOrEqual(t, closed, 5*time.Second)
+	assert.Greater(t, len(mxr.segIDs), 5)
+}

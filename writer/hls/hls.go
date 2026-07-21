@@ -60,9 +60,16 @@ func WithFragmentDuration(d time.Duration) Option {
 }
 
 // WithMaxSegmentDuration overrides the hard cap for segment length under
-// keyframeSplit (muxer default: 2x segment duration). See hls.WithMaxSegmentDuration.
+// keyframeSplit (muxer default: no cap). See hls.WithMaxSegmentDuration.
 func WithMaxSegmentDuration(d time.Duration) Option {
 	return func(h *hlsWriter) { h.maxSegmentDuration = d }
+}
+
+// WithMinPlaylistDuration enables duration-based segment eviction: the
+// playlist always retains at least d seconds of closed segments regardless of
+// their count. See hls.WithMinPlaylistDuration.
+func WithMinPlaylistDuration(d time.Duration) Option {
+	return func(h *hlsWriter) { h.minPlaylistDuration = d }
 }
 
 // hlsWriter fans media packets to one HLS muxer per source URL and publishes
@@ -92,8 +99,9 @@ type hlsWriter struct {
 	partHoldBack       float64
 	version            int
 	keyframeSplit      bool
-	fragmentDuration   time.Duration // 0 → muxer default (495ms)
-	maxSegmentDuration time.Duration // 0 → muxer default (2x segment duration)
+	fragmentDuration    time.Duration // 0 → muxer default (495ms)
+	maxSegmentDuration  time.Duration // 0 → muxer default (no cap)
+	minPlaylistDuration time.Duration // 0 → muxer default (count-based eviction)
 }
 
 func New(id uint64, segCnt uint8, segDur time.Duration, chanSize int, partHoldBack float64, opts ...Option) gomedia.HLSStreamer {
@@ -179,6 +187,9 @@ func (hlsw *hlsWriter) checkCodPar(url string, codecPar gomedia.CodecParameters)
 		}
 		if hlsw.maxSegmentDuration > 0 {
 			muxOpts = append(muxOpts, hls.WithMaxSegmentDuration(hlsw.maxSegmentDuration))
+		}
+		if hlsw.minPlaylistDuration > 0 {
+			muxOpts = append(muxOpts, hls.WithMinPlaylistDuration(hlsw.minPlaylistDuration))
 		}
 		mux = hls.NewHLSMuxer(hlsw.segmentDuration, hlsw.segmentCount, hlsw.partHoldBack, hlsw.log, muxOpts...)
 		if err = mux.Mux(*par); err != nil {
