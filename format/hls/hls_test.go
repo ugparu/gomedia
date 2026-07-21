@@ -848,3 +848,77 @@ func TestWrap_EmitsDiscontinuityAndResetsTimeline(t *testing.T) {
 	}
 	mxr.segments.RUnlock()
 }
+
+// Max segment duration cap tests
+
+func TestKeyframeSplit_CapForcesMidGopRotation(t *testing.T) {
+	// Fixture GOP is ~14.5s; with a 3s cap segments must be force-cut mid-GOP.
+	mxr, _, vCp, aCp := initMuxer(t, 2*time.Second, 5,
+		WithKeyframeSplit(true), WithMaxSegmentDuration(3*time.Second))
+	defer mxr.Release()
+	packets := loadTestPackets(t, vCp, aCp, 300)
+	for _, pkt := range packets {
+		require.NoError(t, mxr.WritePacket(pkt))
+	}
+
+	m, err := mxr.GetIndexM3u8(context.Background(), -1, -1)
+	require.NoError(t, err)
+
+	// The cap is the honest TARGETDURATION upper bound.
+	assert.Contains(t, m, "#EXT-X-TARGETDURATION:3")
+	// After the first forced cut the global independence guarantee is gone.
+	assert.NotContains(t, m, "#EXT-X-INDEPENDENT-SEGMENTS")
+
+	// Every closed segment must respect the cap (+one frame of tolerance).
+	for _, line := range strings.Split(m, "\n") {
+		if !strings.HasPrefix(line, "#EXTINF:") {
+			continue
+		}
+		var dur float64
+		_, scanErr := fmt.Sscanf(line, "#EXTINF:%f", &dur)
+		require.NoError(t, scanErr)
+		assert.LessOrEqual(t, dur, 3.1, "segment duration exceeds cap: %s", line)
+	}
+}
+
+func TestKeyframeSplit_NoCapSplitKeepsIndependentTag(t *testing.T) {
+	// Cap large enough to never fire within the fed data: the tag must stay
+	// and TARGETDURATION must advertise the cap.
+	mxr, _, vCp, aCp := initMuxer(t, 2*time.Second, 3,
+		WithKeyframeSplit(true), WithMaxSegmentDuration(20*time.Second))
+	defer mxr.Release()
+	packets := loadTestPackets(t, vCp, aCp, 100)
+	for _, pkt := range packets {
+		require.NoError(t, mxr.WritePacket(pkt))
+	}
+
+	m, err := mxr.GetIndexM3u8(context.Background(), -1, -1)
+	require.NoError(t, err)
+	assert.Contains(t, m, "#EXT-X-INDEPENDENT-SEGMENTS")
+	assert.Contains(t, m, "#EXT-X-TARGETDURATION:20")
+}
+
+func TestKeyframeSplit_NoCapConfigured_UnboundedAndHonestDefaults(t *testing.T) {
+	// Without WithMaxSegmentDuration nothing is force-cut: rotation waits for
+	// a keyframe however long the GOP (fixture GOP ~14.5s), the INDEPENDENT
+	// tag stays, and TARGETDURATION advertises the desired segment duration.
+	mxr, _, vCp, aCp := initMuxer(t, 2*time.Second, 3, WithKeyframeSplit(true))
+	defer mxr.Release()
+	packets := loadTestPackets(t, vCp, aCp, 300)
+	for _, pkt := range packets {
+		require.NoError(t, mxr.WritePacket(pkt))
+	}
+
+	m, err := mxr.GetIndexM3u8(context.Background(), -1, -1)
+	require.NoError(t, err)
+	assert.Contains(t, m, "#EXT-X-INDEPENDENT-SEGMENTS")
+	assert.Contains(t, m, "#EXT-X-TARGETDURATION:2")
+	assert.False(t, mxr.capSplitSeen)
+}
+
+func TestMaxSegmentDuration_ClampedToSegmentDuration(t *testing.T) {
+	mxr := newTestMuxer(t, 4*time.Second, 3,
+		WithKeyframeSplit(true), WithMaxSegmentDuration(time.Second))
+	assert.Equal(t, 4*time.Second, mxr.maxSegmentDuration)
+	assert.Contains(t, mxr.header, "#EXT-X-TARGETDURATION:4")
+}

@@ -54,6 +54,17 @@ func WithKeyframeSplit(enabled bool) Option {
 	return func(h *hlsWriter) { h.keyframeSplit = enabled }
 }
 
+// WithFragmentDuration overrides the LL-HLS part duration (muxer default 495ms).
+func WithFragmentDuration(d time.Duration) Option {
+	return func(h *hlsWriter) { h.fragmentDuration = d }
+}
+
+// WithMaxSegmentDuration overrides the hard cap for segment length under
+// keyframeSplit (muxer default: 2x segment duration). See hls.WithMaxSegmentDuration.
+func WithMaxSegmentDuration(d time.Duration) Option {
+	return func(h *hlsWriter) { h.maxSegmentDuration = d }
+}
+
 // hlsWriter fans media packets to one HLS muxer per source URL and publishes
 // a master playlist across all muxers. Each muxer rotates on segmentDuration
 // and retains segmentCount live segments; reads are served under mu so the
@@ -75,12 +86,14 @@ type hlsWriter struct {
 	codPars       map[string]*gomedia.CodecParametersPair
 	sortedURLs    []string
 	mu            sync.RWMutex
-	master        string
-	indexName     string
-	mediaName     string
-	partHoldBack  float64
-	version       int
-	keyframeSplit bool
+	master             string
+	indexName          string
+	mediaName          string
+	partHoldBack       float64
+	version            int
+	keyframeSplit      bool
+	fragmentDuration   time.Duration // 0 → muxer default (495ms)
+	maxSegmentDuration time.Duration // 0 → muxer default (2x segment duration)
 }
 
 func New(id uint64, segCnt uint8, segDur time.Duration, chanSize int, partHoldBack float64, opts ...Option) gomedia.HLSStreamer {
@@ -160,7 +173,14 @@ func (hlsw *hlsWriter) checkCodPar(url string, codecPar gomedia.CodecParameters)
 		}
 		hlsw.muxerUIDs[url] = generateUID()
 	} else {
-		mux = hls.NewHLSMuxer(hlsw.segmentDuration, hlsw.segmentCount, hlsw.partHoldBack, hlsw.log, hls.WithMediaName(hlsw.mediaName), hls.WithVersion(hlsw.version), hls.WithKeyframeSplit(hlsw.keyframeSplit))
+		muxOpts := []hls.MuxerOption{hls.WithMediaName(hlsw.mediaName), hls.WithVersion(hlsw.version), hls.WithKeyframeSplit(hlsw.keyframeSplit)}
+		if hlsw.fragmentDuration > 0 {
+			muxOpts = append(muxOpts, hls.WithFragmentDuration(hlsw.fragmentDuration))
+		}
+		if hlsw.maxSegmentDuration > 0 {
+			muxOpts = append(muxOpts, hls.WithMaxSegmentDuration(hlsw.maxSegmentDuration))
+		}
+		mux = hls.NewHLSMuxer(hlsw.segmentDuration, hlsw.segmentCount, hlsw.partHoldBack, hlsw.log, muxOpts...)
 		if err = mux.Mux(*par); err != nil {
 			return
 		}

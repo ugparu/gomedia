@@ -99,8 +99,26 @@ func WithVersion(v int) MuxerOption {
 // an independently decodable frame at the cost of variable segment lengths.
 // This guarantee covers the stream start as well: packets arriving before the
 // first video keyframe are dropped, so segment 0 never opens mid-GOP.
+// Segment length is still bounded by the hard cap (WithMaxSegmentDuration):
+// a source with a pathological GOP (e.g. smart codecs emitting an IDR every
+// 30s on a static scene) is cut mid-GOP at the cap rather than allowed to
+// produce arbitrarily long segments and unbounded muxer memory.
 func WithKeyframeSplit(enabled bool) MuxerOption {
 	return func(m *muxer) { m.keyframeSplit = enabled }
+}
+
+// WithMaxSegmentDuration sets a hard upper bound for segment length under
+// keyframeSplit. By default there is no cap: rotation waits for a keyframe
+// however long the GOP is. With a cap set, rotation still prefers the first
+// keyframe after the target duration, but if none arrives before the cap the
+// segment is force-cut mid-GOP, bounding segment length (and muxer memory)
+// against sources with pathological GOPs. Continuous playback is unaffected
+// (fMP4 is a continuous timeline); only a player that starts inside such a
+// segment must wait for the next IDR. The cap also becomes the advertised
+// EXT-X-TARGETDURATION. Values below the target segment duration are clamped
+// to it.
+func WithMaxSegmentDuration(d time.Duration) MuxerOption {
+	return func(m *muxer) { m.maxSegmentDuration = d }
 }
 
 // muxer is an implementation of the HLS interface.
@@ -129,6 +147,9 @@ type muxer struct {
 	manifestBuilder       strings.Builder                     // Reusable builder for manifest generation.
 	manifestDirty         bool                                // True when manifest needs rebuild.
 	keyframeSplit         bool                                // When true, defer segment rotation to the next video keyframe.
+	maxSegmentDuration    time.Duration                       // Hard cap for segment length under keyframeSplit (0 → 2x segmentDuration).
+	partHoldBack          float64                             // PART-HOLD-BACK advertised in the header; kept for header rebuilds.
+	capSplitSeen          bool                                // True once any segment was force-cut mid-GOP at the cap.
 	tsOffset              time.Duration                       // Timeline epoch: subtracted from incoming timestamps, advanced on wrap.
 	gateOpen              bool                                // False until the first video keyframe arrives; packets are dropped meanwhile.
 }
@@ -159,22 +180,41 @@ func NewHLSMuxer(segmentDuration time.Duration, segmentCount uint8, partHoldBack
 		mediaName:        "media",
 	}
 	newHLS.manifest.Store("")
+	newHLS.partHoldBack = partHoldBack
 	for _, o := range opts {
 		o(newHLS)
 	}
-	partTarget := newHLS.fragmentDuration.Seconds() * 1.01
+	if newHLS.maxSegmentDuration != 0 && newHLS.maxSegmentDuration < segmentDuration {
+		newHLS.maxSegmentDuration = segmentDuration
+	}
+	newHLS.header = newHLS.buildHeader()
+	newHLS.Manager = lifecycle.NewDefaultManager(newHLS, log)
+	return newHLS
+}
+
+// buildHeader renders the static playlist header. Rebuilt when honesty of the
+// advertised tags changes (first mid-GOP force-cut drops INDEPENDENT-SEGMENTS).
+func (mxr *muxer) buildHeader() string {
+	// RFC 8216 §4.3.3.1: TARGETDURATION is an upper bound for every segment.
+	// When a hard cap is configured it is the honest bound to advertise;
+	// otherwise the target duration is used.
+	targetDuration := mxr.segmentDuration
+	if mxr.maxSegmentDuration > 0 {
+		targetDuration = mxr.maxSegmentDuration
+	}
+	partTarget := mxr.fragmentDuration.Seconds() * 1.01
+	// EXT-X-INDEPENDENT-SEGMENTS must hold for every segment; after the first
+	// forced mid-GOP cut it would be a lie, so it is dropped permanently.
 	independentTag := ""
-	if newHLS.keyframeSplit {
+	if mxr.keyframeSplit && !mxr.capSplitSeen {
 		independentTag = "#EXT-X-INDEPENDENT-SEGMENTS\n"
 	}
-	newHLS.header = fmt.Sprintf(`#EXTM3U
+	return fmt.Sprintf(`#EXTM3U
 #EXT-X-VERSION:%d
 #EXT-X-TARGETDURATION:%d
 #EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,PART-HOLD-BACK=%.5f
 #EXT-X-PART-INF:PART-TARGET=%.5f
-%s`, newHLS.version, int(math.Ceil(segmentDuration.Seconds())), partHoldBack, partTarget, independentTag)
-	newHLS.Manager = lifecycle.NewDefaultManager(newHLS, log)
-	return newHLS
+%s`, mxr.version, int(math.Ceil(targetDuration.Seconds())), mxr.partHoldBack, partTarget, independentTag)
 }
 
 // Mux initializes the HLS muxer with codec parameters.
@@ -371,7 +411,10 @@ func (mxr *muxer) WritePacket(inpPkt gomedia.Packet) (err error) {
 	// Rotate segment according to the configured strategy.
 	//   - keyframeSplit=true: wait for the next video keyframe once the
 	//     target duration is met. Segments may exceed target but always
-	//     start with an independently decodable frame.
+	//     start with an independently decodable frame — unless the source
+	//     withholds keyframes past the hard cap (maxSegmentDuration), in
+	//     which case the segment is force-cut mid-GOP to keep segment
+	//     length (and therefore muxer memory) bounded.
 	//   - keyframeSplit=false (default): strict time-based rotation. Cut
 	//     before any video packet that would push the segment past the
 	//     target duration, so EXT-X-TARGETDURATION remains an honest
@@ -379,11 +422,19 @@ func (mxr *muxer) WritePacket(inpPkt gomedia.Packet) (err error) {
 	if vPkt, isVideo := inpPkt.(gomedia.VideoPacket); isVideo {
 		curSeg := mxr.getCurSegment()
 		var rotate bool
+		projected := curSeg.duration + curSeg.curFragment.duration + inpPkt.Duration()
+		hasContent := curSeg.duration > 0 || curSeg.curFragment.duration > 0
 		if mxr.keyframeSplit {
 			rotate = vPkt.IsKeyFrame() && curSeg.duration >= mxr.segmentDuration
+			if !rotate && mxr.maxSegmentDuration > 0 && hasContent && projected > mxr.maxSegmentDuration {
+				rotate = true
+				if !mxr.capSplitSeen {
+					mxr.capSplitSeen = true
+					mxr.header = mxr.buildHeader()
+					mxr.log.Infof(mxr, "segment force-cut mid-GOP at %v cap (no keyframe since target); dropping INDEPENDENT-SEGMENTS tag", mxr.maxSegmentDuration)
+				}
+			}
 		} else {
-			projected := curSeg.duration + curSeg.curFragment.duration + inpPkt.Duration()
-			hasContent := curSeg.duration > 0 || curSeg.curFragment.duration > 0
 			rotate = hasContent && projected > mxr.segmentDuration
 		}
 		if rotate {
