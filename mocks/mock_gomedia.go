@@ -1903,6 +1903,20 @@ func (mr *MockHLSMuxerMockRecorder) GetSegment(ctx, seg any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSegment", reflect.TypeOf((*MockHLSMuxer)(nil).GetSegment), ctx, seg)
 }
 
+// HasPlayableSegments mocks base method.
+func (m *MockHLSMuxer) HasPlayableSegments() bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "HasPlayableSegments")
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+// HasPlayableSegments indicates an expected call of HasPlayableSegments.
+func (mr *MockHLSMuxerMockRecorder) HasPlayableSegments() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HasPlayableSegments", reflect.TypeOf((*MockHLSMuxer)(nil).HasPlayableSegments))
+}
+
 // Mux mocks base method.
 func (m *MockHLSMuxer) Mux(arg0 gomedia.CodecParametersPair) error {
 	m.ctrl.T.Helper()

@@ -72,6 +72,16 @@ func WithMinPlaylistDuration(d time.Duration) Option {
 	return func(h *hlsWriter) { h.minPlaylistDuration = d }
 }
 
+// masterVariant is one rendition of the master playlist: its #EXT-X-STREAM-INF
+// line, the playlist URI line, and the muxer they describe. The muxer is kept
+// so the master can be assembled per request and skip renditions that have
+// nothing playable in them.
+type masterVariant struct {
+	mux   gomedia.HLSMuxer
+	entry string
+	uri   string
+}
+
 // hlsWriter fans media packets to one HLS muxer per source URL and publishes
 // a master playlist across all muxers. Each muxer rotates on segmentDuration
 // and retains segmentCount live segments; reads are served under mu so the
@@ -93,7 +103,7 @@ type hlsWriter struct {
 	codPars       map[string]*gomedia.CodecParametersPair
 	sortedURLs    []string
 	mu            sync.RWMutex
-	master             string
+	variants           []masterVariant
 	indexName          string
 	mediaName          string
 	partHoldBack       float64
@@ -122,7 +132,7 @@ func New(id uint64, segCnt uint8, segDur time.Duration, chanSize int, partHoldBa
 		codPars:      map[string]*gomedia.CodecParametersPair{},
 		sortedURLs:   []string{},
 		mu:           sync.RWMutex{},
-		master:       "",
+		variants:     nil,
 		indexName:    "index.m3u8",
 		mediaName:    "media",
 		partHoldBack: partHoldBack,
@@ -236,15 +246,11 @@ func (hlsw *hlsWriter) recalcManifest() (err error) {
 		return 0
 	})
 
-	var builder strings.Builder
-	if _, err = builder.WriteString(fmt.Sprintf("#EXTM3U\n#EXT-X-VERSION:%d\n", hlsw.version)); err != nil {
-		return
-	}
-
 	hlsw.mu.Lock()
 	defer hlsw.mu.Unlock()
 
 	clear(hlsw.muxerIDs)
+	hlsw.variants = hlsw.variants[:0]
 
 	for _, url := range hlsw.sortedURLs {
 		mux, ok := hlsw.muxerURLs[url]
@@ -259,15 +265,13 @@ func (hlsw *hlsWriter) recalcManifest() (err error) {
 		if entry, err = mux.GetMasterEntry(); err != nil {
 			return err
 		}
-		if _, err = builder.WriteString(fmt.Sprintf("%s\n", entry)); err != nil {
-			return
-		}
-		if _, err = builder.WriteString(fmt.Sprintf("%d/%s/%s\n", hlsw.id, uid, hlsw.indexName)); err != nil {
-			return
-		}
+		hlsw.variants = append(hlsw.variants, masterVariant{
+			mux:   mux,
+			entry: entry,
+			uri:   fmt.Sprintf("%d/%s/%s", hlsw.id, uid, hlsw.indexName),
+		})
 	}
 
-	hlsw.master = builder.String()
 	return
 }
 
@@ -321,10 +325,40 @@ func (hlsw *hlsWriter) Step(stopCh <-chan struct{}) (err error) {
 	return nil
 }
 
+// GetMasterPlaylist assembles the master playlist, advertising only renditions
+// that currently have a playable segment. A source that delivers audio but no
+// decodable video keeps its muxer alive and its playlist empty; advertising it
+// hands players a variant they can only fail on — hls.js pins it, gets
+// LEVEL_EMPTY_ERROR, drops the manual level pin and falls back to the lowest
+// rendition. If nothing is ready yet (startup, source restart) the full list is
+// returned: an empty master is not a valid playlist either.
 func (hlsw *hlsWriter) GetMasterPlaylist() (string, error) {
 	hlsw.mu.RLock()
 	defer hlsw.mu.RUnlock()
-	return hlsw.master, nil
+
+	if len(hlsw.variants) == 0 {
+		return "", nil
+	}
+
+	playable := 0
+	for _, variant := range hlsw.variants {
+		if variant.mux.HasPlayableSegments() {
+			playable++
+		}
+	}
+
+	var builder strings.Builder
+	fmt.Fprintf(&builder, "#EXTM3U\n#EXT-X-VERSION:%d\n", hlsw.version)
+	for _, variant := range hlsw.variants {
+		if playable > 0 && !variant.mux.HasPlayableSegments() {
+			continue
+		}
+		builder.WriteString(variant.entry)
+		builder.WriteByte('\n')
+		builder.WriteString(variant.uri)
+		builder.WriteByte('\n')
+	}
+	return builder.String(), nil
 }
 
 // lookupMuxer resolves a muxer by its master-playlist UID. It holds mu only for

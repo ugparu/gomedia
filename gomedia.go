@@ -163,6 +163,7 @@ type HLSMuxer interface {
 	Muxer
 	UpdateCodecParameters(CodecParametersPair) error
 	GetMasterEntry() (string, error)
+	HasPlayableSegments() bool
 	GetIndexM3u8(ctx context.Context, msn int64, prt int8) (string, error)
 	GetInit() ([]byte, error)
 	GetInitByVersion(version int) ([]byte, error)

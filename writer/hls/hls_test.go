@@ -593,6 +593,77 @@ func TestMultiSource_RemoveOneKeepsOther(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(master, "#EXT-X-STREAM-INF:"))
 }
 
+// Unplayable renditions
+
+// stripKeyframes rebuilds every video packet with the keyframe flag cleared,
+// reproducing a source whose H.264 payload carries no independently decodable
+// picture: packets keep flowing, but the muxer's keyframe gate never opens and
+// its playlist never gets a segment.
+func stripKeyframes(t *testing.T, packets []gomedia.Packet, videoCp *h264.CodecParameters) []gomedia.Packet {
+	t.Helper()
+	result := make([]gomedia.Packet, 0, len(packets))
+	for _, pkt := range packets {
+		vPkt, isVideo := pkt.(gomedia.VideoPacket)
+		if !isVideo || !vPkt.IsKeyFrame() {
+			result = append(result, pkt)
+			continue
+		}
+		replacement := h264.NewPacket(false, pkt.Timestamp(), pkt.StartTime(), pkt.Data(), pkt.SourceID(), videoCp)
+		replacement.SetDuration(pkt.Duration())
+		result = append(result, replacement)
+	}
+	return result
+}
+
+// waitForVariantCount polls the master playlist until it advertises want
+// renditions.
+func waitForVariantCount(t *testing.T, w gomedia.HLSStreamer, want int, timeout time.Duration) string {
+	t.Helper()
+	deadline := time.After(timeout)
+	for {
+		master, err := w.GetMasterPlaylist()
+		require.NoError(t, err)
+		if strings.Count(master, "#EXT-X-STREAM-INF:") == want {
+			return master
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for %d variant(s), got: %q", want, master)
+		default:
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestGetMasterPlaylist_SkipsVariantWithoutPlayableSegments(t *testing.T) {
+	w := newWriter(t, 1, 3, 2*time.Second, WithKeyframeSplit(true))
+	_, vCp1, aCp1 := loadTestCodecPair(t, "playable")
+	_, vCp2, aCp2 := loadTestCodecPair(t, "no-keyframes")
+
+	sendPackets(t, w, loadTestPackets(t, "playable", vCp1, aCp1, 500))
+	sendPackets(t, w, stripKeyframes(t, loadTestPackets(t, "no-keyframes", vCp2, aCp2, 500), vCp2))
+
+	master := waitForVariantCount(t, w, 1, 5*time.Second)
+	uids := extractUIDs(t, master)
+	require.Len(t, uids, 1)
+	manifest, err := w.GetIndexM3u8(context.Background(), uids[0], -1, -1)
+	require.NoError(t, err)
+	assert.Contains(t, manifest, "#EXTINF:")
+}
+
+func TestGetMasterPlaylist_ListsAllWhenNothingPlayableYet(t *testing.T) {
+	w := newWriter(t, 1, 3, 2*time.Second, WithKeyframeSplit(true))
+	_, vCp1, aCp1 := loadTestCodecPair(t, "src1")
+	_, vCp2, aCp2 := loadTestCodecPair(t, "src2")
+
+	sendPackets(t, w, stripKeyframes(t, loadTestPackets(t, "src1", vCp1, aCp1, 500), vCp1))
+	sendPackets(t, w, stripKeyframes(t, loadTestPackets(t, "src2", vCp2, aCp2, 500), vCp2))
+
+	// An empty master is not a valid playlist either: with nothing playable
+	// anywhere (startup, source restart) every rendition stays advertised.
+	waitForVariantCount(t, w, 2, 5*time.Second)
+}
+
 // Audio-only source (no muxer created until video arrives)
 
 func TestAudioOnly_NoMasterPlaylistEntry(t *testing.T) {

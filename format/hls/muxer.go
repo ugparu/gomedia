@@ -21,6 +21,11 @@ import (
 const (
 	fragmentDuration = time.Millisecond * 495
 	maxTS            = time.Hour // wrap-around bound for relative timestamps
+
+	// Placeholders for the mandatory BANDWIDTH attribute when the codec
+	// parameters carry no bit rate. See masterEntryBandwidth.
+	fallbackFPS          = 25
+	fallbackBitsPerPixel = 0.1
 )
 
 type segments struct {
@@ -777,15 +782,49 @@ func (mxr *muxer) GetMasterEntry() (string, error) {
 		codecsStr += fmt.Sprintf(",%s", codecPars.AudioCodecParameters.Tag())
 	}
 
+	fps := codecPars.VideoCodecParameters.FPS()
 	masterEntry := fmt.Sprintf(
-		"#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d,CODECS=\"%s\",FRAME-RATE=%.3f",
-		codecPars.VideoCodecParameters.Bitrate(),
+		"#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d,CODECS=\"%s\"",
+		masterEntryBandwidth(codecPars.VideoCodecParameters.Bitrate(), w, h, fps),
 		w,
 		h,
 		codecsStr,
-		float64(codecPars.VideoCodecParameters.FPS()),
 	)
+	// FRAME-RATE is optional (RFC 8216 §4.3.4.2) and must be positive; parsers
+	// that sort variants by frame rate treat an advertised 0.000 as the slowest
+	// stream. Not every codec parser fills FPS (H.265 SPS timing info is not
+	// parsed), so omit the attribute rather than lie about it.
+	if fps > 0 {
+		masterEntry += fmt.Sprintf(",FRAME-RATE=%.3f", float64(fps))
+	}
 	return masterEntry, nil
+}
+
+// masterEntryBandwidth returns the BANDWIDTH value to advertise. The attribute
+// is mandatory in EXT-X-STREAM-INF and must be a positive peak bit rate, but
+// codec parameters do not always carry one (H.265 leaves Bitrate at 0). A zero
+// makes the variant look free to every ABR implementation, so fall back to a
+// resolution-derived placeholder. It is an order-of-magnitude guess, not a
+// measurement — real bit rates always win.
+func masterEntryBandwidth(bitrate, width, height, fps uint) uint {
+	if bitrate > 0 {
+		return bitrate
+	}
+	if fps == 0 {
+		fps = fallbackFPS
+	}
+	return uint(float64(width*height*fps) * fallbackBitsPerPixel)
+}
+
+// HasPlayableSegments reports whether the playlist currently advertises at
+// least one closed segment. A muxer whose source delivers no decodable video
+// (no keyframe ever opens the segment gate) keeps an open, syntactically valid
+// playlist with nothing to play in it; the master playlist must not advertise
+// such a variant. Derived from the published manifest, so it is safe to call
+// from request goroutines without touching writer-owned segment state.
+func (mxr *muxer) HasPlayableSegments() bool {
+	manifest, _ := mxr.manifest.Load().(string)
+	return strings.Contains(manifest, "#EXTINF")
 }
 
 func (mxr *muxer) String() string {

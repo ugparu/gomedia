@@ -16,7 +16,9 @@ import (
 	"github.com/ugparu/gomedia"
 	"github.com/ugparu/gomedia/codec/aac"
 	"github.com/ugparu/gomedia/codec/h264"
+	"github.com/ugparu/gomedia/mocks"
 	"github.com/ugparu/gomedia/utils/logger"
+	"go.uber.org/mock/gomock"
 )
 
 const testDataDir = "../../tests/data/h264_aac/"
@@ -455,6 +457,83 @@ func TestGetMasterEntry_VideoOnly(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, entry, "avc1.")
 	assert.NotContains(t, entry, "mp4a.")
+}
+
+func TestGetMasterEntry_UnknownBitrateAndFPS(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	vCp := mocks.NewMockVideoCodecParameters(ctrl)
+	vCp.EXPECT().Width().Return(uint(704)).AnyTimes()
+	vCp.EXPECT().Height().Return(uint(576)).AnyTimes()
+	vCp.EXPECT().Tag().Return("hev1.1.0.L00.90").AnyTimes()
+	// H.265 parameters carry neither bit rate nor frame rate.
+	vCp.EXPECT().Bitrate().Return(uint(0)).AnyTimes()
+	vCp.EXPECT().FPS().Return(uint(0)).AnyTimes()
+
+	// Set the parameters directly: Mux would build an init segment, which needs
+	// a real bitstream, and only the master entry is under test here.
+	mxr := newTestMuxer(t, 2*time.Second, 3)
+	mxr.codecPars = gomedia.CodecParametersPair{VideoCodecParameters: vCp}
+
+	entry, err := mxr.GetMasterEntry()
+	require.NoError(t, err)
+	// BANDWIDTH is mandatory and must be positive; FRAME-RATE is optional and
+	// is omitted rather than advertised as zero.
+	assert.NotContains(t, entry, "BANDWIDTH=0,")
+	assert.NotContains(t, entry, "FRAME-RATE")
+	assert.Contains(t, entry, "RESOLUTION=704x576")
+}
+
+func TestGetMasterEntry_KnownBitrateWins(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	vCp := mocks.NewMockVideoCodecParameters(ctrl)
+	vCp.EXPECT().Width().Return(uint(1920)).AnyTimes()
+	vCp.EXPECT().Height().Return(uint(1080)).AnyTimes()
+	vCp.EXPECT().Tag().Return("avc1.42E033").AnyTimes()
+	vCp.EXPECT().Bitrate().Return(uint(3939000)).AnyTimes()
+	vCp.EXPECT().FPS().Return(uint(25)).AnyTimes()
+
+	mxr := newTestMuxer(t, 2*time.Second, 3)
+	mxr.codecPars = gomedia.CodecParametersPair{VideoCodecParameters: vCp}
+
+	entry, err := mxr.GetMasterEntry()
+	require.NoError(t, err)
+	assert.Contains(t, entry, "BANDWIDTH=3939000")
+	assert.Contains(t, entry, "FRAME-RATE=25.000")
+}
+
+// HasPlayableSegments tests
+
+func TestHasPlayableSegments(t *testing.T) {
+	mxr, _, vCp, aCp := initMuxer(t, 2*time.Second, 3)
+	defer mxr.Release()
+
+	// A freshly muxed source has an open, empty segment — nothing to play.
+	assert.False(t, mxr.HasPlayableSegments())
+
+	for _, pkt := range loadTestPackets(t, vCp, aCp, 500) {
+		require.NoError(t, mxr.WritePacket(pkt))
+	}
+
+	assert.True(t, mxr.HasPlayableSegments())
+}
+
+func TestHasPlayableSegments_NoKeyframeNeverOpens(t *testing.T) {
+	mxr := newTestMuxer(t, 2*time.Second, 3, WithKeyframeSplit(true))
+	pair, vCp, aCp := loadTestCodecPair(t)
+	require.NoError(t, mxr.Mux(pair))
+	defer mxr.Release()
+
+	// Reproduces a camera whose H.264 payload contains no independently
+	// decodable picture: packets keep arriving, the keyframe gate never opens,
+	// and the playlist stays syntactically valid but unplayable forever.
+	for _, pkt := range loadTestPackets(t, vCp, aCp, 500) {
+		if vPkt, ok := pkt.(gomedia.VideoPacket); ok && vPkt.IsKeyFrame() {
+			pkt = h264.NewPacket(false, pkt.Timestamp(), pkt.StartTime(), pkt.Data(), pkt.SourceID(), vCp)
+		}
+		require.NoError(t, mxr.WritePacket(pkt))
+	}
+
+	assert.False(t, mxr.HasPlayableSegments())
 }
 
 func TestGetMasterEntry_AudioOnly_ReturnsError(t *testing.T) {
