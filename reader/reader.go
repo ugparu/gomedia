@@ -75,6 +75,10 @@ func (rdr *reader) repackPackets(src string, stopCh <-chan struct{}) {
 	recInterval := time.Second
 	videoOffsetHandler := new(offsetHandler)
 	audioOffsetHandler := new(offsetHandler)
+	// Shared timeline epoch: wall-clock StartTime of the first packet seen on
+	// any track. Both handlers anchor their first packet to it so audio and
+	// video that start apart do not diverge (see offsetHandler.CheckEmptyPacket).
+	var streamEpoch time.Time
 
 	opts := append([]rtsp.DemuxerOption{rtsp.WithLogger(rdr.log)}, rdr.opts...)
 	dmx := rdr.newDmx(src, opts...)
@@ -114,7 +118,10 @@ func (rdr *reader) repackPackets(src string, stopCh <-chan struct{}) {
 
 		switch pkt.(type) {
 		case gomedia.VideoPacket:
-			if videoOffsetHandler.CheckEmptyPacket(pkt) {
+			if streamEpoch.IsZero() {
+				streamEpoch = pkt.StartTime()
+			}
+			if videoOffsetHandler.CheckEmptyPacket(pkt, streamEpoch) {
 				continue
 			}
 			videoOffsetHandler.CheckTSWrap(pkt)
@@ -136,7 +143,10 @@ func (rdr *reader) repackPackets(src string, stopCh <-chan struct{}) {
 				return
 			}
 		case gomedia.AudioPacket:
-			if audioOffsetHandler.CheckEmptyPacket(pkt) {
+			if streamEpoch.IsZero() {
+				streamEpoch = pkt.StartTime()
+			}
+			if audioOffsetHandler.CheckEmptyPacket(pkt, streamEpoch) {
 				continue
 			}
 			audioOffsetHandler.CheckTSWrap(pkt)

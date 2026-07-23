@@ -11,6 +11,11 @@ type offsetHandler struct {
 	lastDuration time.Duration
 	offsetUp     time.Duration
 	offsetDown   time.Duration
+	// anchored becomes true after the very first packet of the track is placed
+	// on the shared epoch. Only that first packet is epoch-aligned; every later
+	// re-anchoring (RecalcForGap/CheckTSWrap on reconnect or wrap) must keep the
+	// timeline it already built, so it must not be re-shifted to the epoch.
+	anchored bool
 }
 
 // releaseLastPacket releases the one-behind cached packet if present.
@@ -36,9 +41,23 @@ func (oh *offsetHandler) RecalcForGap() {
 	oh.lastPacket = nil
 }
 
-func (oh *offsetHandler) CheckEmptyPacket(pkt gomedia.Packet) bool {
+// CheckEmptyPacket caches the first packet of the track (one-behind) and
+// normalizes its timestamp. epoch is the wall-clock StartTime of the first
+// packet seen across ALL tracks of the source; the first packet of THIS track
+// is placed at its wall-clock distance from that epoch instead of at 0, so a
+// track that starts later than the other (e.g. audio that comes up seconds or
+// minutes after video) lands aligned on the shared timeline rather than
+// diverging by its start delay. Later cache refills (after RecalcForGap on a
+// reconnect) keep the offsetUp those handlers computed.
+func (oh *offsetHandler) CheckEmptyPacket(pkt gomedia.Packet, epoch time.Time) bool {
 	if oh.lastPacket == nil {
 		oh.offsetDown = pkt.Timestamp()
+		if !oh.anchored {
+			if d := pkt.StartTime().Sub(epoch); d > 0 && !epoch.IsZero() {
+				oh.offsetUp = time.Duration(d.Milliseconds()/10*10) * time.Millisecond //nolint: mnd
+			}
+			oh.anchored = true
+		}
 		pkt.SetTimestamp(pkt.Timestamp() + oh.offsetUp - oh.offsetDown)
 		oh.lastPacket = pkt
 		return true
