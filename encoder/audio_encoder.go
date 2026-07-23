@@ -18,6 +18,11 @@ type InnerAudioEncoder interface {
 	Close()
 }
 
+// maxEncoderTSDrift bounds how far the evenly-spaced output clock may drift from
+// the source timeline before it is re-anchored: comfortably above normal encoder
+// buffering latency, far below any stream gap or reconnect (which are seconds).
+const maxEncoderTSDrift = time.Second
+
 type audioEncoder struct {
 	lifecycle.AsyncManager[*audioEncoder]
 	InnerAudioEncoder
@@ -72,6 +77,19 @@ func (e *audioEncoder) Step(doneCh <-chan struct{}) error {
 		}
 
 		for _, pkt := range packets {
+			// e.ts spaces AAC frames evenly because one input PCM packet does
+			// not map 1:1 to AAC frames (the encoder buffers samples and may
+			// emit zero, one, or several frames per input packet). But the
+			// counter must still follow the source timeline: on a stream gap or
+			// camera restart the input timestamp jumps forward (the reader
+			// bridges the outage) while a plain frame counter keeps the old pace
+			// and would trail video by the whole outage forever. Re-anchor to
+			// the source whenever they diverge beyond buffering jitter — a gap
+			// or backward reset — otherwise keep ticking by frame duration so a
+			// multi-frame batch stays evenly spaced.
+			if src := pkt.Timestamp(); src-e.ts > maxEncoderTSDrift || e.ts-src > maxEncoderTSDrift {
+				e.ts = src
+			}
 			pkt.SetTimestamp(e.ts)
 			e.ts += pkt.Duration()
 			select {

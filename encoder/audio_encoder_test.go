@@ -532,3 +532,93 @@ func TestEncode_DoubleStartIsSafe(t *testing.T) {
 
 	closeEncoder(enc)
 }
+
+// innerEchoTS is a fake inner encoder that mirrors the real one: it emits AAC
+// frames stamped with the INPUT packet's timestamp. framesPerCall controls how
+// many frames one input packet yields (one input PCM packet does not map 1:1 to
+// AAC frames).
+type innerEchoTS struct {
+	codecPar      *pcm.CodecParameters
+	frameDur      time.Duration
+	framesPerCall int
+}
+
+func (f *innerEchoTS) Init(*pcm.CodecParameters) error { return nil }
+func (f *innerEchoTS) Close()                          {}
+func (f *innerEchoTS) Encode(in *pcm.Packet) ([]gomedia.AudioPacket, error) {
+	out := make([]gomedia.AudioPacket, 0, f.framesPerCall)
+	for range f.framesPerCall {
+		out = append(out, pcm.NewPacket([]byte{0x01}, in.Timestamp(), "s", time.Now(), f.codecPar, f.frameDur))
+	}
+	return out, nil
+}
+
+// TestStep_ReanchorsOutputToSourceOnGap reproduces the A/V desync after a camera
+// restart: the input timestamp jumps forward (the reader bridges the outage),
+// and the evenly-spaced output clock must follow it instead of keeping the old
+// frame-counter pace and trailing by the whole outage.
+func TestStep_ReanchorsOutputToSourceOnGap(t *testing.T) {
+	codecPar := pcm.NewCodecParameters(0, gomedia.PCM, 1, 8000) //nolint:mnd
+	const frameDur = 128 * time.Millisecond                     //nolint:mnd
+
+	enc := NewAudioEncoder(10, func() InnerAudioEncoder { //nolint:mnd
+		return &innerEchoTS{codecPar: codecPar, frameDur: frameDur, framesPerCall: 1}
+	})
+	enc.Encode()
+	defer closeEncoder(enc)
+
+	feed := func(ts time.Duration) time.Duration {
+		enc.Samples() <- pcm.NewPacket(make([]byte, 16), ts, "s", time.Now(), codecPar, frameDur) //nolint:mnd
+		select {
+		case out := <-enc.Packets():
+			return out.Timestamp()
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for output")
+			return 0
+		}
+	}
+
+	// Steady state: output follows the source timeline exactly.
+	if got := feed(0); got != 0 {
+		t.Fatalf("frame 0 ts = %v, want 0", got)
+	}
+	if got := feed(frameDur); got != frameDur {
+		t.Fatalf("frame 1 ts = %v, want %v", got, frameDur)
+	}
+	if got := feed(2 * frameDur); got != 2*frameDur {
+		t.Fatalf("frame 2 ts = %v, want %v", got, 2*frameDur)
+	}
+
+	// Camera restart: input jumps +42s. Output must re-anchor, not stay behind.
+	if got := feed(42 * time.Second); got != 42*time.Second { //nolint:mnd
+		t.Fatalf("after gap ts = %v, want 42s (output trailed the source)", got)
+	}
+}
+
+// TestStep_MultiFrameBatchStaysEvenlySpaced verifies the reason the frame
+// counter exists: one input packet can yield several AAC frames (all carrying
+// the same source ts), and they must be spaced by frame duration, not collapsed.
+func TestStep_MultiFrameBatchStaysEvenlySpaced(t *testing.T) {
+	codecPar := pcm.NewCodecParameters(0, gomedia.PCM, 1, 8000) //nolint:mnd
+	const frameDur = 128 * time.Millisecond                     //nolint:mnd
+
+	enc := NewAudioEncoder(10, func() InnerAudioEncoder { //nolint:mnd
+		return &innerEchoTS{codecPar: codecPar, frameDur: frameDur, framesPerCall: 3}
+	})
+	enc.Encode()
+	defer closeEncoder(enc)
+
+	enc.Samples() <- pcm.NewPacket(make([]byte, 16), 0, "s", time.Now(), codecPar, frameDur) //nolint:mnd
+
+	for i := range 3 { //nolint:mnd
+		select {
+		case out := <-enc.Packets():
+			want := time.Duration(i) * frameDur
+			if out.Timestamp() != want {
+				t.Fatalf("frame %d ts = %v, want %v", i, out.Timestamp(), want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for frame %d", i)
+		}
+	}
+}

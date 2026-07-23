@@ -43,25 +43,6 @@ type reader struct {
 	opts        []rtsp.DemuxerOption
 }
 
-// bridgeGap re-anchors both tracks after a reconnect using ONE shared resume
-// point, so the reconnect is invisible to consumers (continuous, monotonic
-// timeline) AND audio and video continue in lockstep. Each track otherwise
-// computes its own resume step, and on any asymmetry (a stale/silent track
-// whose one-behind was dropped) the steps diverge and A/V drift accumulates
-// across reconnects. Video is preferred as the reference — it is keyframe-gated
-// and always flowing; audio (which can go silent) is slaved to it.
-func (rdr *reader) bridgeGap(videoHandler, audioHandler *offsetHandler) {
-	target, ok := videoHandler.gapResumeTarget()
-	if !ok {
-		target, ok = audioHandler.gapResumeTarget()
-	}
-	if !ok {
-		return
-	}
-	videoHandler.resumeAt(target)
-	audioHandler.resumeAt(target)
-}
-
 func NewRTSP(chanSize int, opts ...Option) gomedia.Reader {
 	rdr := &reader{
 		AsyncManager: nil,
@@ -217,7 +198,8 @@ func (rdr *reader) handleReadError(dmx gomedia.Demuxer, src string, recInterval 
 	rdr.log.Infof(rdr, "Demuxer started. Video: %t, Audio: %t",
 		par.VideoCodecParameters != nil, par.AudioCodecParameters != nil)
 
-	rdr.bridgeGap(videoHandler, audioHandler)
+	videoHandler.RecalcForGap()
+	audioHandler.RecalcForGap()
 
 	return time.Second, dmx
 }
