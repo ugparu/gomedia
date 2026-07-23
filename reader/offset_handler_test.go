@@ -27,7 +27,7 @@ func TestOffsetHandler_FirstPacket_IsCached(t *testing.T) {
 	oh := &offsetHandler{}
 	pkt := newVideoPacket(500 * time.Millisecond)
 
-	cached := oh.CheckEmptyPacket(pkt, time.Time{})
+	cached := oh.CheckEmptyPacket(pkt)
 
 	require.True(t, cached, "first packet should be cached (one-behind)")
 	assert.Equal(t, pkt, oh.lastPacket, "lastPacket should be the first packet")
@@ -39,7 +39,7 @@ func TestOffsetHandler_FirstPacket_TimestampNormalized(t *testing.T) {
 	oh := &offsetHandler{}
 	pkt := newVideoPacket(500 * time.Millisecond)
 
-	oh.CheckEmptyPacket(pkt, time.Time{})
+	oh.CheckEmptyPacket(pkt)
 
 	// With offsetUp=0 and offsetDown=500ms, timestamp should become 500ms + 0 - 500ms = 0
 	assert.Equal(t, time.Duration(0), pkt.Timestamp(), "first packet timestamp should be normalized to 0")
@@ -49,10 +49,10 @@ func TestOffsetHandler_SecondPacket_NotCached(t *testing.T) {
 	t.Parallel()
 	oh := &offsetHandler{}
 	pkt1 := newVideoPacket(100 * time.Millisecond)
-	oh.CheckEmptyPacket(pkt1, time.Time{})
+	oh.CheckEmptyPacket(pkt1)
 
 	pkt2 := newVideoPacket(200 * time.Millisecond)
-	cached := oh.CheckEmptyPacket(pkt2, time.Time{})
+	cached := oh.CheckEmptyPacket(pkt2)
 
 	assert.False(t, cached, "second packet should not be cached")
 }
@@ -61,7 +61,7 @@ func TestOffsetHandler_ApplyToPkt_AdjustsTimestamp(t *testing.T) {
 	t.Parallel()
 	oh := &offsetHandler{}
 	pkt1 := newVideoPacket(1 * time.Second)
-	oh.CheckEmptyPacket(pkt1, time.Time{})
+	oh.CheckEmptyPacket(pkt1)
 
 	pkt2 := newVideoPacket(2 * time.Second)
 	ok := oh.applyToPkt(pkt2)
@@ -75,7 +75,7 @@ func TestOffsetHandler_ApplyToPkt_RejectsNonMonotonic(t *testing.T) {
 	t.Parallel()
 	oh := &offsetHandler{}
 	pkt1 := newVideoPacket(1 * time.Second)
-	oh.CheckEmptyPacket(pkt1, time.Time{})
+	oh.CheckEmptyPacket(pkt1)
 
 	// Same timestamp as first after normalization → not strictly greater → rejected
 	pkt2 := newVideoPacket(1 * time.Second)
@@ -89,7 +89,7 @@ func TestOffsetHandler_ApplyToPkt_RejectsBackwardsTimestamp(t *testing.T) {
 	oh := &offsetHandler{}
 	// First packet at 2s, normalized to 0
 	pkt1 := newVideoPacket(2 * time.Second)
-	oh.CheckEmptyPacket(pkt1, time.Time{})
+	oh.CheckEmptyPacket(pkt1)
 
 	// Second packet at 1.5s, normalized to -0.5s → not greater than 0 → rejected
 	pkt2 := newVideoPacket(1500 * time.Millisecond)
@@ -103,7 +103,7 @@ func TestOffsetHandler_ApplyToPkt_MultiplePackets_MonotonicTimestamps(t *testing
 	oh := &offsetHandler{}
 	// Simulate a stream starting at 10s
 	pkt1 := newVideoPacket(10 * time.Second)
-	oh.CheckEmptyPacket(pkt1, time.Time{})
+	oh.CheckEmptyPacket(pkt1)
 
 	timestamps := []time.Duration{
 		10*time.Second + 33*time.Millisecond,
@@ -143,143 +143,116 @@ func TestOffsetHandler_ReleaseLastPacket_NilSafe(t *testing.T) {
 	assert.Nil(t, oh.lastPacket)
 }
 
-func TestOffsetHandler_RecalcForGap_ResetsAndReleases(t *testing.T) {
+// setFlowing seeds a handler as if it has been emitting: a one-behind packet at
+// the given emitted timestamp that arrived `arrivedAgo` ago.
+func setFlowing(oh *offsetHandler, emit, dur, arrivedAgo time.Duration) {
+	pkt := newVideoPacket(emit)
+	pkt.SetStartTime(time.Now().Add(-arrivedAgo))
+	oh.lastPacket = pkt
+	oh.lastDuration = dur
+}
+
+func TestOffsetHandler_GapResumeTarget_ContinuesTimeline(t *testing.T) {
 	t.Parallel()
 	oh := &offsetHandler{}
-	pkt := newVideoPacket(1 * time.Second)
-	pkt.SetStartTime(time.Now().Add(-100 * time.Millisecond))
-	oh.CheckEmptyPacket(pkt, time.Time{})
-	oh.lastDuration = 33 * time.Millisecond
+	setFlowing(oh, 30*time.Second, 40*time.Millisecond, 10*time.Second)
 
-	oh.RecalcForGap()
+	target, ok := oh.gapResumeTarget()
 
-	assert.Nil(t, oh.lastPacket, "lastPacket should be nil after RecalcForGap")
-	assert.NotZero(t, oh.offsetUp, "offsetUp should be recalculated")
+	require.True(t, ok)
+	// 30s (last emit) + ~10s elapsed = ~40s.
+	assert.InDelta(t, 40.0, target.Seconds(), 0.1, "target continues from last emit plus elapsed")
 }
 
-func TestOffsetHandler_RecalcForGap_NilSafe(t *testing.T) {
+func TestOffsetHandler_GapResumeTarget_NoAnchor(t *testing.T) {
 	t.Parallel()
 	oh := &offsetHandler{}
-
-	// Should not panic with no lastPacket
-	oh.RecalcForGap()
+	_, ok := oh.gapResumeTarget()
+	assert.False(t, ok, "no packet to anchor on")
 }
 
-func TestOffsetHandler_RecalcForGap_PreservesContinuity(t *testing.T) {
+func TestOffsetHandler_ResumeAt_NextPacketLandsAtTarget(t *testing.T) {
 	t.Parallel()
 	oh := &offsetHandler{}
+	setFlowing(oh, 5*time.Second, 40*time.Millisecond, time.Second)
 
-	// First packet at 1s
-	pkt1 := newVideoPacket(1 * time.Second)
-	pkt1.SetStartTime(time.Now())
-	oh.CheckEmptyPacket(pkt1, time.Time{})
-	oh.lastDuration = 33 * time.Millisecond
+	oh.resumeAt(42 * time.Second)
+	assert.Nil(t, oh.lastPacket, "stale one-behind dropped")
 
-	// Simulate second packet arriving
-	pkt2 := newVideoPacket(1*time.Second + 33*time.Millisecond)
-	oh.applyToPkt(pkt2)
-	oh.lastPacket.SetDuration(pkt2.Timestamp() - oh.lastPacket.Timestamp())
-	oh.lastDuration = oh.lastPacket.Duration()
-	oh.lastPacket = pkt2
-
-	// Simulate a gap/reconnect after some time
-	time.Sleep(10 * time.Millisecond)
-	oh.RecalcForGap()
-
-	// After gap, a new packet from the reconnected stream should get normalized
-	// to continue from where we left off (approximately)
-	pkt3 := newVideoPacket(5 * time.Second) // new stream starts at 5s
-	cached := oh.CheckEmptyPacket(pkt3, time.Time{})
-	require.True(t, cached)
-
-	// The new packet's timestamp should be > 0 (continuing from previous stream)
-	assert.Greater(t, pkt3.Timestamp(), time.Duration(0),
-		"after RecalcForGap, new stream packets should have positive timestamps continuing from before")
+	// The reconnected stream starts at an unrelated RTP base; its first packet
+	// must land exactly at the resume target.
+	pkt := newVideoPacket(999 * time.Second)
+	require.True(t, oh.CheckEmptyPacket(pkt))
+	assert.Equal(t, 42*time.Second, pkt.Timestamp(),
+		"first post-reconnect packet continues the timeline at the shared target")
 }
 
-// TestOffsetHandler_CheckEmptyPacket_AlignsLateTrackToEpoch reproduces the A/V
-// desync fix: a track whose first packet arrives after the shared epoch is
-// placed at its wall-clock distance from the epoch, not at 0, so audio that
-// comes up later than video lands on the same timeline instead of trailing by
-// its start delay.
-func TestOffsetHandler_CheckEmptyPacket_AlignsLateTrackToEpoch(t *testing.T) {
+// TestReader_BridgeGap_KeepsAVInLockstep is the core of the accumulation fix:
+// on reconnect both tracks resume at ONE shared target (video's), so even when
+// audio is behind or stale it snaps to video's timeline and cannot drift.
+func TestReader_BridgeGap_KeepsAVInLockstep(t *testing.T) {
 	t.Parallel()
-	epoch := time.Now()
+	rdr := &reader{}
 
-	// "Video": first packet at the epoch, arbitrary RTP base 1000s.
-	vh := &offsetHandler{}
-	vpkt := newVideoPacket(1000 * time.Second)
-	vpkt.SetStartTime(epoch)
-	vh.CheckEmptyPacket(vpkt, epoch)
-	assert.Equal(t, time.Duration(0), vh.offsetUp, "first track anchors at 0")
-	assert.Equal(t, time.Duration(0), vpkt.Timestamp(), "first track normalized to 0")
+	video := &offsetHandler{}
+	setFlowing(video, 30*time.Second, 40*time.Millisecond, 5*time.Second)
+	audio := &offsetHandler{}
+	setFlowing(audio, 30*time.Second, 21*time.Millisecond, 5*time.Second)
 
-	// "Audio": first packet 142s after the epoch, unrelated RTP base 500s.
-	ah := &offsetHandler{}
-	apkt := newVideoPacket(500 * time.Second)
-	apkt.SetStartTime(epoch.Add(142 * time.Second))
-	ah.CheckEmptyPacket(apkt, epoch)
-	assert.Equal(t, 142*time.Second, ah.offsetUp, "late track anchors at its start delay")
-	assert.Equal(t, 142*time.Second, apkt.Timestamp(),
-		"late track placed on the shared timeline, not at 0")
+	rdr.bridgeGap(video, audio)
+
+	assert.Equal(t, video.offsetUp, audio.offsetUp,
+		"both tracks re-anchor to the exact same resume target")
+
+	// Both reconnected streams start at unrelated RTP bases; their first packets
+	// must land at the same point.
+	vpkt := newVideoPacket(700 * time.Second)
+	apkt := newVideoPacket(120 * time.Second)
+	require.True(t, video.CheckEmptyPacket(vpkt))
+	require.True(t, audio.CheckEmptyPacket(apkt))
+	assert.Equal(t, vpkt.Timestamp(), apkt.Timestamp(),
+		"audio and video resume aligned after the reconnect")
 }
 
-// TestOffsetHandler_CheckEmptyPacket_ReanchorKeepsTimeline ensures epoch
-// alignment applies only to the very first packet: after a reconnect
-// (RecalcForGap sets offsetUp to continue the timeline) the next first packet
-// must not be re-shifted back to the epoch.
-func TestOffsetHandler_CheckEmptyPacket_ReanchorKeepsTimeline(t *testing.T) {
+// TestReader_BridgeGap_SnapsStaleAudioToVideo reproduces the desync: audio went
+// silent, so its one-behind was already dropped (nil) at reconnect. Its offsetUp
+// is stale. bridgeGap must still snap it to video's target instead of leaving it
+// behind (the accumulation bug).
+func TestReader_BridgeGap_SnapsStaleAudioToVideo(t *testing.T) {
 	t.Parallel()
-	epoch := time.Now()
+	rdr := &reader{}
 
-	// Already anchored with a non-zero offsetUp, as RecalcForGap leaves it after
-	// a reconnect. The next first packet — arriving an hour after the epoch —
-	// must keep that offset, not jump to (StartTime - epoch).
-	oh := &offsetHandler{anchored: true, offsetUp: 7 * time.Second}
-	pkt := newVideoPacket(5 * time.Second)
-	pkt.SetStartTime(epoch.Add(time.Hour))
+	video := &offsetHandler{}
+	setFlowing(video, 200*time.Second, 40*time.Millisecond, 3*time.Second)
 
-	oh.CheckEmptyPacket(pkt, epoch)
+	// Audio silent: no one-behind, and a stale offsetUp from long ago.
+	audio := &offsetHandler{offsetUp: 80 * time.Second}
 
-	assert.Equal(t, 7*time.Second, oh.offsetUp,
-		"already-anchored track keeps its offset, not re-anchored to epoch")
-	// Normalized against the preserved offset: 5s + 7s - 5s = 7s.
-	assert.Equal(t, 7*time.Second, pkt.Timestamp())
+	rdr.bridgeGap(video, audio)
+
+	assert.Equal(t, video.offsetUp, audio.offsetUp,
+		"stale audio snaps to video's resume target, not its old offset")
+	assert.Greater(t, audio.offsetUp, 80*time.Second, "old stale offset is overwritten")
 }
 
-// TestOffsetHandler_Reconnect_PreservesAVAlignment verifies that after a
-// reconnect (RecalcForGap on both tracks) audio and video that were aligned
-// resume aligned — the epoch anchoring does not interfere, and both continue
-// their timeline by the same real elapsed.
-func TestOffsetHandler_Reconnect_PreservesAVAlignment(t *testing.T) {
+func TestReader_BridgeGap_NoAnchor_NoOp(t *testing.T) {
 	t.Parallel()
-	gapStart := time.Now().Add(-10 * time.Second) // last packets arrived 10s ago
+	rdr := &reader{}
+	video := &offsetHandler{offsetUp: 3 * time.Second}
+	audio := &offsetHandler{offsetUp: 4 * time.Second}
 
-	vh := &offsetHandler{anchored: true}
-	vpkt := newVideoPacket(30 * time.Second)
-	vpkt.SetStartTime(gapStart)
-	vh.lastPacket = vpkt
-	vh.lastDuration = 40 * time.Millisecond
+	// Neither track has a packet to anchor on — leave offsets untouched.
+	rdr.bridgeGap(video, audio)
 
-	ah := &offsetHandler{anchored: true}
-	apkt := newVideoPacket(30 * time.Second)
-	apkt.SetStartTime(gapStart)
-	ah.lastPacket = apkt
-	ah.lastDuration = 40 * time.Millisecond
-
-	vh.RecalcForGap()
-	ah.RecalcForGap()
-
-	assert.Greater(t, vh.offsetUp, 30*time.Second, "timeline continued across the gap")
-	assert.InDelta(t, ah.offsetUp.Seconds(), vh.offsetUp.Seconds(), 0.1,
-		"after reconnect both tracks resume aligned")
+	assert.Equal(t, 3*time.Second, video.offsetUp)
+	assert.Equal(t, 4*time.Second, audio.offsetUp)
 }
 
 func TestOffsetHandler_CheckTSWrap_NoWrap(t *testing.T) {
 	t.Parallel()
 	oh := &offsetHandler{}
 	pkt1 := newVideoPacket(1 * time.Second)
-	oh.CheckEmptyPacket(pkt1, time.Time{})
+	oh.CheckEmptyPacket(pkt1)
 
 	// Normal next packet — no wrap
 	pkt2 := newVideoPacket(1*time.Second + 33*time.Millisecond)
@@ -296,7 +269,7 @@ func TestOffsetHandler_CheckTSWrap_DetectsWrap(t *testing.T) {
 	// Simulate packet near max RTP timestamp (large value)
 	highTS := 100 * time.Minute
 	pkt1 := newVideoPacket(highTS)
-	oh.CheckEmptyPacket(pkt1, time.Time{})
+	oh.CheckEmptyPacket(pkt1)
 	oh.lastDuration = 33 * time.Millisecond
 
 	// Simulate wrapped packet (goes back to small value)

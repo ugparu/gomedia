@@ -43,6 +43,25 @@ type reader struct {
 	opts        []rtsp.DemuxerOption
 }
 
+// bridgeGap re-anchors both tracks after a reconnect using ONE shared resume
+// point, so the reconnect is invisible to consumers (continuous, monotonic
+// timeline) AND audio and video continue in lockstep. Each track otherwise
+// computes its own resume step, and on any asymmetry (a stale/silent track
+// whose one-behind was dropped) the steps diverge and A/V drift accumulates
+// across reconnects. Video is preferred as the reference — it is keyframe-gated
+// and always flowing; audio (which can go silent) is slaved to it.
+func (rdr *reader) bridgeGap(videoHandler, audioHandler *offsetHandler) {
+	target, ok := videoHandler.gapResumeTarget()
+	if !ok {
+		target, ok = audioHandler.gapResumeTarget()
+	}
+	if !ok {
+		return
+	}
+	videoHandler.resumeAt(target)
+	audioHandler.resumeAt(target)
+}
+
 func NewRTSP(chanSize int, opts ...Option) gomedia.Reader {
 	rdr := &reader{
 		AsyncManager: nil,
@@ -75,10 +94,6 @@ func (rdr *reader) repackPackets(src string, stopCh <-chan struct{}) {
 	recInterval := time.Second
 	videoOffsetHandler := new(offsetHandler)
 	audioOffsetHandler := new(offsetHandler)
-	// Shared timeline epoch: wall-clock StartTime of the first packet seen on
-	// any track. Both handlers anchor their first packet to it so audio and
-	// video that start apart do not diverge (see offsetHandler.CheckEmptyPacket).
-	var streamEpoch time.Time
 
 	opts := append([]rtsp.DemuxerOption{rtsp.WithLogger(rdr.log)}, rdr.opts...)
 	dmx := rdr.newDmx(src, opts...)
@@ -118,10 +133,7 @@ func (rdr *reader) repackPackets(src string, stopCh <-chan struct{}) {
 
 		switch pkt.(type) {
 		case gomedia.VideoPacket:
-			if streamEpoch.IsZero() {
-				streamEpoch = pkt.StartTime()
-			}
-			if videoOffsetHandler.CheckEmptyPacket(pkt, streamEpoch) {
+			if videoOffsetHandler.CheckEmptyPacket(pkt) {
 				continue
 			}
 			videoOffsetHandler.CheckTSWrap(pkt)
@@ -143,10 +155,7 @@ func (rdr *reader) repackPackets(src string, stopCh <-chan struct{}) {
 				return
 			}
 		case gomedia.AudioPacket:
-			if streamEpoch.IsZero() {
-				streamEpoch = pkt.StartTime()
-			}
-			if audioOffsetHandler.CheckEmptyPacket(pkt, streamEpoch) {
+			if audioOffsetHandler.CheckEmptyPacket(pkt) {
 				continue
 			}
 			audioOffsetHandler.CheckTSWrap(pkt)
@@ -208,8 +217,7 @@ func (rdr *reader) handleReadError(dmx gomedia.Demuxer, src string, recInterval 
 	rdr.log.Infof(rdr, "Demuxer started. Video: %t, Audio: %t",
 		par.VideoCodecParameters != nil, par.AudioCodecParameters != nil)
 
-	videoHandler.RecalcForGap()
-	audioHandler.RecalcForGap()
+	rdr.bridgeGap(videoHandler, audioHandler)
 
 	return time.Second, dmx
 }

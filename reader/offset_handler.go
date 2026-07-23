@@ -11,11 +11,6 @@ type offsetHandler struct {
 	lastDuration time.Duration
 	offsetUp     time.Duration
 	offsetDown   time.Duration
-	// anchored becomes true after the very first packet of the track is placed
-	// on the shared epoch. Only that first packet is epoch-aligned; every later
-	// re-anchoring (RecalcForGap/CheckTSWrap on reconnect or wrap) must keep the
-	// timeline it already built, so it must not be re-shifted to the epoch.
-	anchored bool
 }
 
 // releaseLastPacket releases the one-behind cached packet if present.
@@ -26,38 +21,41 @@ func (oh *offsetHandler) releaseLastPacket() {
 	}
 }
 
-func (oh *offsetHandler) RecalcForGap() {
+// gapResumeTarget returns the timeline position playback should continue from
+// after a reconnect gap: the last emitted timestamp plus the real wall time
+// elapsed since it arrived, rounded to the last packet duration. ok is false
+// when the track has no packet to anchor on (never started, or went silent and
+// its one-behind was already dropped). The reader uses ONE target for both
+// tracks so audio and video resume in lockstep — see reader.bridgeGap.
+func (oh *offsetHandler) gapResumeTarget() (target time.Duration, ok bool) {
 	if oh.lastPacket == nil {
-		return
+		return 0, false
 	}
-
-	oh.offsetUp = oh.lastPacket.Timestamp() + time.Since(oh.lastPacket.StartTime())
+	target = oh.lastPacket.Timestamp() + time.Since(oh.lastPacket.StartTime())
 	if oh.lastDuration != 0 {
-		oh.offsetUp /= oh.lastDuration
-		oh.offsetUp *= oh.lastDuration
+		target = target / oh.lastDuration * oh.lastDuration
 	}
-	oh.offsetUp = time.Duration(oh.offsetUp.Milliseconds()/10*10) * time.Millisecond //nolint: mnd
-	oh.lastPacket.Release()
-	oh.lastPacket = nil
+	target = time.Duration(target.Milliseconds()/10*10) * time.Millisecond //nolint: mnd
+	return target, true
+}
+
+// resumeAt re-anchors the track so its next (first) packet continues the
+// timeline exactly at target, then drops the stale one-behind packet. Applied
+// with the SAME target to both tracks after a reconnect, so the gap is bridged
+// identically for audio and video and they cannot drift apart — the reconnect
+// stays invisible to consumers (continuous, monotonic timeline).
+func (oh *offsetHandler) resumeAt(target time.Duration) {
+	oh.offsetUp = target
+	oh.releaseLastPacket()
 }
 
 // CheckEmptyPacket caches the first packet of the track (one-behind) and
-// normalizes its timestamp. epoch is the wall-clock StartTime of the first
-// packet seen across ALL tracks of the source; the first packet of THIS track
-// is placed at its wall-clock distance from that epoch instead of at 0, so a
-// track that starts later than the other (e.g. audio that comes up seconds or
-// minutes after video) lands aligned on the shared timeline rather than
-// diverging by its start delay. Later cache refills (after RecalcForGap on a
-// reconnect) keep the offsetUp those handlers computed.
-func (oh *offsetHandler) CheckEmptyPacket(pkt gomedia.Packet, epoch time.Time) bool {
+// normalizes its timestamp against the current offsets. After resumeAt set
+// offsetUp to a shared target, the first packet lands exactly at that target,
+// so audio and video re-anchored together stay aligned.
+func (oh *offsetHandler) CheckEmptyPacket(pkt gomedia.Packet) bool {
 	if oh.lastPacket == nil {
 		oh.offsetDown = pkt.Timestamp()
-		if !oh.anchored {
-			if d := pkt.StartTime().Sub(epoch); d > 0 && !epoch.IsZero() {
-				oh.offsetUp = time.Duration(d.Milliseconds()/10*10) * time.Millisecond //nolint: mnd
-			}
-			oh.anchored = true
-		}
 		pkt.SetTimestamp(pkt.Timestamp() + oh.offsetUp - oh.offsetDown)
 		oh.lastPacket = pkt
 		return true
