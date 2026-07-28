@@ -127,6 +127,24 @@ int rga_nv12_to_rgb(NativeRkmppDecoder *dec,
     return 0;
 }
 
+int check_rkmpp_native(void)
+{
+    MPP_RET ret;
+    MppCtx ctx = NULL;
+    MppApi *mpi = NULL;
+
+    ret = mpp_create(&ctx, &mpi);
+    if (ret)
+        return -1;
+
+    ret = mpp_init(ctx, MPP_CTX_DEC, MPP_VIDEO_CodingAVC);
+    mpp_destroy(ctx);
+    if (ret)
+        return -2;
+
+    return 0;
+}
+
 int init_rkmpp_decoder_native(NativeRkmppDecoder *dec,
                               int codec_id,
                               int width,

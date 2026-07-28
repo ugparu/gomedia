@@ -54,6 +54,14 @@ typedef struct {
 } NativeRkmppDecoder;
 
 /*
+ * Probe for a usable MPP decoder: creates an H.264 decoding context and
+ * destroys it immediately.
+ *
+ * Returns 0 when MPP is usable, negative otherwise.
+ */
+int check_rkmpp_native(void);
+
+/*
  * Initialize RKMPP decoder.
  *
  * codec_id:

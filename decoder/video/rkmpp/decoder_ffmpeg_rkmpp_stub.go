@@ -14,6 +14,11 @@ var errRKMPPNotSupported = errors.New("rkmpp decoder is only supported on linux/
 
 type ffmpegRKMPPDecoder struct{}
 
+// CheckRKMPP always reports false outside linux/arm64.
+func CheckRKMPP() bool {
+	return false
+}
+
 // NewFFmpegRKMPPDecoder returns a dummy decoder implementation for non-arm64 builds.
 // It satisfies decoder.InnerVideoDecoder so packages can compile on other architectures.
 func NewFFmpegRKMPPDecoder() decoder.InnerVideoDecoder { //nolint:revive // exported API kept for compatibility

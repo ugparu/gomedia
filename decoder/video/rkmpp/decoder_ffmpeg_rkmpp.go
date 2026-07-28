@@ -24,6 +24,13 @@ type ffmpegRKMPPDecoder struct {
 	pool        *rgb.FramePool
 }
 
+// CheckRKMPP reports whether the Rockchip VPU can be used for decoding: it
+// opens and closes a throwaway MPP decoding context, so a false result covers
+// both "no MPP device" and "device present but not usable by this process".
+func CheckRKMPP() bool {
+	return C.check_rkmpp_native() == 0
+}
+
 func NewFFmpegRKMPPDecoder() decoder.InnerVideoDecoder {
 	return &ffmpegRKMPPDecoder{
 		dcd:         new(C.NativeRkmppDecoder),
