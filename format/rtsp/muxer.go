@@ -30,12 +30,18 @@ type Muxer struct {
 	client     *client
 	medias     []sdp.Media
 	videoMuxer rtpVideoMuxer
+	audioMuxer rtpAudioMuxer
 	log        logger.Logger
 }
 
 // rtpVideoMuxer is the subset of methods required from an RTP video muxer.
 type rtpVideoMuxer interface {
 	WritePacket(gomedia.VideoPacket) error
+}
+
+// rtpAudioMuxer is the subset of methods required from an RTP audio muxer.
+type rtpAudioMuxer interface {
+	WritePacket(gomedia.AudioPacket) error
 }
 
 // NewMuxer creates a new RTSP muxer for the given URL.
@@ -85,8 +91,11 @@ func (m *Muxer) Mux(streams gomedia.CodecParametersPair) (err error) {
 			return err
 		}
 
-		// Only video is supported for now.
-		if media.AVType == video && streams.VideoCodecParameters != nil {
+		switch media.AVType {
+		case video:
+			if streams.VideoCodecParameters == nil {
+				break
+			}
 			switch v := streams.VideoCodecParameters.(type) {
 			case *h264.CodecParameters:
 				m.log.Debugf(m, "Creating H264 RTP muxer on channel %d", ch)
@@ -96,6 +105,23 @@ func (m *Muxer) Mux(streams gomedia.CodecParametersPair) (err error) {
 				m.videoMuxer = rtp.NewH265Muxer(m.client.conn, media, uint8(ch), v, 0, m.log) //nolint:gosec
 			default:
 				return fmt.Errorf("RTP muxer for video codec %T not implemented", streams.VideoCodecParameters)
+			}
+		case audio:
+			if streams.AudioCodecParameters == nil {
+				break
+			}
+			switch a := streams.AudioCodecParameters.(type) {
+			case *aac.CodecParameters:
+				m.log.Debugf(m, "Creating AAC RTP muxer on channel %d", ch)
+				m.audioMuxer = rtp.NewAACMuxer(m.client.conn, media, uint8(ch), a, m.log) //nolint:gosec
+			case *opus.CodecParameters:
+				m.log.Debugf(m, "Creating Opus RTP muxer on channel %d", ch)
+				m.audioMuxer = rtp.NewOpusMuxer(m.client.conn, media, uint8(ch), m.log) //nolint:gosec
+			case *pcm.CodecParameters:
+				m.log.Debugf(m, "Creating PCM RTP muxer on channel %d codec=%v", ch, a.Type())
+				m.audioMuxer = rtp.NewPCMMuxer(m.client.conn, media, uint8(ch), m.log) //nolint:gosec
+			default:
+				return fmt.Errorf("RTP muxer for audio codec %T not implemented", streams.AudioCodecParameters)
 			}
 		}
 
@@ -112,20 +138,29 @@ func (m *Muxer) Mux(streams gomedia.CodecParametersPair) (err error) {
 
 // WritePacket writes a packet using the underlying RTP muxer.
 func (m *Muxer) WritePacket(pkt gomedia.Packet) error {
-	if m.videoMuxer == nil {
-		return fmt.Errorf("%w: RTP muxer not initialized", ErrRTPMuxerNotImplemented)
+	switch p := pkt.(type) {
+	case gomedia.VideoPacket:
+		if m.videoMuxer == nil {
+			return fmt.Errorf("%w: video RTP muxer not initialized", ErrRTPMuxerNotImplemented)
+		}
+		if err := m.client.conn.SetWriteDeadline(time.Now().Add(readWriteTimeout)); err != nil {
+			return err
+		}
+		return m.videoMuxer.WritePacket(p)
+	case gomedia.AudioPacket:
+		if m.audioMuxer == nil {
+			return fmt.Errorf("%w: audio RTP muxer not initialized", ErrRTPMuxerNotImplemented)
+		}
+		if err := m.client.conn.SetWriteDeadline(time.Now().Add(readWriteTimeout)); err != nil {
+			return err
+		}
+		return m.audioMuxer.WritePacket(p)
+	default:
+		if m.videoMuxer == nil && m.audioMuxer == nil {
+			return fmt.Errorf("%w: RTP muxer not initialized", ErrRTPMuxerNotImplemented)
+		}
+		return fmt.Errorf("rtsp: unsupported packet type %T", pkt)
 	}
-
-	vp, ok := pkt.(gomedia.VideoPacket)
-	if !ok {
-		return fmt.Errorf("rtsp: only video packets are supported for now, got %T", pkt)
-	}
-
-	if err := m.client.conn.SetWriteDeadline(time.Now().Add(readWriteTimeout)); err != nil {
-		return err
-	}
-
-	return m.videoMuxer.WritePacket(vp)
 }
 
 // Close closes the RTSP connection and sends TEARDOWN.
@@ -249,6 +284,7 @@ func audioCodecToSDPMedia(params gomedia.AudioCodecParameters, trackID int) (sdp
 		m.IndexLength = 3
 	case *opus.CodecParameters:
 		m.Type = gomedia.OPUS
+		m.PayloadType = 111 //nolint:mnd // dynamic PT commonly used for Opus (RFC 7587)
 		m.TimeScale = 48000
 		m.ChannelCount = int(p.Channels())
 	case *pcm.CodecParameters:

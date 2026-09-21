@@ -1710,3 +1710,110 @@ func TestWithRingBuffer_Option(t *testing.T) {
 	// Release should not panic
 	pkt.Release()
 }
+
+// ===========================================================================
+// AAC muxer tests
+// ===========================================================================
+
+func TestAACMuxer_WritePacket_RoundTrip(t *testing.T) {
+	config := loadAACConfig(t)
+	codec, err := aac.NewCodecDataFromMPEG4AudioConfigBytes(config)
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	media := sdp.Media{
+		TimeScale:   int(codec.SampleRate()),
+		PayloadType: 97,
+		Config:      config,
+		SizeLength:  13,
+		IndexLength: 3,
+	}
+	muxer := NewAACMuxer(&buf, media, 0, &codec, nil)
+
+	frameData := []byte{0xAA, 0xBB, 0xCC, 0xDD, 0xEE}
+	pkt := aac.NewPacket(frameData, 100*time.Millisecond, "", time.Now(), &codec, 0)
+	require.NoError(t, muxer.WritePacket(pkt))
+
+	output := buf.Bytes()
+	require.True(t, len(output) > rtspHeaderSize+rtpHeaderSize)
+	require.Equal(t, byte(0x24), output[0])
+	require.Equal(t, byte(0), output[1])
+	require.Equal(t, byte(0x80), output[4]&0xC0)
+	require.Equal(t, byte(0x80|97), output[5]) // marker + PT
+
+	rdr := bytes.NewReader(output)
+	dmx := NewAACDemuxer(rdr, media, 0)
+	_, err = dmx.Demux()
+	require.NoError(t, err)
+
+	outPkt, err := dmx.ReadPacket()
+	require.NoError(t, err)
+	require.Equal(t, frameData, outPkt.Data())
+	require.Equal(t, 100*time.Millisecond, outPkt.Timestamp())
+}
+
+func TestAACMuxer_WritePacket_StripsADTS(t *testing.T) {
+	config := loadAACConfig(t)
+	codec, err := aac.NewCodecDataFromMPEG4AudioConfigBytes(config)
+	require.NoError(t, err)
+
+	raw := []byte{0x11, 0x22, 0x33, 0x44}
+	header := make([]byte, aac.ADTSHeaderLength)
+	require.NoError(t, aac.FillADTSHeader(header, codec.Config, 1024, len(raw)))
+	adtsFrame := append(header, raw...)
+
+	var buf bytes.Buffer
+	media := sdp.Media{TimeScale: int(codec.SampleRate()), PayloadType: 97, Config: config}
+	muxer := NewAACMuxer(&buf, media, 2, &codec, nil)
+	pkt := aac.NewPacket(adtsFrame, time.Second, "", time.Now(), &codec, 0)
+	require.NoError(t, muxer.WritePacket(pkt))
+
+	rdr := bytes.NewReader(buf.Bytes())
+	dmx := NewAACDemuxer(rdr, media, 0)
+	_, err = dmx.Demux()
+	require.NoError(t, err)
+
+	outPkt, err := dmx.ReadPacket()
+	require.NoError(t, err)
+	require.Equal(t, raw, outPkt.Data())
+}
+
+func TestOpusMuxer_WritePacket_RoundTrip(t *testing.T) {
+	cp := opus.NewCodecParameters(0, gomedia.ChMono, 48000)
+	var buf bytes.Buffer
+	media := sdp.Media{TimeScale: 48000, PayloadType: 111, ChannelCount: 1}
+	muxer := NewOpusMuxer(&buf, media, 0, nil)
+
+	payload := []byte{0x0C, 0xAA, 0xBB}
+	pkt := opus.NewPacket(payload, 20*time.Millisecond, "", time.Now(), cp, 20*time.Millisecond)
+	require.NoError(t, muxer.WritePacket(pkt))
+
+	rdr := bytes.NewReader(buf.Bytes())
+	dmx := NewOPUSDemuxer(rdr, media, 0)
+	_, err := dmx.Demux()
+	require.NoError(t, err)
+
+	outPkt, err := dmx.ReadPacket()
+	require.NoError(t, err)
+	require.Equal(t, payload, outPkt.Data())
+}
+
+func TestPCMMuxer_WritePacket_RoundTrip_Alaw(t *testing.T) {
+	cp := pcm.NewCodecParameters(0, gomedia.PCMAlaw, 1, 8000)
+	var buf bytes.Buffer
+	media := sdp.Media{TimeScale: 8000, PayloadType: 8, ChannelCount: 1}
+	muxer := NewPCMMuxer(&buf, media, 0, nil)
+
+	payload := []byte{0xD5, 0xD5, 0xD5, 0xD5}
+	pkt := pcm.NewPacket(payload, 500*time.Microsecond, "", time.Now(), cp, 500*time.Microsecond)
+	require.NoError(t, muxer.WritePacket(pkt))
+
+	rdr := bytes.NewReader(buf.Bytes())
+	dmx := NewPCMDemuxer(rdr, media, 0, gomedia.PCMAlaw)
+	_, err := dmx.Demux()
+	require.NoError(t, err)
+
+	outPkt, err := dmx.ReadPacket()
+	require.NoError(t, err)
+	require.Equal(t, payload, outPkt.Data())
+}
