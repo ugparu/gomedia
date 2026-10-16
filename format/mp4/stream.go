@@ -28,6 +28,11 @@ type Stream struct {
 
 	lastPacket gomedia.Packet // Last processed packet in the stream.
 
+	// avgFrameDuration is the learned nominal video frame period used to snap
+	// jittery RTP timestamp deltas into a stable stts timeline. Audio tracks
+	// leave it at 0 and keep raw gaps.
+	avgFrameDuration time.Duration
+
 	timeScale int64 // Time scale for the stream.
 	duration  int64 // Duration of the stream.
 
@@ -444,6 +449,80 @@ func (s *Stream) readPacket(tm time.Duration, url string) (pkt gomedia.Packet, e
 // entire outage instead of the actual recorded content.
 const maxSampleDuration = 5 * time.Second
 
+// Bounds for learning the nominal video frame period from observed gaps.
+const (
+	minPlausibleFrame = 5 * time.Millisecond
+	maxPlausibleFrame = 100 * time.Millisecond
+)
+
+// smoothSampleDuration snaps a raw timestamp gap onto the nominal frame grid.
+// Gaps within 1.5× nominal (typical RTP jitter / 20+60ms pairs around 40ms) become
+// one frame; larger gaps round to the nearest integer multiple so a dropped
+// camera frame is a clean 2× hold instead of a tempo stutter in stts.
+func smoothSampleDuration(raw, nominal time.Duration) time.Duration {
+	if nominal <= 0 {
+		if raw <= 0 {
+			return time.Millisecond
+		}
+		return raw
+	}
+	if raw <= 0 {
+		return nominal
+	}
+	if raw <= nominal+nominal/2 { //nolint:mnd // ≤ 1.5× nominal → single frame
+		return nominal
+	}
+	n := (raw + nominal/2) / nominal //nolint:mnd
+	if n < 1 {
+		n = 1
+	}
+	out := n * nominal
+	if out > maxSampleDuration {
+		return maxSampleDuration
+	}
+	return out
+}
+
+func (s *Stream) videoFPS() uint {
+	if s.CodecParameters == nil {
+		return 0
+	}
+	if v, ok := s.CodecParameters.(gomedia.VideoCodecParameters); ok {
+		return v.FPS()
+	}
+	return 0
+}
+
+// observeFrameDuration updates the learned nominal video frame period from a
+// raw gap. Only near-nominal observations train the average so multi-frame
+// gaps and skip-frame jitter cannot pull it off the real FPS.
+func (s *Stream) observeFrameDuration(raw time.Duration) {
+	if raw < minPlausibleFrame || raw > maxPlausibleFrame {
+		if s.avgFrameDuration == 0 {
+			if fps := s.videoFPS(); fps > 0 {
+				s.avgFrameDuration = time.Second / time.Duration(fps)
+			}
+		}
+		return
+	}
+	if s.avgFrameDuration == 0 {
+		if fps := s.videoFPS(); fps > 0 {
+			s.avgFrameDuration = time.Second / time.Duration(fps)
+		} else {
+			s.avgFrameDuration = raw
+			return
+		}
+	}
+	diff := raw - s.avgFrameDuration
+	if diff < 0 {
+		diff = -diff
+	}
+	if diff*10 > s.avgFrameDuration { //nolint:mnd // ignore samples more than 10% off
+		return
+	}
+	s.avgFrameDuration = (s.avgFrameDuration*7 + raw) / 8 //nolint:mnd // slow EMA
+}
+
 // writePacket records a pending write for the previous packet and updates sample tables.
 // No I/O is performed; actual writing is deferred to Flush/WriteTrailer.
 func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
@@ -459,10 +538,15 @@ func (s *Stream) writePacket(nPkt gomedia.Packet) (err error) {
 	switch {
 	case dur <= 0:
 		logger.Default.Errorf(s, "mp4: non-monotonic packet timestamp (delta %v), clamping sample duration to avoid stts corruption", dur)
-		dur = time.Millisecond
 	case dur > maxSampleDuration:
 		logger.Default.Errorf(s, "mp4: implausible sample duration %v (likely a timestamp gap across a source reconnect), clamping to %v", dur, maxSampleDuration)
 		dur = maxSampleDuration
+	}
+	if _, isVideo := s.lastPacket.(gomedia.VideoPacket); isVideo {
+		s.observeFrameDuration(dur)
+		dur = smoothSampleDuration(dur, s.avgFrameDuration)
+	} else if dur <= 0 {
+		dur = time.Millisecond
 	}
 	s.lastPacket.SetDuration(dur)
 

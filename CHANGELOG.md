@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [1.0.21] - 2026-10-16
+
+### Fixed
+
+- MP4 muxer snaps jittery video timestamp gaps onto the nominal frame grid
+  before writing stts, so smart-codec RTP wobble (20/60ms pairs around 40ms)
+  no longer produces tempo jumps on archive playback. Dropped frames become a
+  clean 2× hold; reconnect/outage clamps are unchanged.
+
 ## [1.0.20] - 2026-10-14
 
 ### Fixed

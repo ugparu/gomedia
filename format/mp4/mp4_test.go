@@ -898,6 +898,87 @@ func TestMuxer_SampleTable_SttsAndStsz(t *testing.T) {
 	}
 }
 
+// smoothSampleDuration — RTP jitter → stable stts
+
+func TestSmoothSampleDuration(t *testing.T) {
+	t.Parallel()
+	nominal := 40 * time.Millisecond
+
+	assert.Equal(t, nominal, smoothSampleDuration(20*time.Millisecond, nominal))
+	assert.Equal(t, nominal, smoothSampleDuration(40*time.Millisecond, nominal))
+	assert.Equal(t, nominal, smoothSampleDuration(60*time.Millisecond, nominal))
+	assert.Equal(t, 2*nominal, smoothSampleDuration(80*time.Millisecond, nominal))
+	assert.Equal(t, nominal, smoothSampleDuration(0, nominal))
+	assert.Equal(t, nominal, smoothSampleDuration(-time.Millisecond, nominal))
+	assert.Equal(t, time.Millisecond, smoothSampleDuration(0, 0))
+	assert.Equal(t, 50*time.Millisecond, smoothSampleDuration(50*time.Millisecond, 0))
+}
+
+// TestMuxer_WritePacket_SmoothsJitteryVideoTimestamps verifies that the
+// 20/60ms RTP jitter pattern from smart-codec cameras becomes a flat 40ms
+// stts timeline instead of a tempo stutter on playback.
+func TestMuxer_WritePacket_SmoothsJitteryVideoTimestamps(t *testing.T) {
+	t.Parallel()
+	pair, videoCp, _ := loadTestCodecPair(t)
+	pair.AudioCodecParameters = nil
+
+	f, err := os.CreateTemp("", "gomedia_test_*.mp4")
+	require.NoError(t, err)
+	path := f.Name()
+	t.Cleanup(func() { os.Remove(path) })
+
+	mux := NewMuxer(f, WithBatchedDump())
+	require.NoError(t, mux.Mux(pair))
+
+	// Seed from the SPS FPS (test fixture reports 23) so gaps line up with the
+	// muxer's nominal grid the way a real camera stream would.
+	require.Equal(t, uint(23), videoCp.FPS())
+	nominal := time.Second / time.Duration(videoCp.FPS())
+
+	base := time.Now()
+	// Archive-like jitter around nominal: 1.0×, 1.5×, 0.5×, 1.0×, 2.0×, 1.0×.
+	timestamps := []time.Duration{
+		0,
+		nominal,
+		nominal + (nominal*3)/2, // +1.5×
+		nominal + (nominal*3)/2 + nominal/2, // +0.5×
+		nominal*4,               // +1.0×
+		nominal*6,               // +2.0× dropped frame
+		nominal*7,               // +1.0×
+	}
+	for _, ts := range timestamps {
+		pkt := h264.NewPacket(true, ts, base, []byte{0x01}, "test", videoCp)
+		require.NoError(t, mux.WritePacket(pkt))
+	}
+	require.NoError(t, mux.WriteTrailer())
+	require.NoError(t, f.Close())
+
+	moov := demuxAndGetMoov(t, path)
+	require.Len(t, moov.Tracks, 1)
+
+	timeScale := int64(moov.Tracks[0].Media.Header.TimeScale)
+	nominalTicks := timeToTS(nominal, timeScale)
+	doubleTicks := timeToTS(2*nominal, timeScale)
+
+	var durations []int64
+	for _, entry := range moov.Tracks[0].Media.Info.Sample.TimeToSample.Entries {
+		for i := uint32(0); i < entry.Count; i++ {
+			durations = append(durations, int64(entry.Duration))
+		}
+	}
+	// WriteTrailer flushes the final sample with a synthetic self-gap.
+	require.Len(t, durations, len(timestamps))
+
+	for i, d := range durations {
+		switch i {
+		case 4: // the 2× hole snaps to two frames
+			assert.Equalf(t, doubleTicks, d, "sample %d: expected 2× frame for dropped-frame gap", i)
+		default:
+			assert.Equalf(t, nominalTicks, d, "sample %d: expected smoothed single-frame duration", i)
+		}
+	}
+}
+
 // writePacket — anomalous timestamp gaps (source reconnect / clock jump)
 
 // TestMuxer_WritePacket_ClampsImplausibleAndNonMonotonicDurations reproduces
