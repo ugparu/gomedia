@@ -907,6 +907,10 @@ func TestSmoothSampleDuration(t *testing.T) {
 	assert.Equal(t, nominal, smoothSampleDuration(20*time.Millisecond, nominal))
 	assert.Equal(t, nominal, smoothSampleDuration(40*time.Millisecond, nominal))
 	assert.Equal(t, nominal, smoothSampleDuration(60*time.Millisecond, nominal))
+	// Trassir / smart-codec halves land at 61–65ms — must stay one frame, not 2×.
+	assert.Equal(t, nominal, smoothSampleDuration(61*time.Millisecond, nominal))
+	assert.Equal(t, nominal, smoothSampleDuration(65*time.Millisecond, nominal))
+	assert.Equal(t, nominal, smoothSampleDuration(79*time.Millisecond, nominal))
 	assert.Equal(t, 2*nominal, smoothSampleDuration(80*time.Millisecond, nominal))
 	assert.Equal(t, nominal, smoothSampleDuration(0, nominal))
 	assert.Equal(t, nominal, smoothSampleDuration(-time.Millisecond, nominal))
@@ -915,8 +919,8 @@ func TestSmoothSampleDuration(t *testing.T) {
 }
 
 // TestMuxer_WritePacket_SmoothsJitteryVideoTimestamps verifies that the
-// 20/60ms RTP jitter pattern from smart-codec cameras becomes a flat 40ms
-// stts timeline instead of a tempo stutter on playback.
+// 20/60ms (and ~19/61ms) RTP jitter pattern from smart-codec cameras becomes
+// a flat nominal stts timeline instead of a tempo stutter / inflated duration.
 func TestMuxer_WritePacket_SmoothsJitteryVideoTimestamps(t *testing.T) {
 	t.Parallel()
 	pair, videoCp, _ := loadTestCodecPair(t)

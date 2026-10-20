@@ -456,9 +456,12 @@ const (
 )
 
 // smoothSampleDuration snaps a raw timestamp gap onto the nominal frame grid.
-// Gaps within 1.5× nominal (typical RTP jitter / 20+60ms pairs around 40ms) become
-// one frame; larger gaps round to the nearest integer multiple so a dropped
-// camera frame is a clean 2× hold instead of a tempo stutter in stts.
+// Gaps below 2× nominal (smart-codec RTP jitter: 20+60ms and the common
+// 19+61..65ms pairs around a 40ms frame) collapse to one frame. A hard 1.5×
+// ceiling mis-classified those ~61ms halves as dropped frames and wrote 40/80
+// stts, inflating archive duration ~1.45× while wall-clock/DB time stayed
+// correct. Gaps at/above 2× round to the nearest integer multiple so a real
+// dropped camera frame is still a clean 2× hold instead of a tempo stutter.
 func smoothSampleDuration(raw, nominal time.Duration) time.Duration {
 	if nominal <= 0 {
 		if raw <= 0 {
@@ -469,7 +472,7 @@ func smoothSampleDuration(raw, nominal time.Duration) time.Duration {
 	if raw <= 0 {
 		return nominal
 	}
-	if raw <= nominal+nominal/2 { //nolint:mnd // ≤ 1.5× nominal → single frame
+	if raw < 2*nominal { //nolint:mnd // < 2× nominal → single frame (jitter, not a drop)
 		return nominal
 	}
 	n := (raw + nominal/2) / nominal //nolint:mnd
