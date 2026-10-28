@@ -510,6 +510,43 @@ func TestRemoveSource_FlushesActiveSegment(t *testing.T) {
 	assert.Greater(t, info.Size, 0)
 }
 
+// TestStableStreamIndex_SurvivesRemoveReadd reproduces the archive swap bug:
+// main (idx 0) times out and is removed while sub (idx 1) keeps recording;
+// compacting the sources slice used to renumber sub → 0, so after main
+// recovered it wrote 1_*.mp4 and sub owned 0_*.mp4.
+func TestStableStreamIndex_SurvivesRemoveReadd(t *testing.T) {
+	dest := t.TempDir()
+	mainURL := "rtsp://cam/main"
+	subURL := "rtsp://cam/sub"
+
+	s := New(dest+"/", 5*time.Second, gomedia.Always, 8)
+	seg := s.(*segmenter)
+
+	seg.addSource(mainURL)
+	seg.addSource(subURL)
+	assert.Equal(t, 0, seg.getSourceIndex(mainURL))
+	assert.Equal(t, 1, seg.getSourceIndex(subURL))
+
+	_ = seg.removeSource(mainURL)
+	assert.Equal(t, -1, slicesIndex(seg.sources, mainURL))
+	assert.Equal(t, 0, seg.getSourceIndex(mainURL), "sticky index must survive remove")
+	assert.Equal(t, 1, seg.getSourceIndex(subURL), "sub must keep idx 1 after main removal")
+
+	seg.addSource(mainURL)
+	assert.Equal(t, 0, seg.getSourceIndex(mainURL))
+	assert.Equal(t, 1, seg.getSourceIndex(subURL))
+	assert.Equal(t, []string{subURL, mainURL}, seg.sources)
+}
+
+func slicesIndex(ss []string, v string) int {
+	for i, s := range ss {
+		if s == v {
+			return i
+		}
+	}
+	return -1
+}
+
 func TestRemoveSource_NonExistent(t *testing.T) {
 	dest := t.TempDir()
 

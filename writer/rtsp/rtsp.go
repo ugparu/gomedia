@@ -127,6 +127,12 @@ func (w *rtspWriter) handleVideoPacket(vp gomedia.VideoPacket) error {
 	w.codecPar.VideoCodecParameters = vp.CodecParameters()
 
 	if !w.started {
+		// MediaMTX / players decode garbage (green frames) if the publish
+		// session opens on a non-IDR. Drop until the first keyframe after
+		// start or after resetMuxer (reconnect / AddSource).
+		if !vp.IsKeyFrame() {
+			return nil
+		}
 		if err := w.initMuxer(); err != nil {
 			return err
 		}

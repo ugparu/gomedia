@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [1.0.23] - 2026-10-28
+
+### Fixed
+
+- Segmenter keeps a sticky PathFunc stream index per source URL across
+  RemoveSource/AddSource, so offline timeout of the main stream can no longer
+  renumber the sub stream onto `0_*.mp4` (and hand `1_*.mp4` to the recovered
+  main).
+- RTSP publisher waits for a video keyframe before announcing/writing, so
+  MediaMTX republish after start/reconnect does not open mid-GOP (green frames).
+
 ## [1.0.21] - 2026-10-16
 
 ### Fixed

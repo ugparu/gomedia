@@ -279,9 +279,16 @@ type segmenter struct {
 	ringBufferByteCap int
 	muxerFlushByteCap int
 
-	sources   []string
-	streams   map[string]*streamState
-	streamsMu sync.RWMutex
+	// sources is the set of currently registered URLs (order is insertion
+	// among the currently-active ones only). Filename stream indices come
+	// from sourceIndex instead, so a mid-session RemoveSource of stream 0
+	// cannot renumber stream 1 → 0_*.mp4 (and then hand 1_*.mp4 to the
+	// recovered main after re-add).
+	sources     []string
+	sourceIndex map[string]int
+	nextIndex   int
+	streams     map[string]*streamState
+	streamsMu   sync.RWMutex
 }
 
 func (s *segmenter) hasSource(url string) bool {
@@ -289,29 +296,34 @@ func (s *segmenter) hasSource(url string) bool {
 }
 
 func (s *segmenter) getSourceIndex(url string) int {
-	for i, src := range s.sources {
-		if src == url {
-			return i
-		}
+	if idx, ok := s.sourceIndex[url]; ok {
+		return idx
 	}
 	return -1
 }
 
 // addSource registers a new source; the underlying streamState and file are
 // only materialized once the first packet arrives and codec parameters are known.
+// The PathFunc stream index assigned on first add is sticky across later
+// remove/re-add of the same URL so archive filenames stay tied to the URL.
 func (s *segmenter) addSource(url string) {
 	if s.hasSource(url) {
 		s.log.Infof(s, "Source %s already exists, skipping", url)
 		return
 	}
 
+	if _, ok := s.sourceIndex[url]; !ok {
+		s.sourceIndex[url] = s.nextIndex
+		s.nextIndex++
+	}
 	s.sources = append(s.sources, url)
-	s.log.Infof(s, "Added new source %s", url)
+	s.log.Infof(s, "Added new source %s (streamIdx=%d)", url, s.sourceIndex[url])
 }
 
 // removeSource returns any FileInfo that closeSegment produced; the caller
 // must forward it on outInfoCh outside of streamsMu to avoid holding the
 // lock across a potentially blocking channel send.
+// The URL's PathFunc stream index is retained so a later addSource reuses it.
 func (s *segmenter) removeSource(url string) *gomedia.FileInfo {
 	var info *gomedia.FileInfo
 	if stream, exists := s.streams[url]; exists {
@@ -349,6 +361,7 @@ func New(dest string, segSize time.Duration, recordMode gomedia.RecordMode, chan
 		rmSrcCh:           make(chan string, chanSize),
 		addSrcCh:          make(chan string, chanSize),
 		sources:           []string{},
+		sourceIndex:       make(map[string]int),
 		streams:           make(map[string]*streamState),
 		streamsMu:         sync.RWMutex{},
 		pathFunc: func(startTime time.Time, streamIdx int) (string, string) {
