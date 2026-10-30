@@ -918,6 +918,43 @@ func TestSmoothSampleDuration(t *testing.T) {
 	assert.Equal(t, 50*time.Millisecond, smoothSampleDuration(50*time.Millisecond, 0))
 }
 
+func TestMedianDuration(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, time.Duration(0), medianDuration(nil))
+	assert.Equal(t, 40*time.Millisecond, medianDuration([]time.Duration{40 * time.Millisecond}))
+	assert.Equal(t, 67*time.Millisecond, medianDuration([]time.Duration{
+		33 * time.Millisecond, 67 * time.Millisecond, 67 * time.Millisecond,
+		67 * time.Millisecond, 33 * time.Millisecond,
+	}))
+}
+
+// 15 fps Trassir sub with no VUI timing: a half-period first gap must not lock
+// the stts grid at ~33ms (that yields ~6s archive for ~11s wall / 160 frames).
+func TestObserveFrameDuration_NoFPS_RecoversFromHalfPeriodSeed(t *testing.T) {
+	t.Parallel()
+	s := &Stream{} // CodecParameters nil → FPS 0
+
+	half := 34 * time.Millisecond
+	full := 67 * time.Millisecond
+
+	// Unlucky boot: first gap is half-period, then real 15 fps gaps.
+	s.observeFrameDuration(half)
+	for i := 0; i < frameDurBootSize-1; i++ {
+		s.observeFrameDuration(full)
+	}
+	require.Equal(t, full, s.avgFrameDuration, "median boot should prefer the real period")
+
+	// Even if boot somehow locked on half, repeated 2× gaps must promote.
+	s2 := &Stream{}
+	s2.avgFrameDuration = half
+	for i := 0; i < frameDurDoublePromoteAfter; i++ {
+		s2.observeFrameDuration(full)
+	}
+	require.Equal(t, full, s2.avgFrameDuration, "double-streak promote should escape half-period seed")
+	// After promote, smooth must keep real gaps as one frame (not snap to half).
+	assert.Equal(t, full, smoothSampleDuration(full, s2.avgFrameDuration))
+}
+
 // TestMuxer_WritePacket_SmoothsJitteryVideoTimestamps verifies that the
 // 20/60ms (and ~19/61ms) RTP jitter pattern from smart-codec cameras becomes
 // a flat nominal stts timeline instead of a tempo stutter / inflated duration.

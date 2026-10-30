@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [1.0.25] - 2026-10-30
+
+### Fixed
+
+- MP4 muxer no longer locks a half-period frame grid when SPS/VUI has no
+  timing info: boot from the median of the first gaps, and promote the
+  nominal period if several consecutive gaps look like 2×avg. Stops 15 fps
+  Trassir subs from writing ~6 s archive segments for ~11 s wall (160 frames
+  at ~33 ms stts instead of ~67 ms).
+
 ## [1.0.24] - 2026-10-30
 
 ### Fixed

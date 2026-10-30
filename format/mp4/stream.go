@@ -33,6 +33,16 @@ type Stream struct {
 	// leave it at 0 and keep raw gaps.
 	avgFrameDuration time.Duration
 
+	// frameDurBoot collects the first raw gaps when SPS/VUI FPS is unknown so
+	// the nominal period is the median of several samples, not a single
+	// half-frame RTP delta that can appear at segment start.
+	frameDurBoot  [frameDurBootSize]time.Duration
+	frameDurBootN int
+
+	// frameDurDoubleStreak counts consecutive raw gaps that look like 2× the
+	// current nominal. Used to escape a half-period seed when FPS is unknown.
+	frameDurDoubleStreak int
+
 	timeScale int64 // Time scale for the stream.
 	duration  int64 // Duration of the stream.
 
@@ -453,6 +463,14 @@ const maxSampleDuration = 5 * time.Second
 const (
 	minPlausibleFrame = 5 * time.Millisecond
 	maxPlausibleFrame = 100 * time.Millisecond
+
+	// frameDurBootSize is how many raw gaps to median before locking a nominal
+	// period when the bitstream has no VUI timing (FPS=0).
+	frameDurBootSize = 5
+
+	// frameDurDoublePromoteAfter escapes a half-period seed: this many
+	// consecutive gaps near 2×avg (with unknown SPS FPS) re-base avg on raw.
+	frameDurDoublePromoteAfter = 3
 )
 
 // smoothSampleDuration snaps a raw timestamp gap onto the nominal frame grid.
@@ -496,9 +514,29 @@ func (s *Stream) videoFPS() uint {
 	return 0
 }
 
+// medianDuration returns the median of samples (copied so the caller's slice
+// is not reordered).
+func medianDuration(samples []time.Duration) time.Duration {
+	if len(samples) == 0 {
+		return 0
+	}
+	sorted := append([]time.Duration(nil), samples...)
+	for i := 1; i < len(sorted); i++ {
+		for j := i; j > 0 && sorted[j] < sorted[j-1]; j-- {
+			sorted[j], sorted[j-1] = sorted[j-1], sorted[j]
+		}
+	}
+	return sorted[len(sorted)/2]
+}
+
 // observeFrameDuration updates the learned nominal video frame period from a
 // raw gap. Only near-nominal observations train the average so multi-frame
 // gaps and skip-frame jitter cannot pull it off the real FPS.
+//
+// When SPS/VUI FPS is unknown, the first gap alone is unsafe: a half-period
+// RTP delta at segment start (common on 15 fps Trassir subs) used to lock the
+// nominal at ~33 ms, after which real ~67 ms gaps sat just under 2×nominal and
+// smoothSampleDuration collapsed them → archive duration ~½ wall (~6 s).
 func (s *Stream) observeFrameDuration(raw time.Duration) {
 	if raw < minPlausibleFrame || raw > maxPlausibleFrame {
 		if s.avgFrameDuration == 0 {
@@ -512,7 +550,14 @@ func (s *Stream) observeFrameDuration(raw time.Duration) {
 		if fps := s.videoFPS(); fps > 0 {
 			s.avgFrameDuration = time.Second / time.Duration(fps)
 		} else {
-			s.avgFrameDuration = raw
+			if s.frameDurBootN < frameDurBootSize {
+				s.frameDurBoot[s.frameDurBootN] = raw
+				s.frameDurBootN++
+			}
+			if s.frameDurBootN < frameDurBootSize {
+				return
+			}
+			s.avgFrameDuration = medianDuration(s.frameDurBoot[:s.frameDurBootN])
 			return
 		}
 	}
@@ -521,8 +566,27 @@ func (s *Stream) observeFrameDuration(raw time.Duration) {
 		diff = -diff
 	}
 	if diff*10 > s.avgFrameDuration { //nolint:mnd // ignore samples more than 10% off
+		// Escape half-period seed when FPS is unknown: repeated gaps near
+		// 2×avg are the real frame period, not isolated dropped frames.
+		if s.videoFPS() == 0 {
+			twice := 2 * s.avgFrameDuration
+			d2 := raw - twice
+			if d2 < 0 {
+				d2 = -d2
+			}
+			if twice > 0 && d2*10 <= twice { //nolint:mnd // within 10% of 2×
+				s.frameDurDoubleStreak++
+				if s.frameDurDoubleStreak >= frameDurDoublePromoteAfter {
+					s.avgFrameDuration = raw
+					s.frameDurDoubleStreak = 0
+				}
+				return
+			}
+		}
+		s.frameDurDoubleStreak = 0
 		return
 	}
+	s.frameDurDoubleStreak = 0
 	s.avgFrameDuration = (s.avgFrameDuration*7 + raw) / 8 //nolint:mnd // slow EMA
 }
 
