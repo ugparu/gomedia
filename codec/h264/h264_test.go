@@ -2,6 +2,7 @@ package h264
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"testing"
@@ -67,6 +68,25 @@ func TestNewCodecDataFromSPSAndPPS_ShortSPS(t *testing.T) {
 
 	_, err = NewCodecDataFromSPSAndPPS(nil, []byte{0x68})
 	require.Error(t, err, "expected error for nil SPS")
+}
+
+// Hikvision sub-stream SPS (Channels/102): VUI timing_info with
+// num_units_in_tick=1000, time_scale=50000, fixed_frame_rate_flag=1.
+// Correct frame rate is 25 fps (= time_scale / (2 * num_units_in_tick)).
+// A previous bug halved again when fixed_frame_rate_flag was set → 12 fps.
+func TestSPS_FPS_FixedFrameRateDoesNotDoubleHalve(t *testing.T) {
+	t.Parallel()
+
+	sps, err := hex.DecodeString("674d400d8d8d40a0fffff803f002fb7010101400000fa000030d43a1802de000ce8aef2e343005bc0019d15de5c280")
+	require.NoError(t, err)
+	pps, err := hex.DecodeString("68ee3880")
+	require.NoError(t, err)
+
+	cp, err := NewCodecDataFromSPSAndPPS(sps, pps)
+	require.NoError(t, err)
+	require.Equal(t, uint(320), cp.Width())
+	require.Equal(t, uint(240), cp.Height())
+	require.Equal(t, uint(25), cp.FPS(), "fixed_frame_rate_flag must not halve FPS a second time")
 }
 
 func TestNewCodecDataFromSPSAndPPS_Valid(t *testing.T) {

@@ -538,16 +538,20 @@ func parseSPS(data []byte) (s SPSInfo, err error) { //nolint:nakedret,gocyclo,cy
 			if err != nil {
 				return s, err
 			}
+			// H.264 VUI: frame rate = time_scale / (2 * num_units_in_tick).
+			// The factor of 2 is the field→frame DeltaTfiDivisor used by FFmpeg
+			// and the spec for progressive (frame_mbs_only) streams. It applies
+			// whether or not fixed_frame_rate_flag is set; that flag only says
+			// the rate is constant. Halving again when the flag is 1 (legacy
+			// code) reported 12 fps for cameras that signal 25
+			// (time_scale=50000, num_units_in_tick=1000, fixed=1), which seeded
+			// the MP4 muxer's stts grid at ~83ms and doubled archive duration.
 			if numUnitsInTick > 0 {
 				s.FPS = uint(math.Floor(float64(timeScale) / float64(numUnitsInTick) / frameRateDivisor))
 			}
-			var fixedFrameRateFlag uint
-			fixedFrameRateFlag, err = r.ReadBit()
-			if err != nil {
+			// Consume fixed_frame_rate_flag so subsequent VUI bits stay aligned.
+			if _, err = r.ReadBit(); err != nil {
 				return s, err
-			}
-			if fixedFrameRateFlag != 0 {
-				s.FPS /= 2
 			}
 		}
 	}

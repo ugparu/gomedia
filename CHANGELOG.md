@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [1.0.24] - 2026-10-30
+
+### Fixed
+
+- H.264 SPS VUI FPS no longer divides by 2 a second time when
+  `fixed_frame_rate_flag=1`. That double-halve reported 12 fps for streams
+  that signal 25 (`time_scale=50000`, `num_units_in_tick=1000`), which seeded
+  the MP4 muxer stts grid at ~83 ms and roughly doubled archive segment
+  duration while wall-clock/DB time stayed correct.
+
 ## [1.0.23] - 2026-10-28
 
 ### Fixed
