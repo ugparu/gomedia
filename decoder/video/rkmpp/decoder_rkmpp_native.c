@@ -217,6 +217,109 @@ int init_rkmpp_decoder_native(NativeRkmppDecoder *dec,
     return 0;
 }
 
+static void clear_rga_cache(NativeRkmppDecoder *dec)
+{
+    for (int i = 0; i < dec->cache_count; i++)
+        releasebuffer_handle(dec->cached_handles[i]);
+    dec->cache_count = 0;
+}
+
+/* Applies an MPP info-change and arms the external frame group.
+ * Returns 0 on success, negative on error. The frame is not freed. */
+static int apply_info_change(NativeRkmppDecoder *dec, MppFrame frame)
+{
+    MPP_RET ret;
+    RK_U32 width    = mpp_frame_get_width(frame);
+    RK_U32 height   = mpp_frame_get_height(frame);
+    RK_U32 buf_size = mpp_frame_get_buf_size(frame);
+    MppBufferGroup grp = NULL;
+
+    if (!dec->frm_grp) {
+        ret = mpp_buffer_group_get_internal(&grp, MPP_BUFFER_TYPE_ION);
+        if (ret)
+            return -4;
+        dec->frm_grp = grp;
+    } else {
+        grp = dec->frm_grp;
+    }
+
+    ret = mpp_buffer_group_limit_config(grp, buf_size, 24);
+    if (ret)
+        return -5;
+
+    ret = dec->mpi->control(dec->ctx, MPP_DEC_SET_EXT_BUF_GROUP, grp);
+    if (ret)
+        return -6;
+
+    ret = dec->mpi->control(dec->ctx, MPP_DEC_SET_INFO_CHANGE_READY, NULL);
+    if (ret)
+        return -7;
+
+    dec->width  = (int)width;
+    dec->height = (int)height;
+    dec->src_buf_size = buf_size;
+
+    /* Old DMA fds belong to the previous buffer group. */
+    clear_rga_cache(dec);
+
+    if (dec->dst_handle) {
+        releasebuffer_handle(dec->dst_handle);
+        dec->dst_handle = 0;
+    }
+    if (dec->dst_rgb_buf) {
+        free(dec->dst_rgb_buf);
+        dec->dst_rgb_buf = NULL;
+    }
+
+    int wstride  = ((int)width + 3) & ~3;
+    int dst_size = wstride * (int)height * 3;
+
+    dec->dst_rgb_buf = (uint8_t *)malloc(dst_size);
+    if (!dec->dst_rgb_buf)
+        return -13;
+    dec->dst_rgb_size = dst_size;
+    dec->dst_wstride  = wstride;
+
+    im_handle_param_t dst_param = {0};
+    dst_param.width  = (uint32_t)wstride;
+    dst_param.height = (uint32_t)height;
+    dst_param.format = RK_FORMAT_RGB_888;
+    dec->dst_handle = importbuffer_virtualaddr(dec->dst_rgb_buf, &dst_param);
+    if (!dec->dst_handle) {
+        free(dec->dst_rgb_buf);
+        dec->dst_rgb_buf = NULL;
+        return -14;
+    }
+
+    return 0;
+}
+
+/* Drops one decoded frame so decode_put_packet can accept another packet.
+ * 0 — a frame was discarded or an info-change was applied,
+ * 2 — nothing is pending,
+ * <0 — error. */
+static int discard_decoded_frame(NativeRkmppDecoder *dec)
+{
+    MppFrame frame = NULL;
+    MPP_RET ret = dec->mpi->decode_get_frame(dec->ctx, &frame);
+
+    if (ret == MPP_ERR_TIMEOUT)
+        return 2;
+    if (ret)
+        return -3;
+    if (!frame)
+        return 2;
+
+    if (mpp_frame_get_info_change(frame)) {
+        int rc = apply_info_change(dec, frame);
+        mpp_frame_deinit(&frame);
+        return rc;
+    }
+
+    mpp_frame_deinit(&frame);
+    return 0;
+}
+
 int feed_rkmpp_packet_native(NativeRkmppDecoder *dec,
                              const uint8_t *data,
                              int size,
@@ -240,13 +343,32 @@ int feed_rkmpp_packet_native(NativeRkmppDecoder *dec,
     mpp_packet_set_length(packet, size);
     mpp_packet_set_pts(packet, pts_ms * 1000); /* microseconds */
 
-    ret = dec->mpi->decode_put_packet(dec->ctx, packet);
+    /*
+     * decode_put_packet refuses the packet when its input queue is full and
+     * does not take ownership of it. The FPS limiter feeds packets here
+     * without pulling a frame; if those packets are dropped, later frames
+     * come out with errinfo and never reach the subscriber. Drain one
+     * decoded frame (the limiter did not ask to display it) and retry.
+     */
+    for (int attempt = 0; attempt < 24; attempt++) {
+        ret = dec->mpi->decode_put_packet(dec->ctx, packet);
+        if (ret != MPP_ERR_BUFFER_FULL)
+            break;
+
+        int drained = discard_decoded_frame(dec);
+        if (drained < 0) {
+            mpp_packet_deinit(&packet);
+            return drained;
+        }
+        /* Nothing decoded yet. The queue can still be full of partial NALs;
+           wait once and retry instead of dropping the packet. */
+        if (drained > 0)
+            usleep(1000);
+    }
     mpp_packet_deinit(&packet);
 
-    if (ret == MPP_ERR_BUFFER_FULL) {
-        /* try again after consuming frames */
+    if (ret == MPP_ERR_BUFFER_FULL)
         return 2;
-    }
 
     if (ret) {
         return -3;
@@ -284,78 +406,10 @@ try_again:
         return 1;
 
     if (mpp_frame_get_info_change(frame)) {
-        RK_U32 width    = mpp_frame_get_width(frame);
-        RK_U32 height   = mpp_frame_get_height(frame);
-        RK_U32 buf_size = mpp_frame_get_buf_size(frame);
-        MppBufferGroup grp = NULL;
-
-        if (!dec->frm_grp) {
-            ret = mpp_buffer_group_get_internal(&grp, MPP_BUFFER_TYPE_ION);
-            if (ret) {
-                mpp_frame_deinit(&frame);
-                return -4;
-            }
-            dec->frm_grp = grp;
-        } else {
-            grp = dec->frm_grp;
-        }
-
-        ret = mpp_buffer_group_limit_config(grp, buf_size, 24);
-        if (ret) {
-            mpp_frame_deinit(&frame);
-            return -5;
-        }
-
-        ret = dec->mpi->control(dec->ctx, MPP_DEC_SET_EXT_BUF_GROUP, grp);
-        if (ret) {
-            mpp_frame_deinit(&frame);
-            return -6;
-        }
-
-        ret = dec->mpi->control(dec->ctx, MPP_DEC_SET_INFO_CHANGE_READY, NULL);
-        if (ret) {
-            mpp_frame_deinit(&frame);
-            return -7;
-        }
-
-        dec->width  = (int)width;
-        dec->height = (int)height;
-        dec->src_buf_size = buf_size;
-
-        /* (Re-)allocate persistent aligned RGB dst buffer for RGA */
-        if (dec->dst_handle) {
-            releasebuffer_handle(dec->dst_handle);
-            dec->dst_handle = 0;
-        }
-        if (dec->dst_rgb_buf) {
-            free(dec->dst_rgb_buf);
-            dec->dst_rgb_buf = NULL;
-        }
-
-        int wstride  = ((int)width + 3) & ~3;
-        int dst_size = wstride * (int)height * 3;
-
-        dec->dst_rgb_buf  = (uint8_t *)malloc(dst_size);
-        if (!dec->dst_rgb_buf) {
-            mpp_frame_deinit(&frame);
-            return -13;
-        }
-        dec->dst_rgb_size = dst_size;
-        dec->dst_wstride  = wstride;
-
-        im_handle_param_t dst_param = {0};
-        dst_param.width  = (uint32_t)wstride;
-        dst_param.height = (uint32_t)height;
-        dst_param.format = RK_FORMAT_RGB_888;
-        dec->dst_handle = importbuffer_virtualaddr(dec->dst_rgb_buf, &dst_param);
-        if (!dec->dst_handle) {
-            free(dec->dst_rgb_buf);
-            dec->dst_rgb_buf = NULL;
-            mpp_frame_deinit(&frame);
-            return -14;
-        }
-
+        int rc = apply_info_change(dec, frame);
         mpp_frame_deinit(&frame);
+        if (rc != 0)
+            return rc;
         return 1;
     }
 
